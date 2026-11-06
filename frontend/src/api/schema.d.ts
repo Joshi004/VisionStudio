@@ -4483,6 +4483,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/voice-recordings/full/{recording_id}/boundaries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Decide Boundary
+         * @description Decides one tight boundary of the newest full recording: keep it as is (cut in the middle
+         *     of the pause) or cut at a point of the owner's choosing. It replaces an earlier decision. The
+         *     recording is split again when nothing is left to decide and a scene has no take at its cuts.
+         */
+        put: operations["decide_boundary_api_projects__project_id__voice_recordings_full__recording_id__boundaries_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/voice-recordings/full/{recording_id}/boundaries/keep-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep All Boundaries
+         * @description Keeps as is every tight boundary of the newest full recording that nobody has decided.
+         */
+        post: operations["keep_all_boundaries_api_projects__project_id__voice_recordings_full__recording_id__boundaries_keep_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/voice-recordings/full/{recording_id}/excerpt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recording Excerpt
+         * @description A part of a full recording, at most 10 seconds, for the player and the cut point editor
+         *     of a tight boundary.
+         */
+        get: operations["get_recording_excerpt_api_projects__project_id__voice_recordings_full__recording_id__excerpt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphics": {
         parameters: {
             query?: never;
@@ -6064,6 +6127,20 @@ export interface components {
             /** Blocked Reason */
             blocked_reason: string | null;
         };
+        /** BoundaryDecisionIn */
+        BoundaryDecisionIn: {
+            /** After Scene Id */
+            after_scene_id: string;
+            /** Before Scene Id */
+            before_scene_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "keep" | "cut_at";
+            /** Cut S */
+            cut_s?: number | null;
+        };
         /** BoundaryIn */
         BoundaryIn: {
             /** From Cue */
@@ -7444,6 +7521,11 @@ export interface components {
             /** Revision */
             revision?: string | null;
         };
+        /** DecisionOut */
+        DecisionOut: {
+            /** Split Job Id */
+            split_job_id: number | null;
+        };
         /** DefaultWardrobeOut */
         DefaultWardrobeOut: {
             /** Upper */
@@ -8441,10 +8523,14 @@ export interface components {
             boundaries: components["schemas"]["SceneBoundaryOut"][];
             /** Tight Count */
             tight_count: number;
+            /** Open Count */
+            open_count: number;
             /** Script Changed */
             script_changed: boolean;
             /** Can Retry */
             can_retry: boolean;
+            /** Can Decide */
+            can_decide: boolean;
         };
         /** FullRecordingStoredOut */
         FullRecordingStoredOut: {
@@ -13702,6 +13788,10 @@ export interface components {
             pause_s: number;
             /** Cut S */
             cut_s: number;
+            /** Min Cut S */
+            min_cut_s: number;
+            /** Max Cut S */
+            max_cut_s: number;
             /** Tight */
             tight: boolean;
             /** Reasons */
@@ -13710,6 +13800,12 @@ export interface components {
             before_words: string;
             /** After Words */
             after_words: string;
+            /** Decision */
+            decision: ("keep" | "cut_at") | null;
+            /** Decision Cut S */
+            decision_cut_s: number | null;
+            /** Final Cut S */
+            final_cut_s: number;
         };
         /**
          * SceneChangeOut
@@ -28207,6 +28303,136 @@ export interface operations {
                 };
             };
             /** @description The recording is not the newest full recording, or nothing failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    decide_boundary_api_projects__project_id__voice_recordings_full__recording_id__boundaries_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                recording_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BoundaryDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project's voice is not recorded, the recording is not the newest full recording or cannot be decided now, or the decision is not allowed (not a tight boundary, or a cut point outside its window or out of order). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    keep_all_boundaries_api_projects__project_id__voice_recordings_full__recording_id__boundaries_keep_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                recording_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project's voice is not recorded, the recording is not the newest full recording or cannot be decided now, or the decision is not allowed (not a tight boundary, or a cut point outside its window or out of order). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_recording_excerpt_api_projects__project_id__voice_recordings_full__recording_id__excerpt_get: {
+        parameters: {
+            query: {
+                start_s: number;
+                end_s: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                recording_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A WAV (mono, 24 kHz, 16-bit) of the part asked for. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": string;
+                };
+            };
+            /** @description No such project or full recording. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The part is empty, longer than 10 seconds or outside the recording. */
             422: {
                 headers: {
                     [name: string]: unknown;

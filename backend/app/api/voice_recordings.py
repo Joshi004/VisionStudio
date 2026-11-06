@@ -3,7 +3,9 @@
 `GET .../full` gives the script of the whole video to read and where the newest full recording
 stands (REC-004); `POST .../full` receives a recording of the whole script (the same body and
 checks as a scene's) and queues its transcription; `POST .../full/{recording_id}/retry` queues
-the job of the newest full recording that failed.
+the job of the newest full recording that failed. `PUT .../full/{recording_id}/boundaries` and
+`POST .../full/{recording_id}/boundaries/keep-all` decide the tight boundaries of the newest one,
+and `GET .../full/{recording_id}/excerpt` gives a short part of it as a WAV (REC-005).
 
 `POST .../scenes/{scene_id}` receives one recording of one scene, as the raw request body (the
 browser recorder's file or an uploaded one), and makes it the scene's take. The file is checked
@@ -19,15 +21,17 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Final, Literal
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, status
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.projects import content_length, load_project, require_octet_stream
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import full_recordings, speech_synthesis, voice_recordings
+from app.services.recording_boundaries import BoundaryDecision
 
 router = APIRouter()
 
@@ -131,10 +135,18 @@ class SceneBoundaryOut(BaseModel):
     # The silence between the two scenes' words, and where the recording would be cut.
     pause_s: float
     cut_s: float
+    # The window a hand-set cut point may be in, in seconds from the start of the recording.
+    min_cut_s: float
+    max_cut_s: float
     tight: bool
     reasons: list[str]
     before_words: str
     after_words: str
+    # The owner's decision (REC-005): `keep`, `cut_at` or None, and its cut point (for `cut_at`).
+    decision: Literal["keep", "cut_at"] | None
+    decision_cut_s: float | None
+    # Where the recording is cut at this boundary now.
+    final_cut_s: float
 
 
 class FullRecordingStateOut(BaseModel):
@@ -158,10 +170,14 @@ class FullRecordingStateOut(BaseModel):
     error: str | None
     boundaries: list[SceneBoundaryOut]
     tight_count: int
+    # The tight boundaries nobody has decided.
+    open_count: int
     # True when the script was changed after this recording was made.
     script_changed: bool
     # True when "Try again" does something: the transcription or the split failed.
     can_retry: bool
+    # True when a tight boundary can be decided now (not while the recording is being split).
+    can_decide: bool
 
 
 class FullRecordingOut(BaseModel):
@@ -178,6 +194,31 @@ class FullRecordingStoredOut(BaseModel):
 
 class RetryOut(BaseModel):
     job_id: int
+
+
+class BoundaryDecisionIn(BaseModel):
+    after_scene_id: str = Field(min_length=1, max_length=200)
+    before_scene_id: str = Field(min_length=1, max_length=200)
+    decision: Literal["keep", "cut_at"]
+    # Seconds from the start of the recording: needed for `cut_at`, not allowed for `keep`.
+    cut_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _cut_point_matches_decision(self) -> BoundaryDecisionIn:
+        if (self.decision == "cut_at") != (self.cut_s is not None):
+            raise ValueError("A cut point is needed when, and only when, cutting at it.")
+        return self
+
+
+class DecisionOut(BaseModel):
+    # The job that splits the recording again, or None when nothing had to be split.
+    split_job_id: int | None
+
+
+def _decision_name(decided: BoundaryDecision | None) -> Literal["keep", "cut_at"] | None:
+    if decided is None:
+        return None
+    return "cut_at" if decided.decision == "cut_at" else "keep"
 
 
 def _state_out(
@@ -197,6 +238,26 @@ def _state_out(
             for scene in status.scenes
         ]
     )
+    boundaries: list[SceneBoundaryOut] = []
+    for boundary, final_cut_s in zip(status.boundaries, status.cuts, strict=True):
+        decided = status.decisions.get((boundary.after_scene_id, boundary.before_scene_id))
+        boundaries.append(
+            SceneBoundaryOut(
+                after_scene_id=boundary.after_scene_id,
+                before_scene_id=boundary.before_scene_id,
+                pause_s=boundary.pause_s,
+                cut_s=boundary.cut_s,
+                min_cut_s=boundary.min_cut_s,
+                max_cut_s=boundary.max_cut_s,
+                tight=boundary.tight,
+                reasons=boundary.reasons,
+                before_words=boundary.before_words,
+                after_words=boundary.after_words,
+                decision=_decision_name(decided),
+                decision_cut_s=decided.cut_s if decided else None,
+                final_cut_s=final_cut_s,
+            )
+        )
     return FullRecordingStateOut(
         recording_id=recording.id,
         version=recording.version or 0,
@@ -207,22 +268,12 @@ def _state_out(
         match_percent=status.match_percent,
         threshold=status.threshold,
         error=status.error,
-        boundaries=[
-            SceneBoundaryOut(
-                after_scene_id=boundary.after_scene_id,
-                before_scene_id=boundary.before_scene_id,
-                pause_s=boundary.pause_s,
-                cut_s=boundary.cut_s,
-                tight=boundary.tight,
-                reasons=boundary.reasons,
-                before_words=boundary.before_words,
-                after_words=boundary.after_words,
-            )
-            for boundary in status.boundaries
-        ],
+        boundaries=boundaries,
         tight_count=status.tight_count,
+        open_count=status.open_count,
         script_changed=script.blocked_reason is None and script.script_key != recorded_key,
         can_retry=status.stage in ("transcription_failed", "split_failed"),
+        can_decide=status.stage in full_recordings.DECIDABLE_STAGES,
     )
 
 
@@ -340,3 +391,110 @@ async def retry_full_recording(
         raise HTTPException(422, str(exc)) from exc
     dispatcher.nudge()
     return RetryOut(job_id=job.id)
+
+
+# --- Tight boundaries (REC-005) -----------------------------------------------------------------
+
+_DECISION_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
+    404: {"model": ErrorResponse, "description": "No such project."},
+    422: {
+        "model": ErrorResponse,
+        "description": "The project's voice is not recorded, the recording is not the newest "
+        "full recording or cannot be decided now, or the decision is not allowed (not a tight "
+        "boundary, or a cut point outside its window or out of order).",
+    },
+}
+
+
+async def _recorded_project(session: SessionDep, project_id: int) -> Project:
+    project = await load_project(session, project_id)
+    if not speech_synthesis.is_recorded(project):
+        raise HTTPException(422, voice_recordings.NOT_RECORDED_PROJECT)
+    return project
+
+
+@router.put(
+    "/projects/{project_id}/voice-recordings/full/{recording_id}/boundaries",
+    response_model=DecisionOut,
+    responses=_DECISION_RESPONSES,
+)
+async def decide_boundary(
+    project_id: int,
+    recording_id: Annotated[int, Path(ge=1)],
+    body: BoundaryDecisionIn,
+    session: SessionDep,
+) -> DecisionOut:
+    """Decides one tight boundary of the newest full recording: keep it as is (cut in the middle
+    of the pause) or cut at a point of the owner's choosing. It replaces an earlier decision. The
+    recording is split again when nothing is left to decide and a scene has no take at its cuts.
+    """
+    project = await _recorded_project(session, project_id)
+    try:
+        job = await full_recordings.decide(
+            session,
+            project,
+            recording_id,
+            body.after_scene_id,
+            body.before_scene_id,
+            body.decision,
+            body.cut_s,
+        )
+    except full_recordings.FullRecordingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if job is not None:
+        dispatcher.nudge()
+    return DecisionOut(split_job_id=job.id if job is not None else None)
+
+
+@router.post(
+    "/projects/{project_id}/voice-recordings/full/{recording_id}/boundaries/keep-all",
+    response_model=DecisionOut,
+    responses=_DECISION_RESPONSES,
+)
+async def keep_all_boundaries(
+    project_id: int, recording_id: Annotated[int, Path(ge=1)], session: SessionDep
+) -> DecisionOut:
+    """Keeps as is every tight boundary of the newest full recording that nobody has decided."""
+    project = await _recorded_project(session, project_id)
+    try:
+        job = await full_recordings.keep_all(session, project, recording_id)
+    except full_recordings.FullRecordingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if job is not None:
+        dispatcher.nudge()
+    return DecisionOut(split_job_id=job.id if job is not None else None)
+
+
+@router.get(
+    "/projects/{project_id}/voice-recordings/full/{recording_id}/excerpt",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "A WAV (mono, 24 kHz, 16-bit) of the part asked for.",
+            "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
+        },
+        404: {"model": ErrorResponse, "description": "No such project or full recording."},
+        422: {
+            "model": ErrorResponse,
+            "description": "The part is empty, longer than 10 seconds or outside the recording.",
+        },
+    },
+)
+async def get_recording_excerpt(
+    project_id: int,
+    recording_id: Annotated[int, Path(ge=1)],
+    session: SessionDep,
+    start_s: Annotated[float, Query(ge=0, allow_inf_nan=False)],
+    end_s: Annotated[float, Query(ge=0, allow_inf_nan=False)],
+) -> Response:
+    """A part of a full recording, at most 10 seconds, for the player and the cut point editor
+    of a tight boundary.
+    """
+    project = await _recorded_project(session, project_id)
+    try:
+        wav = await full_recordings.excerpt(session, project, recording_id, start_s, end_s)
+    except full_recordings.RecordingNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except full_recordings.FullRecordingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return Response(content=wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})

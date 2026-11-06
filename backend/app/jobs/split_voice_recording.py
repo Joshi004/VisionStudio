@@ -4,15 +4,18 @@ A local job, like `render_av_test` (FFmpeg only; nothing is paid for and no mode
 restart makes the split again from the start):
 
 1. the recording's timing gives each scene's words, and `full_recordings.analyse` the scene
-   boundaries. The job refuses to run while any boundary is tight: nobody has decided it yet;
-2. each cut is the middle of the pause (R-7, the decisions of REC-005 are not here yet). The cuts
-   are rounded to a sample and the scenes are `split_windows`, so together they are exactly the
-   recording;
-3. each scene is cut out with a 15 ms fade at every cut inside the recording (the start of the
-   first scene and the end of the last are not faded), and its length is checked to the sample;
-4. in one transaction every scene gets a recorded `speech_unit_audio` take (`inputs` names the
-   recording and the window it was cut from), the job that times the words of each take is
-   queued (as for any take), and the job is finished.
+   boundaries. The job refuses to run while any tight boundary has no decision of the owner;
+2. each cut is the middle of the pause (R-7), or the cut point the owner decided (REC-005). The
+   cuts are rounded to a sample and the scenes are `split_windows`, so together they are exactly
+   the recording;
+3. a scene that already has a take cut from this recording at exactly those samples is left
+   alone (so a changed decision makes new takes only for the scenes either side of the cut that
+   moved). Every other scene is cut out with a 15 ms fade at every cut inside the recording (the
+   start of the first scene and the end of the last are not faded), and its length is checked
+   to the sample;
+4. in one transaction every scene cut gets a recorded `speech_unit_audio` take (`inputs` names the
+   recording, the window it was cut from and the decisions on its two boundaries), the job that
+   times the words of each take is queued (as for any take), and the job is finished.
 
 Every temporary file is removed afterwards. Logs hold ids, never the text.
 """
@@ -108,6 +111,16 @@ class SplitVoiceRecordingHandler(JobHandler):
             min_pause_ms = await settings_service.get_int(
                 session, settings_service.RECORDING_MIN_BOUNDARY_PAUSE_MS_KEY
             )
+            decisions = (
+                await full_recordings.decisions_of(session, recording.id)
+                if recording is not None
+                else {}
+            )
+            earlier_takes = (
+                await full_recordings.takes_of(session, recording.project_id, recording.id)
+                if recording is not None
+                else []
+            )
             await session.commit()
         if recording is None:
             raise SplitFailed("The recording this split was queued for is gone.")
@@ -116,20 +129,28 @@ class SplitVoiceRecordingHandler(JobHandler):
 
         scenes = full_recordings.scenes_of(recording)
         found = full_recordings.analyse(scenes, timing, min_pause_ms)
-        if any(boundary.tight for boundary in found):
+        if any(
+            boundary.tight and recording_boundaries.key_of(boundary) not in decisions
+            for boundary in found
+        ):
             raise SplitFailed("Some scene boundaries are tight. Decide them first.")
+        cuts = recording_boundaries.final_cuts(found, decisions)
 
         source = storage.get_path(recording.path)
         if not source.is_file():
             raise SplitFailed("The recording file could not be found on disk.")
         total_samples = frame_count(source)
-        windows = recording_boundaries.split_windows(
-            total_samples, [boundary.cut_s for boundary in found], SAMPLE_RATE
-        )
+        windows = recording_boundaries.split_windows(total_samples, cuts, SAMPLE_RATE)
+        # A scene with a take at these very samples keeps it.
+        have = full_recordings.matching_takes(scenes, cuts, total_samples, earlier_takes)
+        positions = [
+            position for position, scene in enumerate(scenes) if scene.scene_id not in have
+        ]
 
         await self._phase(job_id, phases.SPLITTING_RECORDING)
         temps: list[TempFile] = []
-        for position, (first, last) in enumerate(windows):
+        for position in positions:
+            first, last = windows[position]
             fade = min(_FADE_SAMPLES, (last - first) // 2)
             dest = storage.new_temp_path("wav")
             temp_paths.append(dest)
@@ -148,8 +169,43 @@ class SplitVoiceRecordingHandler(JobHandler):
         await self._phase(job_id, phases.SAVING_SCENE_TAKES)
         stored = [await storage.save(temp, recording.project_id, "wav") for temp in temps]
         await self._save(
-            job_id, recording, scenes, windows, temps, [item.relative_path for item in stored]
+            job_id,
+            recording,
+            scenes,
+            windows,
+            cuts,
+            found,
+            decisions,
+            positions,
+            temps,
+            [item.relative_path for item in stored],
         )
+
+    @staticmethod
+    def _decisions_of_scene(
+        position: int,
+        scenes: list[recording_boundaries.SceneText],
+        found: list[recording_boundaries.Boundary],
+        decisions: dict[recording_boundaries.BoundaryKey, recording_boundaries.BoundaryDecision],
+    ) -> list[dict[str, Any]]:
+        """The decisions on the two boundaries of a scene (the one before it and the one after
+        it), for the take's `inputs`. A boundary nobody decided is not listed.
+        """
+        listed: list[dict[str, Any]] = []
+        for index in (position - 1, position):
+            if not 0 <= index < len(found):
+                continue
+            decided = decisions.get(recording_boundaries.key_of(found[index]))
+            if decided is not None:
+                listed.append(
+                    {
+                        "after_scene_id": found[index].after_scene_id,
+                        "before_scene_id": found[index].before_scene_id,
+                        "decision": decided.decision,
+                        "cut_s": decided.cut_s,
+                    }
+                )
+        return listed
 
     @staticmethod
     async def _save(
@@ -157,6 +213,10 @@ class SplitVoiceRecordingHandler(JobHandler):
         recording: VoiceRecording,
         scenes: list[recording_boundaries.SceneText],
         windows: list[tuple[int, int]],
+        cuts: list[float],
+        found: list[recording_boundaries.Boundary],
+        decisions: dict[recording_boundaries.BoundaryKey, recording_boundaries.BoundaryDecision],
+        positions: list[int],
         temps: list[TempFile],
         paths: list[str],
     ) -> None:
@@ -171,62 +231,69 @@ class SplitVoiceRecordingHandler(JobHandler):
             "samples": windows[-1][1],
         }
         async with SessionLocal() as session:
-            if await full_recordings.has_takes(session, recording.project_id, recording.id):
-                # Split by an earlier run in the meantime: its takes stand.
-                output["kept"] = True
-                new_takes: list[SpeechUnitAudio] = []
-            else:
-                new_takes = []
-                for scene, (first, last), temp, path in zip(
-                    scenes, windows, temps, paths, strict=True
-                ):
-                    start_s, end_s = round(first / SAMPLE_RATE, 6), round(last / SAMPLE_RATE, 6)
-                    plan = plans.get(scene.scene_id, {})
-                    take = SpeechUnitAudio(
-                        project_id=recording.project_id,
-                        scene_id=scene.scene_id,
-                        unit_id=None,
-                        kind=speech_synthesis.KIND_TAKE,
-                        speaker_id=None,
-                        text=scene.text,
-                        mode=speech_synthesis.MODE_RECORDED,
-                        instruction=None,
-                        voice_id=None,
-                        audio_key=speech_synthesis.recorded_take_key(
-                            scene.text, recording.sha256, start_s, end_s
-                        ),
-                        job_id=None,
-                        path=path,
-                        size_bytes=temp.size_bytes,
-                        sha256=temp.sha256,
-                        duration_s=(last - first) / SAMPLE_RATE,
-                        sample_rate=SAMPLE_RATE,
-                        inputs={
-                            "project_id": recording.project_id,
-                            "artifacts": [
-                                {
-                                    "kind": "speech_units",
-                                    "id": plan.get("plan_id"),
-                                    "version": plan.get("plan_version"),
-                                }
-                            ],
-                            "recording": {"id": recording.id, "sha256": recording.sha256},
-                            "window": {
-                                "start_s": start_s,
-                                "end_s": end_s,
-                                "start_sample": first,
-                                "end_sample": last,
-                            },
-                            "decisions": [],
+            # A run in the meantime may have made a scene's take at these very cuts: it stands.
+            already = full_recordings.matching_takes(
+                scenes,
+                cuts,
+                windows[-1][1],
+                await full_recordings.takes_of(session, recording.project_id, recording.id),
+            )
+            new_takes: list[SpeechUnitAudio] = []
+            for position, temp, path in zip(positions, temps, paths, strict=True):
+                scene = scenes[position]
+                if scene.scene_id in already:
+                    continue
+                first, last = windows[position]
+                start_s, end_s = round(first / SAMPLE_RATE, 6), round(last / SAMPLE_RATE, 6)
+                plan = plans.get(scene.scene_id, {})
+                take = SpeechUnitAudio(
+                    project_id=recording.project_id,
+                    scene_id=scene.scene_id,
+                    unit_id=None,
+                    kind=speech_synthesis.KIND_TAKE,
+                    speaker_id=None,
+                    text=scene.text,
+                    mode=speech_synthesis.MODE_RECORDED,
+                    instruction=None,
+                    voice_id=None,
+                    audio_key=speech_synthesis.recorded_take_key(
+                        scene.text, recording.sha256, start_s, end_s
+                    ),
+                    job_id=None,
+                    path=path,
+                    size_bytes=temp.size_bytes,
+                    sha256=temp.sha256,
+                    duration_s=(last - first) / SAMPLE_RATE,
+                    sample_rate=SAMPLE_RATE,
+                    inputs={
+                        "project_id": recording.project_id,
+                        "artifacts": [
+                            {
+                                "kind": "speech_units",
+                                "id": plan.get("plan_id"),
+                                "version": plan.get("plan_version"),
+                            }
+                        ],
+                        "recording": {"id": recording.id, "sha256": recording.sha256},
+                        "window": {
+                            "start_s": start_s,
+                            "end_s": end_s,
+                            "start_sample": first,
+                            "end_sample": last,
                         },
-                    )
-                    session.add(take)
-                    new_takes.append(take)
-                await session.flush()
-                # The word timing of a take is always made, and is saved with the take.
-                for take in new_takes:
-                    await word_timings.queue(session, take, commit=False)
-                output["take_audio_ids"] = [take.id for take in new_takes]
+                        "decisions": SplitVoiceRecordingHandler._decisions_of_scene(
+                            position, scenes, found, decisions
+                        ),
+                    },
+                )
+                session.add(take)
+                new_takes.append(take)
+            await session.flush()
+            # The word timing of a take is always made, and is saved with the take.
+            for take in new_takes:
+                await word_timings.queue(session, take, commit=False)
+            output["take_audio_ids"] = [take.id for take in new_takes]
+            output["kept_take_ids"] = sorted(already.values())
             # The takes and the finished job are saved together or not at all.
             if not await store.finish_job(session, job_id, output):
                 await session.rollback()

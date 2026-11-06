@@ -10,6 +10,9 @@ is clean only where there is a pause:
   scene's first word less the end of this scene's last word. The boundary is **tight** when the
   pause is shorter than the setting, or when either of the two words was not actually heard
   (its time was filled in, not measured). The proposed cut is the middle of the pause.
+- `final_cuts`, `check_cut` and `window_matches` apply the owner's decisions (REC-005): a decided
+  cut point replaces the middle of the pause, must stay inside the boundary's window and between
+  the neighbouring cuts, and a stored take matches when it was cut at the samples now wanted.
 - `split_windows` turns the cuts into the first and last sample of each scene, so the scenes
   add up to exactly the recording.
 - `transcription_pieces` cuts a long recording into pieces under a length, at silences, for the
@@ -18,7 +21,8 @@ is clean only where there is a pause:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -61,6 +65,11 @@ class Boundary:
     pause_s: float
     # The middle of the pause: where the recording is cut unless the owner decides otherwise.
     cut_s: float
+    # The window a hand-set cut point may be in (REC-005): from the start of the last word of the
+    # scene before to the end of the first word of the scene after, in seconds (rounded inwards
+    # to the millisecond, so a cut rounded to the millisecond stays inside).
+    min_cut_s: float
+    max_cut_s: float
     tight: bool
     # One sentence for each reason the boundary is tight; empty when it is clean.
     reasons: list[str]
@@ -130,12 +139,16 @@ def boundaries(
             )
         before_from = max(before.first_word, before.last_word - CONTEXT_WORDS + 1)
         after_to = min(after.last_word, after.first_word + CONTEXT_WORDS - 1)
+        min_cut_s = math.ceil(float(last_word["start"]) * 1000) / 1000
+        max_cut_s = max(min_cut_s, math.floor(float(first_word["end"]) * 1000) / 1000)
         found.append(
             Boundary(
                 after_scene_id=before.scene_id,
                 before_scene_id=after.scene_id,
                 pause_s=round(pause_s, 3),
                 cut_s=round(before.end + pause_s / 2, 3),
+                min_cut_s=min_cut_s,
+                max_cut_s=max_cut_s,
                 tight=bool(reasons),
                 reasons=reasons,
                 before_words=" ".join(
@@ -147,6 +160,93 @@ def boundaries(
             )
         )
     return found
+
+
+# --- The owner's decisions (REC-005) --------------------------------------------------------
+
+DECISION_KEEP: Final = "keep"
+DECISION_CUT_AT: Final = "cut_at"
+
+# One boundary, by the ids of the scene before it and the scene after it.
+BoundaryKey = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class BoundaryDecision:
+    """What the owner decided for one boundary: `keep` (cut in the middle of the pause) or
+    `cut_at` (cut at `cut_s`, seconds from the start of the recording).
+    """
+
+    decision: str
+    cut_s: float | None
+
+
+def key_of(boundary: Boundary) -> BoundaryKey:
+    return (boundary.after_scene_id, boundary.before_scene_id)
+
+
+def _cut_of(boundary: Boundary, decisions: Mapping[BoundaryKey, BoundaryDecision]) -> float:
+    decided = decisions.get(key_of(boundary))
+    if decided is not None and decided.decision == DECISION_CUT_AT and decided.cut_s is not None:
+        return decided.cut_s
+    return boundary.cut_s
+
+
+def final_cuts(
+    boundaries: Sequence[Boundary], decisions: Mapping[BoundaryKey, BoundaryDecision]
+) -> list[float]:
+    """Where each boundary is cut: the decided `cut_s` of a `cut_at` decision, else the middle of
+    the pause. Raises BoundaryError when a cut comes before the one before it.
+    """
+    cuts = [_cut_of(boundary, decisions) for boundary in boundaries]
+    for earlier, later in zip(cuts, cuts[1:], strict=False):
+        if later < earlier:
+            raise BoundaryError("The cut points of the scene boundaries are out of order.")
+    return cuts
+
+
+def check_cut(
+    boundaries: Sequence[Boundary],
+    index: int,
+    cut_s: float,
+    decisions: Mapping[BoundaryKey, BoundaryDecision],
+    *,
+    check_window: bool = True,
+) -> None:
+    """Checks a cut for the boundary at `index`. It must be inside the boundary's window, so no
+    word of either scene is cut off (`check_window` is False for `keep`, which is the middle of
+    the pause), and strictly between the cuts of the boundaries either side, so no scene is
+    empty. Raises BoundaryError with a sentence for the user.
+    """
+    boundary = boundaries[index]
+    if check_window and not boundary.min_cut_s <= cut_s <= boundary.max_cut_s:
+        raise BoundaryError(
+            f"The cut point must be between {boundary.min_cut_s:.3f} s and "
+            f"{boundary.max_cut_s:.3f} s, so that no word of either scene is cut off."
+        )
+    if index > 0:
+        earlier = _cut_of(boundaries[index - 1], decisions)
+        if cut_s <= earlier:
+            raise BoundaryError(
+                f"The cut point must come after the cut before it, at {earlier:.3f} s."
+            )
+    if index < len(boundaries) - 1:
+        later = _cut_of(boundaries[index + 1], decisions)
+        if cut_s >= later:
+            raise BoundaryError(
+                f"The cut point must come before the cut after it, at {later:.3f} s."
+            )
+
+
+def window_matches(window: Any, start_sample: int, end_sample: int | None) -> bool:
+    """Whether a take was cut at these samples. `window` is the take's stored `inputs.window`;
+    `end_sample` is None for the last scene, whose end is the end of the recording.
+    """
+    if not isinstance(window, dict):
+        return False
+    if window.get("start_sample") != start_sample:
+        return False
+    return end_sample is None or window.get("end_sample") == end_sample
 
 
 # --- The split ------------------------------------------------------------------------------

@@ -13,13 +13,19 @@ import {
 
 import { describeError } from "../../api/errors";
 import {
+  PREVIEW_SPAN_S,
+  recordingExcerptUrl,
+  useDecideBoundary,
   useFullRecording,
+  useKeepAllBoundaries,
   useRetryFullRecording,
   useUploadFullRecording,
   type FullRecordingState,
   type FullScript,
   type RecordingOrigin,
+  type SceneBoundary,
 } from "../../api/voiceRecordings";
+import { BoundaryCutModal } from "./BoundaryCutModal";
 import { FullRecordingModal } from "./FullRecordingModal";
 
 type FullRecordingPanelProps = {
@@ -58,11 +64,205 @@ function sceneName(script: FullScript, sceneId: string): string {
   return `Scene ${script.scenes[position].index ?? position + 1}`;
 }
 
+type TightBoundaryCardProps = {
+  projectId: number;
+  recordingId: number;
+  script: FullScript;
+  boundary: SceneBoundary;
+  /** False while the recording cannot take decisions (it is being split, for example). */
+  canDecide: boolean;
+};
+
+/**
+ * One tight scene boundary (REC-005): the words around it, a player for the two seconds either
+ * side of where it is cut now, and the owner's choices: keep it as is (cut in the middle of the
+ * pause), or set the cut point by hand. A decision can be changed later.
+ */
+function TightBoundaryCard({
+  projectId,
+  recordingId,
+  script,
+  boundary,
+  canDecide,
+}: TightBoundaryCardProps) {
+  const decide = useDecideBoundary(projectId, recordingId);
+  const [cutOpen, setCutOpen] = useState(false);
+  const title = `${sceneName(script, boundary.after_scene_id)} to ${sceneName(
+    script,
+    boundary.before_scene_id,
+  )}`;
+  const badge =
+    boundary.decision === null
+      ? { label: "Not decided", color: "yellow" }
+      : boundary.decision === "keep"
+        ? { label: "Kept as is", color: "green" }
+        : {
+            label: `Cut at ${(boundary.decision_cut_s ?? boundary.final_cut_s).toFixed(3)} s`,
+            color: "green",
+          };
+
+  return (
+    <Paper withBorder p="xs" radius="sm">
+      <Stack gap={4}>
+        <Group gap="xs" align="center">
+          <Text size="xs" fw={600}>
+            {title}, pause {Math.round(boundary.pause_s * 1000)} ms
+          </Text>
+          <Badge variant="light" size="sm" color={badge.color}>
+            {badge.label}
+          </Badge>
+        </Group>
+        <Text size="xs">
+          …{boundary.before_words}{" "}
+          <Text span c="dimmed">
+            |
+          </Text>{" "}
+          {boundary.after_words}…
+        </Text>
+        {boundary.reasons.map((reason) => (
+          <Text key={reason} size="xs" c="yellow.8">
+            {reason}
+          </Text>
+        ))}
+        <audio
+          controls
+          preload="none"
+          src={recordingExcerptUrl(
+            projectId,
+            recordingId,
+            Math.max(0, boundary.final_cut_s - PREVIEW_SPAN_S),
+            boundary.final_cut_s + PREVIEW_SPAN_S,
+          )}
+          style={{ width: "100%", height: 32 }}
+        />
+        <Group gap="xs">
+          <Button
+            size="compact-xs"
+            variant="default"
+            loading={decide.isPending && decide.variables?.decision === "keep"}
+            disabled={
+              !canDecide || decide.isPending || boundary.decision === "keep"
+            }
+            onClick={() =>
+              decide.mutate({
+                afterSceneId: boundary.after_scene_id,
+                beforeSceneId: boundary.before_scene_id,
+                decision: "keep",
+              })
+            }
+          >
+            Keep as is
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="default"
+            disabled={!canDecide || decide.isPending}
+            onClick={() => {
+              decide.reset();
+              setCutOpen(true);
+            }}
+          >
+            Set the cut point
+          </Button>
+        </Group>
+        {decide.isError && !cutOpen && (
+          <Alert color="red" title="Could not save the decision">
+            {describeError(decide.error)}
+          </Alert>
+        )}
+      </Stack>
+      <BoundaryCutModal
+        opened={cutOpen}
+        onClose={() => setCutOpen(false)}
+        projectId={projectId}
+        recordingId={recordingId}
+        boundary={boundary}
+        title={title}
+        saving={decide.isPending}
+        error={decide.error}
+        onSave={(cutS) =>
+          decide.mutate(
+            {
+              afterSceneId: boundary.after_scene_id,
+              beforeSceneId: boundary.before_scene_id,
+              decision: "cut_at",
+              cutS,
+            },
+            { onSuccess: () => setCutOpen(false) },
+          )
+        }
+      />
+    </Paper>
+  );
+}
+
+type TightBoundariesProps = {
+  projectId: number;
+  script: FullScript;
+  newest: FullRecordingState;
+};
+
+/**
+ * Every tight boundary of the newest full recording, with "Keep all as is" while any is
+ * undecided (REC-005). They stay listed once decided, and after the split, so that a decision
+ * can be changed: a changed decision splits again, and only the two scenes either side of that
+ * cut get new takes.
+ */
+function TightBoundaries({ projectId, script, newest }: TightBoundariesProps) {
+  const keepAll = useKeepAllBoundaries(projectId, newest.recording_id);
+  const tight = newest.boundaries.filter((boundary) => boundary.tight);
+  // A fast reader leaves little pause: recording again with a clear pause is the better fix.
+  const mostlyTight = tight.length * 2 > newest.boundaries.length;
+  return (
+    <Stack gap="xs">
+      <Text size="xs" c="dimmed">
+        A tight boundary has too little pause to cut at, or a word next to it
+        was not heard. For each one, keep the cut in the middle of the pause, or
+        set the cut point yourself. A recording that is cut where it should not
+        be can also be recorded again with a clear pause at the scene changes.
+      </Text>
+      {mostlyTight && (
+        <Text size="xs" c="yellow.8">
+          Most of the scene changes are tight. It is probably quicker to record
+          the whole video again and pause clearly at every pause sign.
+        </Text>
+      )}
+      {newest.open_count > 0 && (
+        <Group>
+          <Button
+            size="compact-xs"
+            loading={keepAll.isPending}
+            disabled={!newest.can_decide}
+            onClick={() => keepAll.mutate()}
+          >
+            Keep all as is
+          </Button>
+        </Group>
+      )}
+      {keepAll.isError && (
+        <Alert color="red" title="Could not keep the boundaries">
+          {describeError(keepAll.error)}
+        </Alert>
+      )}
+      {tight.map((boundary) => (
+        <TightBoundaryCard
+          key={`${boundary.after_scene_id}/${boundary.before_scene_id}`}
+          projectId={projectId}
+          recordingId={newest.recording_id}
+          script={script}
+          boundary={boundary}
+          canDecide={newest.can_decide}
+        />
+      ))}
+    </Stack>
+  );
+}
+
 /**
  * Recording the whole video in one flow (REC-004): the person records it in the browser or
- * uploads a file, the app transcribes it, finds the scene boundaries and, when every boundary is
- * clean, splits it into one take for each scene. This panel shows where the newest full
- * recording stands and lists the tight boundaries (read only for now).
+ * uploads a file, the app transcribes it, finds the scene boundaries and, once every tight
+ * boundary is decided (REC-005), splits it into one take for each scene. This panel shows where
+ * the newest full recording stands and lists the tight boundaries, to keep or to cut by hand.
  */
 export function FullRecordingPanel({ projectId }: FullRecordingPanelProps) {
   const { data, isLoading, isError, error } = useFullRecording(projectId, true);
@@ -193,44 +393,13 @@ export function FullRecordingPanel({ projectId }: FullRecordingPanelProps) {
                 text changed has to be recorded again.
               </Text>
             )}
-            {newest.stage === "tight" && (
-              <Text size="xs" c="dimmed">
-                A tight boundary has too little pause to cut at, or a word next
-                to it was not heard. Record the whole video again with a clear
-                pause at the scene changes, or record the scenes separately.
-                Deciding them here comes in a later step.
-              </Text>
+            {newest.tight_count > 0 && (
+              <TightBoundaries
+                projectId={projectId}
+                script={script}
+                newest={newest}
+              />
             )}
-            {newest.boundaries
-              .filter((boundary) => boundary.tight)
-              .map((boundary) => (
-                <Paper
-                  key={`${boundary.after_scene_id}/${boundary.before_scene_id}`}
-                  withBorder
-                  p="xs"
-                  radius="sm"
-                >
-                  <Stack gap={2}>
-                    <Text size="xs" fw={600}>
-                      {sceneName(script, boundary.after_scene_id)} to{" "}
-                      {sceneName(script, boundary.before_scene_id)}, pause{" "}
-                      {Math.round(boundary.pause_s * 1000)} ms
-                    </Text>
-                    <Text size="xs">
-                      …{boundary.before_words}{" "}
-                      <Text span c="dimmed">
-                        |
-                      </Text>{" "}
-                      {boundary.after_words}…
-                    </Text>
-                    {boundary.reasons.map((reason) => (
-                      <Text key={reason} size="xs" c="yellow.8">
-                        {reason}
-                      </Text>
-                    ))}
-                  </Stack>
-                </Paper>
-              ))}
           </Stack>
         )}
       </Stack>

@@ -32,8 +32,9 @@ project and a story never have a take and are unchanged.
 A recorded take (REC-002) is stored by `services/voice_recordings.py` (REC-003), or made by the
 job that splits a full recording (REC-004), not by a job of this module. A newer full recording
 takes over the scenes whose text it was read from while it is being transcribed, split or held on
-tight boundaries (`services/full_recordings.py`); if it is refused or fails, the scenes keep their
-earlier takes.
+undecided tight boundaries (`services/full_recordings.py`); if it is refused or fails, the scenes
+keep their earlier takes. A take of that recording whose cut was decided differently since is
+stale and never counts, and only the scenes whose cut moved are split again (REC-005).
 
 `start_unit`, `start_take` and `start_all` queue the jobs and write one `speech_unit_audio` row
 per job, in one transaction.
@@ -542,22 +543,46 @@ def _recorded_take_entry(
     replace them (when it covers this scene: its text for the scene is the scene's current text,
     and no take is made from a newer recording). Once it is refused or has failed it is ignored,
     and the scene keeps its earlier take, or shows the reason when it has none.
+
+    Only a take cut at the cuts the newest full recording has now counts (REC-005): once the
+    recording is analysed, a take of it that is not `full.scene_takes[scene_id]` is stale (its
+    cut was decided differently since) and never counts. The takeover is per scene: a scene whose
+    cut did not move keeps its take while the others are split again; a scene whose stale take was
+    dropped shows `none` with the reason when the split failed.
     """
     stored_rows = sorted(
         (row for row in recorded_takes if row.path is not None),
         key=lambda row: (_recording_id_of(row), row.id),
         reverse=True,
     )
-    stored = next((row for row in stored_rows if row.text == text), None)
     covered = full is not None and any(
         scene.scene_id == scene_id and scene.text == text for scene in full.scenes
     )
+    had_stale = False
+    if (
+        full is not None
+        and covered
+        and full.stage in ("tight", "splitting", "split_failed", "split")
+    ):
+        current_id = full.scene_takes.get(scene_id)
+        kept_rows = [
+            row
+            for row in stored_rows
+            if _recording_id_of(row) != full.recording.id or row.id == current_id
+        ]
+        had_stale = len(kept_rows) != len(stored_rows)
+        stored_rows = kept_rows
+    stored = next((row for row in stored_rows if row.text == text), None)
     if full is not None and covered:
         newer_take = stored is not None and _recording_id_of(stored) > full.recording.id
-        if not newer_take and full.stage in ("transcribing", "splitting", "tight"):
+        taken_over = scene_id not in full.scene_takes and (
+            full.stage in ("transcribing", "splitting", "tight")
+            or (full.stage == "split_failed" and had_stale)
+        )
+        if not newer_take and taken_over:
             return TakeEntry(
                 text=text,
-                status="in_progress" if full.stage != "tight" else "none",
+                status="in_progress" if full.stage in ("transcribing", "splitting") else "none",
                 reasons=[],
                 voice=None,
                 instruction="",

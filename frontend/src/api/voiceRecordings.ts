@@ -172,3 +172,108 @@ export function useRetryFullRecording(projectId: number) {
       ]),
   });
 }
+
+/** The owner's decision on one tight boundary (REC-005). `cutS` is for `cut_at` only. */
+export type BoundaryDecisionInput =
+  | { afterSceneId: string; beforeSceneId: string; decision: "keep" }
+  | {
+      afterSceneId: string;
+      beforeSceneId: string;
+      decision: "cut_at";
+      cutS: number;
+    };
+
+/**
+ * Decides one tight boundary of the newest full recording (REC-005): keep it as is, or cut at a
+ * point. The server checks the cut point and stays the judge. The recording is split again by a
+ * job once nothing is left to decide.
+ */
+export function useDecideBoundary(projectId: number, recordingId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: BoundaryDecisionInput) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/voice-recordings/full/{recording_id}/boundaries",
+        {
+          params: {
+            path: { project_id: projectId, recording_id: recordingId },
+          },
+          body: {
+            after_scene_id: input.afterSceneId,
+            before_scene_id: input.beforeSceneId,
+            decision: input.decision,
+            cut_s: input.decision === "cut_at" ? input.cutS : null,
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not save the decision (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: speechAudioKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** "Keep all as is": keeps every tight boundary nobody has decided yet (REC-005). */
+export function useKeepAllBoundaries(projectId: number, recordingId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/voice-recordings/full/{recording_id}/boundaries/keep-all",
+        {
+          params: {
+            path: { project_id: projectId, recording_id: recordingId },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not keep the boundaries (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: speechAudioKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/**
+ * The address of a short WAV of a full recording, from `startS` to `endS` seconds (the server
+ * gives at most 10 seconds and cuts the end short at the end of the recording). Used by the
+ * boundary player and the cut point editor (REC-005).
+ */
+export function recordingExcerptUrl(
+  projectId: number,
+  recordingId: number,
+  startS: number,
+  endS: number,
+): string {
+  const query = new URLSearchParams({
+    start_s: startS.toFixed(3),
+    end_s: endS.toFixed(3),
+  });
+  return `/api/projects/${projectId}/voice-recordings/full/${recordingId}/excerpt?${query.toString()}`;
+}
+
+/** The two seconds either side of a cut that the player and the previews play. */
+export const PREVIEW_SPAN_S = 2;
