@@ -34,6 +34,11 @@ NOT_MADE_REASON: Final = "Make this scene's take first."
 IN_PROGRESS_REASON: Final = "This scene's take is being made."
 OUT_OF_DATE_REASON: Final = "This scene's take is out of date. Make the take again."
 NOT_TIMED_REASON: Final = "The words of this scene's take are not timed yet."
+# The same reasons for a take a person recorded (REC-003): it is recorded again, not made again.
+RECORDED_NOT_MADE_REASON: Final = "Record this scene's voice first."
+RECORDED_OUT_OF_DATE_REASON: Final = (
+    "This scene's recording is out of date. Record the scene again."
+)
 # The reasons that pass by themselves: a take being made, or being timed. Any other reason needs
 # the user (a take to make again, a timing that failed, a poor match).
 WAITING_REASONS: Final = (IN_PROGRESS_REASON, NOT_TIMED_REASON)
@@ -68,11 +73,16 @@ class TakeClock:
 # --- Pure rules ---------------------------------------------------------------------------
 
 
-def poor_match_reason(match_percent: float | None, threshold: int | None) -> str:
-    """Why a take with estimated timing cannot be cut on."""
+def poor_match_reason(
+    match_percent: float | None, threshold: int | None, *, recorded: bool = False
+) -> str:
+    """Why a take with estimated timing cannot be cut on. `recorded` is true for a take a person
+    recorded, which is recorded again, not made again.
+    """
+    again = "Record the scene again." if recorded else "Make the scene's take again."
     return (
         f"Only {match_percent or 0}% of this take's words matched what was heard "
-        f"({threshold or 0}% needed), which is too few to cut on. Make the scene's take again."
+        f"({threshold or 0}% needed), which is too few to cut on. {again}"
     )
 
 
@@ -124,17 +134,21 @@ def _blocked(
 
 
 def blocked_reason_of(
-    take: speech_synthesis.TakeEntry, entry: word_timings.TimingEntry | None
+    take: speech_synthesis.TakeEntry,
+    entry: word_timings.TimingEntry | None,
+    *,
+    recorded: bool = False,
 ) -> str | None:
     """Why this take cannot go on to cut planning, or None when it is ready and timed from what
-    Parakeet heard. Worked out from the take's state and the state of its timing.
+    Parakeet heard. Worked out from the take's state and the state of its timing. `recorded` is
+    true for a take a person recorded (REC-003): its reasons say to record the scene.
     """
     if take.status == "in_progress":
         return IN_PROGRESS_REASON
     if take.status == "out_of_date":
-        return OUT_OF_DATE_REASON
+        return RECORDED_OUT_OF_DATE_REASON if recorded else OUT_OF_DATE_REASON
     if take.status != "ready" or take.audio is None:
-        return NOT_MADE_REASON
+        return RECORDED_NOT_MADE_REASON if recorded else NOT_MADE_REASON
     if entry is None or entry.status in ("none", "in_progress"):
         return NOT_TIMED_REASON
     if entry.status == "failed":
@@ -144,6 +158,7 @@ def blocked_reason_of(
         return poor_match_reason(
             timing.match_percent if timing is not None else None,
             timing.threshold if timing is not None else None,
+            recorded=recorded,
         )
     return None
 
@@ -157,13 +172,14 @@ async def scene_clocks(session: AsyncSession, project: Project) -> dict[str, Tak
     audio_state = await speech_synthesis.state(session, project)
     timings = await word_timings.state(session, project)
     clocks: dict[str, TakeClock] = {}
+    recorded = audio_state.recorded
     for scene in audio_state.scenes:
         take = scene.take
         if take is None:
             continue
         scene_id = str(scene.scene.item["id"])
         entry = timings.get(take.audio.id) if take.audio is not None else None
-        reason = blocked_reason_of(take, entry)
+        reason = blocked_reason_of(take, entry, recorded=recorded)
         if reason is not None:
             clocks[scene_id] = _blocked(
                 scene_id, reason, take.audio, entry.timing if entry is not None else None

@@ -1596,7 +1596,7 @@ async def _evaluate_word_timings(
                         active=take.status == "in_progress",
                         block=None
                         if take.status == "in_progress"
-                        else take_timings.blocked_reason_of(take, None),
+                        else take_timings.blocked_reason_of(take, None, recorded=state.recorded),
                         group=scene_id,
                     )
                 )
@@ -1615,6 +1615,7 @@ async def _evaluate_word_timings(
                         take_timings.poor_match_reason(
                             take_timing.match_percent if take_timing is not None else None,
                             take_timing.threshold if take_timing is not None else None,
+                            recorded=state.recorded,
                         )
                         if take_status == "estimated"
                         else None

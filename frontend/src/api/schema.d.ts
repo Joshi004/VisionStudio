@@ -4416,6 +4416,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/voice-recordings/scenes/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Scene Recording
+         * @description Makes a recording (WAV, MP3, WebM or MP4/M4A, sent as the raw request body) the take of
+         *     one scene of a recorded explainer. A scene recorded again gets a newer take that replaces it.
+         */
+        post: operations["upload_scene_recording_api_projects__project_id__voice_recordings_scenes__scene_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphics": {
         parameters: {
             query?: never;
@@ -14071,6 +14092,17 @@ export interface components {
             middle: string;
             /** End */
             end: string;
+        };
+        /** SceneRecordingOut */
+        SceneRecordingOut: {
+            /** Recording Id */
+            recording_id: number;
+            /** Take Audio Id */
+            take_audio_id: number;
+            /** Duration S */
+            duration_s: number;
+            /** Timing Job Id */
+            timing_job_id: number;
         };
         /** SceneRef */
         SceneRef: {
@@ -27807,6 +27839,81 @@ export interface operations {
                 };
             };
             /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_scene_recording_api_projects__project_id__voice_recordings_scenes__scene_id__post: {
+        parameters: {
+            query: {
+                origin: "browser" | "upload";
+                units_version: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneRecordingOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene's text changed since the person was shown it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project is not recorded, the scene cannot have a recording, or the file is not acceptable. */
             422: {
                 headers: {
                     [name: string]: unknown;

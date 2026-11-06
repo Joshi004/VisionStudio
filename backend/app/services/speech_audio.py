@@ -19,10 +19,56 @@ from app.services.render_commands import concat_list
 SAMPLE_RATE: Final = 24000
 JOIN_TIMEOUT_S: Final = 300.0
 PAD_TIMEOUT_S: Final = 120.0
+# A recording is converted inside the request that received it, and the web server gives the
+# backend 60 s to answer (REC-003), so the conversion must end well before that.
+CONVERT_TIMEOUT_S: Final = 45.0
 
 
 class JoinError(Exception):
     """The pieces could not be joined. The message is meant to be shown to the user."""
+
+
+class ConvertError(Exception):
+    """A recording could not be converted. The message is meant to be shown to the user."""
+
+
+def convert_args(source: Path, dest: Path) -> list[str]:
+    """Writes the first audio stream of `source` as the takes' format: mono, 24 kHz, 16-bit PCM
+    WAV (REC-003). Any picture is dropped.
+    """
+    return [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-n",
+        "-i",
+        ffmpeg.file_input(source),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-ac",
+        "1",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        ffmpeg.file_input(dest),
+    ]
+
+
+async def convert_to_take(source: Path, dest: Path) -> None:
+    """Converts a recording into the new WAV file `dest`. Raises ConvertError."""
+    try:
+        result = await ffmpeg.run_tool(
+            "ffmpeg", convert_args(source, dest), timeout_s=CONVERT_TIMEOUT_S
+        )
+    except ffmpeg.ToolError as exc:
+        raise ConvertError(f"The recording could not be converted: {exc}") from exc
+    if result.returncode != 0:
+        raise ConvertError("The recording could not be converted. The file may be damaged.")
 
 
 class PadError(Exception):

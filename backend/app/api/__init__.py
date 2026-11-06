@@ -64,6 +64,7 @@ from app.api import (
     thumbnails,
     video_lab,
     voice_lab,
+    voice_recordings,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -111,6 +112,7 @@ api_router.include_router(look_state_resolution.router, tags=["look-state-resolu
 api_router.include_router(look_state_images.router, tags=["look-state-images"])
 api_router.include_router(speech_units.router, tags=["speech-units"])
 api_router.include_router(speech_audio.router, tags=["speech-audio"])
+api_router.include_router(voice_recordings.router, tags=["voice-recordings"])
 api_router.include_router(shot_graphics.router, tags=["shot-graphics"])
 api_router.include_router(shot_plans.router, tags=["shot-plans"])
 api_router.include_router(shot_definitions.router, tags=["shot-definitions"])

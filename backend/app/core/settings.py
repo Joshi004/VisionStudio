@@ -185,6 +185,10 @@ DIALOGUE_MATCH_THRESHOLD_KEY = "dialogue_match_threshold"
 # it, in percent (EXPLAINER-007). Below it the speech's word times are estimated instead.
 WORD_TIMING_MATCH_THRESHOLD_KEY = "word_timing_match_threshold"
 
+# The largest recording the app receives for a recorded explainer voice, in MB (REC-003). Only a
+# safety guard: a recording is never refused for its length (R-6).
+RECORDING_MAX_UPLOAD_MB_KEY = "recording_max_upload_mb"
+
 # The display limits of an explainer's callouts (EXPLAINER-009): the least time between the start
 # of two callouts, and the most callouts in any one minute. The callout plan is checked against
 # them and records the values it was checked with.
@@ -642,6 +646,21 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=70,
         min_value=0,
         max_value=100,
+    ),
+    SettingSpec(
+        key=RECORDING_MAX_UPLOAD_MB_KEY,
+        group=GROUP_SPEECH,
+        label="Largest recording received (MB)",
+        help=(
+            "The largest file the app accepts when you record or upload the voice of an "
+            "explainer. It is only a safety guard: a recording is never refused for its "
+            "length. The web server in front of the app refuses anything above 512 MB "
+            "whatever this number is. It applies to the next recording."
+        ),
+        value_type="integer",
+        default=500,
+        min_value=1,
+        max_value=500,
     ),
     SettingSpec(
         key=CALLOUT_MIN_GAP_MS_KEY,

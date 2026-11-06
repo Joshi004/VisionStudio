@@ -5,6 +5,7 @@ import {
   Button,
   Collapse,
   Divider,
+  FileButton,
   Group,
   Loader,
   Paper,
@@ -33,9 +34,14 @@ import {
   type SpeechUnitInput,
   type SpeechUnitsEntry,
 } from "../../api/speechUnits";
+import {
+  useUploadSceneRecording,
+  type RecordingOrigin,
+} from "../../api/voiceRecordings";
 import { ArtifactViewer } from "./ArtifactViewer";
 import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SceneRecordingModal } from "./SceneRecordingModal";
 import { SpeechUnitsEditor } from "./SpeechUnitsEditor";
 import { SpeechUnitsView, TimingBadge } from "./SpeechUnitsView";
 
@@ -83,14 +89,31 @@ type TakeLineProps = {
   /** True when a person records the takes (REC-002): nothing is made, so there is no Make. */
   recorded: boolean;
   onMake: () => void;
+  /** Recorded voice only: whether this scene can be recorded now (its plan is current). */
+  canRecord: boolean;
+  onRecord: () => void;
+  /** Recorded voice only: a file the person chose for this scene. */
+  onUpload: (file: File | null) => void;
 };
+
+/** The files a recording may be: the server decides by what is inside, not by the name. */
+const RECORDING_ACCEPT = ".wav,.mp3,.webm,.m4a,.mp4,audio/*";
 
 /**
  * The one take of a scene of a continuous explainer (FLOW-003): its status, the presenter's
  * voice, the player with the measured length, why it is out of date or cannot be made, and the
- * button to make it. The scene's units are spoken inside it, not one by one.
+ * button to make it. The scene's units are spoken inside it, not one by one. For a recorded
+ * explainer (REC-003) the buttons record the scene in the browser or upload a file for it.
  */
-function TakeLine({ take, busy, recorded, onMake }: TakeLineProps) {
+function TakeLine({
+  take,
+  busy,
+  recorded,
+  onMake,
+  canRecord,
+  onRecord,
+  onUpload,
+}: TakeLineProps) {
   const status = recorded
     ? RECORDED_TAKE_STATUS[take.status]
     : TAKE_STATUS[take.status];
@@ -132,6 +155,30 @@ function TakeLine({ take, busy, recorded, onMake }: TakeLineProps) {
           >
             {label}
           </Button>
+        )}
+        {recorded && (
+          <>
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={!canRecord || busy}
+              onClick={onRecord}
+            >
+              {take.status === "ready" ? "Record again" : "Record this scene"}
+            </Button>
+            <FileButton onChange={onUpload} accept={RECORDING_ACCEPT}>
+              {(props) => (
+                <Button
+                  {...props}
+                  size="compact-xs"
+                  variant="default"
+                  disabled={!canRecord || busy}
+                >
+                  Upload for this scene
+                </Button>
+              )}
+            </FileButton>
+          </>
         )}
       </Group>
       {take.audio !== null && (
@@ -188,6 +235,17 @@ type EntryRowProps = {
   onMakeTake: () => void;
   /** True when a person records the takes (REC-002). */
   recorded: boolean;
+  /** Recorded voice (REC-003): sends a recording of this scene, made here or chosen as a file. */
+  onSendRecording: (
+    unitsVersion: number,
+    origin: RecordingOrigin,
+    file: Blob,
+    done: () => void,
+  ) => void;
+  /** True while a recording made in the browser is being sent, and why the last one failed. */
+  recordingSending: boolean;
+  recordingError: unknown;
+  onRecordingOpen: () => void;
 };
 
 /**
@@ -209,9 +267,14 @@ function EntryRow({
   onMake,
   onMakeTake,
   recorded,
+  onSendRecording,
+  recordingSending,
+  recordingError,
+  onRecordingOpen,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [recordingOpen, setRecordingOpen] = useState(false);
   const status = STATUS[entry.status];
   const planned = entry.status === "planned" || entry.status === "out_of_date";
   // Why this one scene cannot be planned, when that is about the scene itself.
@@ -220,6 +283,13 @@ function EntryRow({
     (sceneAudio?.units ?? []).map((unit) => [unit.unit_id, unit]),
   );
   const take = sceneAudio?.take ?? null;
+  // A scene can be recorded once its speech units are planned and current: the recording is of
+  // exactly those words, and the version tells the server which words the person was shown.
+  const unitsVersion =
+    entry.status === "planned" && entry.units !== null
+      ? (entry.version?.version ?? null)
+      : null;
+  const canRecord = unitsVersion !== null && !projectBlocked;
   const made = (sceneAudio?.units ?? []).filter(
     (unit) => unit.audio !== null,
   ).length;
@@ -296,6 +366,16 @@ function EntryRow({
               busy={speechBusy}
               recorded={recorded}
               onMake={onMakeTake}
+              canRecord={canRecord}
+              onRecord={() => {
+                onRecordingOpen();
+                setRecordingOpen(true);
+              }}
+              onUpload={(file) => {
+                if (file !== null && unitsVersion !== null) {
+                  onSendRecording(unitsVersion, "upload", file, () => undefined);
+                }
+              }}
             />
           )}
           {entry.reasons.map((text) => (
@@ -369,6 +449,23 @@ function EntryRow({
           </ArtifactViewer>
         </Collapse>
       )}
+      {recorded && take !== null && (
+        <SceneRecordingModal
+          opened={recordingOpen}
+          onClose={() => setRecordingOpen(false)}
+          sceneTitle={entry.title}
+          text={take.text}
+          sending={recordingSending}
+          error={recordingError}
+          onSend={(file) => {
+            if (unitsVersion !== null) {
+              onSendRecording(unitsVersion, "browser", file, () =>
+                setRecordingOpen(false),
+              );
+            }
+          }}
+        />
+      )}
     </Stack>
   );
 }
@@ -390,6 +487,10 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
   const makeAll = useMakeAllSpeech(projectId);
   const makeOne = useMakeOneSpeech(projectId);
   const makeTake = useMakeSceneTake(projectId);
+  // Recorded voice (REC-003): a file the person chose, and a recording made in the modal. They
+  // are two mutations so that each one's error shows where the person is looking.
+  const sendFile = useUploadSceneRecording(projectId);
+  const sendRecording = useUploadSceneRecording(projectId);
 
   const busy = planAll.isPending || planOne.isPending;
   const entries = data?.entries ?? [];
@@ -407,7 +508,11 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
     (audio.data?.scenes ?? []).map((scene) => [scene.scene_id, scene]),
   );
   const speechBusy =
-    makeAll.isPending || makeOne.isPending || makeTake.isPending;
+    makeAll.isPending ||
+    makeOne.isPending ||
+    makeTake.isPending ||
+    sendFile.isPending ||
+    sendRecording.isPending;
   const continuous = audio.data?.continuous ?? false;
   // A recorded explainer (REC-002) has no Make: its takes are recorded or uploaded.
   const recorded = audio.data?.take_source === "recorded";
@@ -446,7 +551,9 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
               saved voice (or the narrator&apos;s); the real length is measured
               from the speech. A continuous explainer speaks each scene as one
               take instead, in the presenter&apos;s voice with one delivery, so
-              its pace is even.
+              its pace is even. With recorded voice, you record each scene in
+              the browser or upload a file for it, and read the scene&apos;s
+              text word for word.
             </Text>
           </Stack>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -508,6 +615,11 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
         {makeTake.isError && (
           <Alert color="red" title="Could not make the take">
             {describeError(makeTake.error)}
+          </Alert>
+        )}
+        {sendFile.isError && (
+          <Alert color="red" title="Could not use the file">
+            {describeError(sendFile.error)}
           </Alert>
         )}
         {makeOne.isError && (
@@ -575,6 +687,16 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
             onMake={(unitId) => makeOne.mutate({ sceneId: entry.id, unitId })}
             onMakeTake={() => makeTake.mutate({ sceneId: entry.id })}
             recorded={recorded}
+            onSendRecording={(unitsVersion, origin, file, done) => {
+              const mutation = origin === "upload" ? sendFile : sendRecording;
+              mutation.mutate(
+                { sceneId: entry.id, unitsVersion, origin, file },
+                { onSuccess: done },
+              );
+            }}
+            recordingSending={sendRecording.isPending}
+            recordingError={sendRecording.error}
+            onRecordingOpen={() => sendRecording.reset()}
           />
         ))}
       </Stack>

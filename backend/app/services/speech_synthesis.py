@@ -29,6 +29,9 @@ equal to a unit's key), so an unchanged scene is not made again and one changed 
 its scene's take out of date. The units of such a project are not spoken one by one. A `lines`
 project and a story never have a take and are unchanged.
 
+A recorded take (REC-002) is stored by `services/voice_recordings.py` (REC-003), not by a job
+of this module.
+
 `start_unit`, `start_take` and `start_all` queue the jobs and write one `speech_unit_audio` row
 per job, in one transaction.
 """
@@ -612,7 +615,7 @@ def _take_entry(
     )
 
 
-def _scene_refusal(entry: speech_units.SceneEntry) -> str | None:
+def scene_refusal(entry: speech_units.SceneEntry) -> str | None:
     """Why this scene's units cannot be made now, from its plan, or None."""
     if entry.row is None:
         return "Plan this scene's speech units first."
@@ -654,7 +657,7 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
     for entry in planned.entries:
         content = entry.content
         units: list[UnitEntry] = []
-        scene_refusal = planned.blocked_reason or _scene_refusal(entry)
+        refusal = planned.blocked_reason or scene_refusal(entry)
         for unit in content["units"] if content is not None else []:
             choice = _choice_for(unit, narrator, characters)
             speaker = (
@@ -663,9 +666,7 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
                 else str(names.get(unit["speaker_id"], unit["speaker_id"]))
             )
             units.append(
-                _unit_entry(
-                    unit, entry.item["id"], scene_refusal, choice, by_key, by_unit, jobs, speaker
-                )
+                _unit_entry(unit, entry.item["id"], refusal, choice, by_key, by_unit, jobs, speaker)
             )
         take: TakeEntry | None = None
         if continuous:
@@ -683,14 +684,14 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
                 if recorded:
                     take = _recorded_take_entry(
                         text,
-                        scene_refusal,
+                        refusal,
                         [row for row in scene_takes if row.mode == MODE_RECORDED],
                     )
                 else:
                     take = _take_entry(
                         text,
                         delivery,
-                        scene_refusal,
+                        refusal,
                         narrator,
                         by_key,
                         [row for row in scene_takes if row.mode != MODE_RECORDED],
