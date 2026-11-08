@@ -191,8 +191,16 @@ def _get_upload_client() -> httpx.AsyncClient:
     return _upload_client
 
 
-async def _read_limited(response: httpx.Response, max_bytes: int) -> bytes:
-    """Reads the body, refusing to read past `max_bytes` (counted after decompression)."""
+async def _read_limited(
+    response: httpx.Response,
+    max_bytes: int,
+    on_chunk: Callable[[bytes], None] | None = None,
+) -> bytes:
+    """Reads the body, refusing to read past `max_bytes` (counted after decompression).
+
+    `on_chunk`, when given, is told each piece as it arrives, so a caller can follow a streamed
+    answer while it is still being written. The whole body is still returned at the end.
+    """
     too_large = OutboundError("too_large", f"The answer is larger than {max_bytes:,} bytes.")
 
     declared = response.headers.get("content-length", "")
@@ -201,11 +209,17 @@ async def _read_limited(response: httpx.Response, max_bytes: int) -> bytes:
 
     chunks: list[bytes] = []
     size = 0
-    async for chunk in response.aiter_bytes(_READ_CHUNK_BYTES):
+    # httpx collects pieces until it has `chunk_size` bytes. A caller that follows the answer as
+    # it arrives needs each piece as it comes (None), or a short answer would only show up at
+    # the end.
+    chunk_size = None if on_chunk is not None else _READ_CHUNK_BYTES
+    async for chunk in response.aiter_bytes(chunk_size):
         size += len(chunk)
         if size > max_bytes:
             raise too_large
         chunks.append(chunk)
+        if on_chunk is not None:
+            on_chunk(chunk)
     return b"".join(chunks)
 
 
@@ -218,12 +232,14 @@ async def request(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     idle_timeout_s: float | None = None,
     max_bytes: int = JSON_MAX_BYTES,
+    on_chunk: Callable[[bytes], None] | None = None,
 ) -> OutboundResponse:
     """Calls `url` and returns the answer, whatever its status code.
 
     `timeout_s` limits the whole call. `idle_timeout_s`, when given, also limits each wait
     for more data (the first byte included), so a streamed answer can run for `timeout_s`
     as long as it keeps arriving. The answer is read to its end before it is returned.
+    `on_chunk`, when given, is told each piece of the answer as it arrives.
 
     A non-2xx answer is returned, not raised: the caller decides what it means.
     Raises `OutboundError` when there is no usable answer at all.
@@ -237,6 +253,7 @@ async def request(
         timeout_s=timeout_s,
         idle_timeout_s=idle_timeout_s,
         max_bytes=max_bytes,
+        on_chunk=on_chunk,
     )
 
 
@@ -310,9 +327,10 @@ async def _send(
     data: Mapping[str, str] | None = None,
     idle_timeout_s: float | None = None,
     fresh_connection: bool = False,
+    on_chunk: Callable[[bytes], None] | None = None,
 ) -> OutboundResponse:
     async def read_body(response: httpx.Response, final_url: str) -> OutboundResponse:
-        body = await _read_limited(response, max_bytes)
+        body = await _read_limited(response, max_bytes, on_chunk)
         return OutboundResponse(
             url=final_url,
             status_code=response.status_code,

@@ -5,8 +5,8 @@
 - `dispatcher.py`: the one loop that moves jobs forward.
 - `phases.py`: the phase labels the UI shows.
 - one module per job type: the labs (`generate_lab_video.py`, `write_lab_video_prompt.py`,
-  `lab_voice.py`, `generate_lab_image.py`, `generate_lab_music.py`, `write_lab_music_prompt.py`)
-  and the Character lab
+  `lab_voice.py`, `generate_lab_image.py`, `generate_lab_music.py`, `write_lab_music_prompt.py`,
+  `write_chat_reply.py`) and the Character lab
   (`write_character_look_prompt.py`, `write_character_take_prompt.py`) and the story stages
   (`write_story_bible.py`, `discover_characters.py`, `discover_environments.py`,
   `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`,
@@ -104,6 +104,7 @@ def register_handlers() -> None:
     from app.jobs.write_callout_scene import WriteCalloutSceneHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
+    from app.jobs.write_chat_reply import WriteChatReplyHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
     from app.jobs.write_graphic_theme import WriteGraphicThemeHandler
@@ -128,6 +129,7 @@ def register_handlers() -> None:
     handlers.register(LabVoiceHandler())
     handlers.register(GenerateLabMusicHandler())
     handlers.register(WriteLabMusicPromptHandler())
+    handlers.register(WriteChatReplyHandler())
     handlers.register(GenerateLabImageHandler())
     handlers.register(WriteCharacterLookPromptHandler())
     handlers.register(WriteCharacterTakePromptHandler())

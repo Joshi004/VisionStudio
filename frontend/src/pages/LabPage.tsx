@@ -4,6 +4,7 @@ import { Navigate, useNavigate, useParams } from "react-router";
 
 import { CharacterLabPanel } from "../components/characterLab/CharacterLabPanel";
 import { EnvironmentLabPanel } from "../components/environmentLab/EnvironmentLabPanel";
+import { ChatLabPanel } from "../components/lab/ChatLabPanel";
 import { GraphicsLabPanel } from "../components/lab/GraphicsLabPanel";
 import { ImageLabPanel } from "../components/lab/ImageLabPanel";
 import { LabLibraryDrawer, type LibraryActions } from "../components/lab/LabLibraryDrawer";
@@ -36,6 +37,7 @@ const TABS = [
   { value: "voice", label: "Voice" },
   { value: "music", label: "Music" },
   { value: "graphics", label: "Graphics" },
+  { value: "text", label: "Text" },
 ] as const;
 
 type LabTab = (typeof TABS)[number]["value"];
@@ -49,7 +51,8 @@ function isLabTab(value: string | undefined): value is LabTab {
 /**
  * One place for everything that is tried by hand and belongs to no project: the library of
  * characters (Characters), the library of environments (Environments), and the four labs it
- * is made of (Image, Video, Voice, Music), and the Graphics lab (graphics drawn by code).
+ * is made of (Image, Video, Voice, Music), the Graphics lab (graphics drawn by code), and the
+ * Text lab (a chat with a model).
  *
  * The tab is in the address (`/lab/characters`), so a tab can be linked to. The Image, Video,
  * Voice, Music and Graphics forms are kept here, so changing tabs never loses what you typed,
@@ -153,6 +156,9 @@ export function LabPage() {
         </Tabs.Panel>
         <Tabs.Panel value="graphics" pt="md">
           <GraphicsLabPanel form={graphicsForm} onFormChange={setGraphicsForm} />
+        </Tabs.Panel>
+        <Tabs.Panel value="text" pt="md">
+          <ChatLabPanel />
         </Tabs.Panel>
       </Tabs>
 

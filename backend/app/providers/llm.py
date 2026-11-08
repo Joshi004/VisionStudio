@@ -22,6 +22,7 @@ is still understood.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -61,6 +62,61 @@ class ChatResult:
     finish_reason: str | None
     usage: dict[str, Any] | None
     response_id: str | None
+    reasoning: str = ""  # the model thinking aloud, when the server sends it (streamed answers)
+
+
+# Told the answer and the reasoning written so far, each time a streamed answer grows.
+ProgressCallback = Callable[[str, str], None]
+
+
+class _StreamProgress:
+    """Follows a streamed answer piece by piece, only to report how far it has got.
+
+    It never raises: anything it cannot read is skipped, because `_read_stream` reads the same
+    bytes again at the end and is the one that decides whether the answer is good.
+    """
+
+    def __init__(self, on_progress: ProgressCallback) -> None:
+        self._on_progress = on_progress
+        self._buffer = b""
+        self._content: list[str] = []
+        self._reasoning: list[str] = []
+
+    def feed(self, data: bytes) -> None:
+        self._buffer += data
+        *lines, self._buffer = self._buffer.split(b"\n")  # the last piece may be half a line
+        changed = False
+        for raw_line in lines:
+            changed = self._read_line(raw_line.decode("utf-8", errors="replace")) or changed
+        if changed:
+            self._on_progress("".join(self._content), "".join(self._reasoning))
+
+    def _read_line(self, raw_line: str) -> bool:
+        line = raw_line.rstrip("\r")
+        if not line.startswith("data:"):
+            return False
+        payload = line[len("data:") :].strip()
+        if payload == "[DONE]":
+            return False
+        try:
+            chunk = json.loads(payload)
+        except (ValueError, RecursionError):
+            return False
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        delta = choice.get("delta") if isinstance(choice, dict) else None
+        if not isinstance(delta, dict):
+            return False
+        changed = False
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            self._content.append(content)
+            changed = True
+        thinking = delta.get("reasoning_content") or delta.get("reasoning")
+        if isinstance(thinking, str) and thinking:
+            self._reasoning.append(thinking)
+            changed = True
+        return changed
 
 
 def chat_url(base_url: str) -> str:
@@ -110,16 +166,26 @@ def _transport_error(exc: outbound.OutboundError) -> LlmCallError:
 
 
 async def complete(
-    base_url: str, body: dict[str, Any], *, timeout_s: float, idle_timeout_s: float
+    base_url: str,
+    body: dict[str, Any],
+    *,
+    timeout_s: float,
+    idle_timeout_s: float,
+    on_progress: ProgressCallback | None = None,
 ) -> ChatResult:
     """Sends one chat completion request and returns the model's text.
 
     `timeout_s` limits the whole call and `idle_timeout_s` the wait for the first piece of
     the answer and the silence between two pieces after it.
 
+    `on_progress`, when given, is called with `(answer so far, reasoning so far)` each time a
+    streamed answer grows. It is only a view of the stream: the returned `ChatResult` is still
+    built from the whole answer at the end.
+
     Raises `LlmCallError` for anything that is not a usable answer. An answer with no text
     is returned with `content == ""` so the caller can record its `finish_reason`.
     """
+    progress = _StreamProgress(on_progress) if on_progress is not None else None
     try:
         response = await outbound.request(
             "POST",
@@ -128,6 +194,7 @@ async def complete(
             timeout_s=timeout_s,
             idle_timeout_s=idle_timeout_s,
             max_bytes=ANSWER_MAX_BYTES,
+            on_chunk=progress.feed if progress is not None else None,
         )
     except outbound.OutboundError as exc:
         raise _transport_error(exc) from exc
@@ -154,7 +221,7 @@ def _read_stream(text: str) -> ChatResult:
     """Joins a streamed answer (server-sent events) into one `ChatResult`.
 
     Each piece is a line `data: {json}`. Its `choices[0].delta.content` is a piece of the
-    answer, and `delta.reasoning_content` (the model thinking aloud) is left out. The piece
+    answer, and `delta.reasoning_content` (the model thinking aloud) goes to `reasoning`. The piece
     with the `finish_reason` and the last one, which has the token counts and no choices,
     are read the same way. The stream ends with `data: [DONE]`. Blank lines and `:` comment
     lines (keep-alives) are skipped.
@@ -163,6 +230,7 @@ def _read_stream(text: str) -> ChatResult:
     a stream at all, and a stream that ended before the model finished.
     """
     parts: list[str] = []
+    thinking_parts: list[str] = []
     finish_reason: str | None = None
     usage: dict[str, Any] | None = None
     response_id: str | None = None
@@ -197,6 +265,11 @@ def _read_stream(text: str) -> ChatResult:
         piece = delta.get("content") if isinstance(delta, dict) else None
         if isinstance(piece, str):
             parts.append(piece)
+        thinking = None
+        if isinstance(delta, dict):
+            thinking = delta.get("reasoning_content") or delta.get("reasoning")
+        if isinstance(thinking, str):
+            thinking_parts.append(thinking)
         if isinstance(choice.get("finish_reason"), str):
             finish_reason = choice["finish_reason"]
 
@@ -209,6 +282,7 @@ def _read_stream(text: str) -> ChatResult:
         finish_reason=finish_reason,
         usage=usage,
         response_id=response_id,
+        reasoning="".join(thinking_parts),
     )
 
 

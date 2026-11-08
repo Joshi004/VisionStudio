@@ -99,9 +99,17 @@ def call_url(target: LlmTarget) -> str:
 
 
 async def complete(
-    target: LlmTarget, body: dict[str, Any], *, timeout_s: float, idle_timeout_s: float
+    target: LlmTarget,
+    body: dict[str, Any],
+    *,
+    timeout_s: float,
+    idle_timeout_s: float,
+    on_progress: llm.ProgressCallback | None = None,
 ) -> llm.ChatResult:
     """Sends one request to the target and returns the model's text.
+
+    `on_progress` is told the answer so far while a Bitdeer answer streams in. Qwen3.8 is a GPU
+    job that only returns the finished answer, so it never calls it.
 
     Raises `llm.LlmCallError`, with the same kinds for both providers.
     """
@@ -111,5 +119,9 @@ async def complete(
             target.base_url, body, timeout_s=timeout_s, priority=gpu_priority.SHORT_WORK
         )
     return await llm.complete(
-        target.base_url, body, timeout_s=timeout_s, idle_timeout_s=idle_timeout_s
+        target.base_url,
+        body,
+        timeout_s=timeout_s,
+        idle_timeout_s=idle_timeout_s,
+        on_progress=on_progress,
     )

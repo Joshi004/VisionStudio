@@ -319,6 +319,8 @@ Rules that go with it:
 
 **Update (CMO-004 building-blocks version of a callout and the choice, 2026-11-06):** migration `0091`. **Every callout of a motion project also gets a block scene, and the owner chooses per callout which version the video uses.** (1) **`job.type` gains `write_callout_scene`** (paid, story model, restart rule `never_rerun`): the CHECK is rebuilt in batch mode, so `job` now has sixty-five types. No row changes. Its preview is drawn by the existing `render_callout_preview`. (2) **`callout_graphic` is written with `engine = remotion_blocks`** (Section 4.83): `input` is the block scene `{blocks_version, elements, layout}`, and a scene is never repaired (a scene that cannot be drawn is `failed_outright`). The resolved callout in `inputs.resolved` gains `frame_width` and `motion`, so existing component attempts read "out of date" once and are drawn again from the same code, with no model call. (3) **`callout_graphic_choice` is written** (Section 4.84) by `PUT /api/projects/{id}/callout-graphics/{callout_id}/choice`. (4) No new column, table or setting.
 
+**Update (Text lab chat, 2026-11-08):** migration `0095`. **The Lab gets a Text tab: a chat with a language model chosen for every message.** (1) `job.type` gains `write_chat_reply` (a paid call to the chosen model, or a Qwen3.8 call on the GPU server; the job belongs to no project and saves the answer as it streams). (2) Two tables: `lab_chat` (one conversation) and `lab_chat_message` (its messages; Section 4.88 and 4.89). The server builds the whole history from these rows on every message, so the page never sends it.
+
 
 ---
 
@@ -4111,6 +4113,65 @@ CREATE TABLE recording_boundary_decision (
 CREATE INDEX idx_recording_boundary_decision_project ON recording_boundary_decision (project_id);
 ```
 
+### 4.88 `lab_chat`
+
+*Added in the Text lab (migration `0095`).* One conversation of the Text lab. It belongs to no project.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `updated_at` | DATETIME | NOT NULL | now | Set when a message is sent. Orders the list, newest first |
+| `title` | TEXT | NOT NULL | — | The first words of the first message, or what the user typed when renaming |
+| `model` | TEXT | NOT NULL | — | The chat model id of the last message (`services/chat_models.py`), which the page starts the next message with |
+
+```sql
+CREATE TABLE lab_chat (
+    id         INTEGER PRIMARY KEY,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    title      TEXT NOT NULL,
+    model      TEXT NOT NULL
+);
+CREATE INDEX idx_lab_chat_updated ON lab_chat (updated_at);
+```
+
+### 4.89 `lab_chat_message`
+
+*Added in the Text lab (migration `0095`).* One message of a chat. A user message holds what was typed. An assistant message is created empty, with its `write_chat_reply` job, when the user sends a message; the job saves the answer here about once a second while it streams. Whether the reply is waiting, running, done or failed is the status of the job.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key. Messages are in the order of their ids |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `chat_id` | INTEGER, FK → `lab_chat.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `role` | TEXT | NOT NULL | — | `user` or `assistant` (`CHECK`) |
+| `content` | TEXT | NOT NULL | `''` | What was typed, or the answer so far (the whole answer once the job has finished) |
+| `reasoning` | TEXT | NOT NULL | `''` | The model's thinking, when the server sent it. Assistant messages only |
+| `model` | TEXT | NULL | — | The chat model id the reply was asked of. Assistant messages only |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_chat_reply` job that fills the message. `ON DELETE SET NULL` |
+| `finish_reason` | TEXT | NULL | — | `stop`, `length`, ... from the model |
+| `usage` | JSON | NULL | — | `{prompt_tokens, completion_tokens, reasoning_tokens}` (Section 5) |
+| `history_dropped` | INTEGER | NOT NULL | 0 | How many of the oldest earlier messages were left out of the request because the chat was longer than the model accepts |
+
+```sql
+CREATE TABLE lab_chat_message (
+    id              INTEGER PRIMARY KEY,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    chat_id         INTEGER NOT NULL REFERENCES lab_chat(id) ON DELETE CASCADE,
+    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content         TEXT NOT NULL DEFAULT '',
+    reasoning       TEXT NOT NULL DEFAULT '',
+    model           TEXT,
+    job_id          INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    finish_reason   TEXT,
+    usage           JSON,
+    history_dropped INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_lab_chat_message_chat ON lab_chat_message (chat_id, id);
+CREATE INDEX idx_lab_chat_message_job ON lab_chat_message (job_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -5305,6 +5366,14 @@ Both belong to a project and are deduped by `voice_recording_id`. `time_voice_re
 ### `job.input` and `job.output` for the `splice_voice_recording` job (REC-006)
 
 Belongs to a project and is deduped by `voice_recording_id`. `provider='local'` (FFmpeg only; nothing is paid for), restart rule `start_again`. It is queued by "Splice in N patches" for the newest full recording, and `input` is `{"requested": "splice_voice_recording", "voice_recording_id": 5}`. When it runs it reads the recording's regions and patches again and uses every patch that is `accepted` then. It fails with the reason when the recording is no longer the newest, is being split, or has no accepted patch. Each patch is trimmed to its words plus as much silence on each side as the recording had there; its loudness is matched to the 10 seconds of the recording either side of the region (`ffmpeg.measure_loudness`, a gain within 12 dB, 0 dB when either cannot be measured); the pieces are joined by one FFmpeg run with a 15 ms equal-power crossfade at every join (`acrossfade`, an exact number of samples). The length of the file is checked to the sample against the plan. In one transaction the file is stored, the new `voice_recording` row (Section 4.85) is added, the `time_voice_recording` job for it is queued and this job is finished. `output` is `{"voice_recording_id": 5, "new_recording_id": 9, "version": 2, "patches": [7, 8], "samples": 711360, "timing_job_id": 12}`. The `time_voice_recording` job's `output` gains `patch_of` (the base version's id) for a patch, and `carried_decisions` and `undecided_boundaries` for a spliced version.
+
+### `job.input` and `job.output` for the `write_chat_reply` job (Text lab)
+
+One job per message sent in a Text lab chat (and per **Try again** on a failed reply). It belongs to no project, is `provider='llm'` with the restart rule `never_rerun`, and is not deduped (every send is its own paid call). It has no model role (`handler.model_key` is None): the chat model is named in the job, and so is the server, which is how the pools count a Qwen3.8 reply in the GPU pool and any other in the paid pool.
+
+`input` is first `{"requested": "lab_chat_reply", "chat_id": 3, "message_id": 12, "model": "zai-org/GLM-5.3", "endpoint": "/chat/completions"}`. `message_id` is the empty assistant message the job fills; `endpoint` is the path used on the model's server (`/v1/qwen38/generate` for the GPU model). When the job starts it adds `server_url`, `request` (the request body without its `messages`: `model`, `max_tokens`, `stream`, `stream_options` and, for models that take it, `reasoning_effort`), `message_count` and `history_chars` (what was sent) and `history_dropped` (how many of the oldest messages were left out to fit the model). The messages themselves are the rows of `lab_chat_message`, so they are not copied here.
+
+While a Bitdeer answer streams, the job writes the answer so far to `lab_chat_message.content` and `.reasoning` about once a second; the Qwen3.8 model on the GPU server answers in one piece. `output` is written when the job succeeds: `{"model", "chat_id", "message_id", "finish_reason", "response_id", "usage": {"prompt_tokens", "completion_tokens", "reasoning_tokens"}, "history_dropped", "seconds"}`. A failed job keeps the text written before the failure in the message and the reason in `job.error`. A reply that is waiting in the queue can be cancelled; a running one cannot (a call to the model cannot be taken back).
 
 ### `job.input` and `job.output` for a `time_lab_graphic_words` job (GFX-004)
 

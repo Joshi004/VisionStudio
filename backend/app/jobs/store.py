@@ -42,6 +42,7 @@ IMAGE_LAB_NAME = "Image lab"
 CHARACTER_LAB_NAME = "Character lab"
 MUSIC_LAB_NAME = "Music lab"
 GRAPHICS_LAB_NAME = "Graphics lab"
+TEXT_LAB_NAME = "Text lab"
 
 # The job types of the Graphics lab (GFX-002 made them, one phase writes each handler).
 GRAPHICS_LAB_JOB_TYPES = frozenset(
@@ -560,6 +561,8 @@ def owner_name(job: Job, project_name: str | None) -> str:
         return MUSIC_LAB_NAME
     if job.type in GRAPHICS_LAB_JOB_TYPES:
         return GRAPHICS_LAB_NAME
+    if job.type == "write_chat_reply":
+        return TEXT_LAB_NAME
     return IMAGE_LAB_NAME if job.type == "lab_image" else NO_PROJECT_NAME
 
 

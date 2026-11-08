@@ -14,6 +14,7 @@ from app.api import (
     character_lab,
     character_links,
     character_relations,
+    chat_lab,
     deletion,
     discovery,
     environment_definitions,
@@ -98,6 +99,7 @@ api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
 api_router.include_router(music_lab.router, tags=["music-lab"])
+api_router.include_router(chat_lab.router, tags=["chat-lab"])
 api_router.include_router(graphics_lab.router, tags=["graphics-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
 api_router.include_router(av_lab.router, tags=["av-lab"])

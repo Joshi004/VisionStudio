@@ -210,7 +210,7 @@ class Job(Base):
             "'write_thumbnail_concepts', 'write_callout_look', 'write_callout_component', "
             "'render_callout_preview', 'write_callout_scene', "
             "'time_voice_recording', 'split_voice_recording', "
-            "'splice_voice_recording')",
+            "'splice_voice_recording', 'write_chat_reply')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -3297,3 +3297,55 @@ class LabGraphicRender(Base):
     verdict: Mapped[str | None] = mapped_column(default=None)
     note: Mapped[str | None] = mapped_column(default=None)
     last_error: Mapped[str | None] = mapped_column(default=None)
+
+
+class LabChat(Base):
+    """One conversation of the Text lab (revision 0095). Its messages are in `lab_chat_message`.
+
+    `title` starts as the first words of the first message and can be renamed. `model` is the
+    model the last message was sent to, so the page starts the next message with it.
+    `updated_at` is set when a message is sent, and orders the list.
+    """
+
+    __tablename__ = "lab_chat"
+    __table_args__ = (Index("idx_lab_chat_updated", "updated_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    title: Mapped[str]
+    model: Mapped[str]
+
+
+class LabChatMessage(Base):
+    """One message of a Text lab chat (revision 0095).
+
+    A user message holds what was typed. An assistant message is created empty when the user
+    sends a message, together with the `write_chat_reply` job (`job_id`) that fills it: the job
+    saves the answer here about once a second while it streams, then the final text, the
+    `finish_reason` and the token counts in `usage`. Whether the reply is waiting, running,
+    done or failed is the job's status. `model` is the chat model id the reply was asked of.
+    `history_dropped` is how many of the oldest earlier messages were left out of the request
+    because the chat was longer than the model accepts.
+    """
+
+    __tablename__ = "lab_chat_message"
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant')", name="role_valid"),
+        Index("idx_lab_chat_message_chat", "chat_id", "id"),
+        Index("idx_lab_chat_message_job", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("lab_chat.id", ondelete="CASCADE"))
+    role: Mapped[str]
+    content: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    reasoning: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    model: Mapped[str | None] = mapped_column(default=None)
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    finish_reason: Mapped[str | None] = mapped_column(default=None)
+    usage: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    history_dropped: Mapped[int] = mapped_column(default=0, server_default=text("0"))

@@ -161,6 +161,9 @@ def on_qwen38(job: Job, handler: JobHandler, qwen38_keys: frozenset[str]) -> boo
     endpoint = recorded.get("endpoint")
     if job.status == "running" and isinstance(endpoint, str):
         return endpoint == qwen38.GENERATE_PATH
+    if handler.model_key is None and isinstance(endpoint, str):
+        # A job that is not tied to a role (the chat lab) names its server when it is created.
+        return endpoint == qwen38.GENERATE_PATH
     return handler.model_key in qwen38_keys
 
 
