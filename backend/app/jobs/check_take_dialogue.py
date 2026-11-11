@@ -325,21 +325,7 @@ class CheckTakeDialogueHandler(JobHandler):
             threshold,
         )
 
-        # Best effort: a failure here is recorded and never fails the check.
-        purge = await self._purge(base_url, job.provider_job_id)
-        async with SessionLocal() as session:
-            await store.merge_output(session, job.id, {"purge": purge})
         return retry_take_id, selected_take_id
-
-    @staticmethod
-    async def _purge(base_url: str, provider_job_id: str | None) -> dict[str, Any]:
-        if not provider_job_id:
-            return {"skipped": "no server job"}
-        try:
-            return (await gpu_server.purge_job(base_url, provider_job_id)).to_json()
-        except GpuCallError as exc:
-            _logger.warning("could not purge server job %s: %s", provider_job_id, exc)
-            return {"error": str(exc)}
 
     @staticmethod
     async def _retry(take_id: int | None) -> None:

@@ -162,7 +162,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
         try:
             info = await frame_images.run_pillow(frame_images.inspect_image, dest)
         except FrameRejected as exc:
-            await self._fail_and_purge(job, base_url, f"The image could not be used: {exc.message}")
+            await self._fail(job.id, f"The image could not be used: {exc.message}")
             return
 
         await self._phase(job.id, phases.SAVING_IMAGE)
@@ -170,7 +170,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
             temp = TempFile(path=dest, size_bytes=result.size_bytes, sha256=result.sha256)
             stored = await storage.save_lab(temp, info.ext)
         except StorageError as exc:
-            await self._fail_and_purge(job, base_url, f"The image could not be stored: {exc}")
+            await self._fail(job.id, f"The image could not be stored: {exc}")
             return
 
         output: dict[str, Any] = dict(job.output) if isinstance(job.output, dict) else {}
@@ -229,10 +229,6 @@ class GenerateLabImageHandler(RemoteImageHandler):
             await self._continue_character_lab(job.id, run_id)
             await self._continue_environment_lab(job.id, run_id)
             await self._continue_thumbnail(job.id, run_id)
-        # Best effort: a failure here is recorded and never fails the run.
-        purge = await self._purge(base_url, job.provider_job_id)
-        async with SessionLocal() as session:
-            await store.merge_output(session, job.id, {"purge": purge})
 
     @staticmethod
     async def _continue_character_lab(job_id: int, run_id: int) -> None:

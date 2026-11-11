@@ -232,11 +232,7 @@ class TimeSpeechWordsHandler(JobHandler):
             return
 
         await self._phase(job_id, phases.MATCHING_WORDS)
-        if await self._match_and_store(job, body, spoken):
-            # Best effort: a failure here is recorded and never fails the job.
-            purge = await self._purge(base_url, job.provider_job_id)
-            async with SessionLocal() as session:
-                await store.merge_output(session, job.id, {"purge": purge})
+        await self._match_and_store(job, body, spoken)
 
     async def _result_not_downloaded(self, job: Job, exc: GpuCallError) -> None:
         """The download did not give a transcript. Only a result that cannot be used fails."""
@@ -338,16 +334,6 @@ class TimeSpeechWordsHandler(JobHandler):
                 return False
             await session.commit()
         return True
-
-    @staticmethod
-    async def _purge(base_url: str, provider_job_id: str | None) -> dict[str, Any]:
-        if not provider_job_id:
-            return {"skipped": "no server job"}
-        try:
-            return (await gpu_server.purge_job(base_url, provider_job_id)).to_json()
-        except GpuCallError as exc:
-            _logger.warning("could not purge server job %s: %s", provider_job_id, exc)
-            return {"error": str(exc)}
 
     # --- small helpers ---------------------------------------------------------------
 

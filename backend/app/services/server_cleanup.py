@@ -1,13 +1,16 @@
-"""Cleaning up the GPU server when something is deleted (the delete dialogs' optional checkbox).
+"""Cleaning up the GPU server: what is left there when a job is done, and how to remove it.
 
-Every remote job is purged on the server as soon as it finishes (`DELETE /v1/jobs/{id}/purge`),
-so most of the time nothing is left there. Some jobs are not purged: the purge call failed
-(`job.output.purge` holds an error), a lip-sync clip was kept on purpose for a re-sync, or the
-job was cancelled. This module finds those jobs and purges them when the user ticked "also delete
-what is left on the GPU server".
+Nothing here runs by itself after a job. The app never purges a job on its own: the server keeps
+every job (output, logs and uploads) until its own retention (`job_retention_days`, see
+`GET /v1/health`) deletes it, so the logs of a failed job can still be read there. A purge
+(`DELETE /v1/jobs/{id}/purge`) happens in two cases, both chosen by the user:
 
-Two steps, because the rows are gone after the delete:
+- `purge_jobs`: the Activity page's "Purge on GPU server" action, for the jobs the user ticked.
+  It answers per job and writes the server's answer to `job.output.purge`.
+- `make_plan` and `purge`: the delete dialogs' optional checkbox ("also delete what is left on
+  the GPU server"), for the jobs behind what is deleted.
 
+The delete flow has two steps, because the rows are gone after the delete:
 1. `make_plan` runs *before* the delete. It reads the server's job ids from the job rows and the
    server's address from the settings.
 2. `purge` runs *after* the commit, in a background task, so a slow or offline server never
@@ -22,7 +25,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +42,18 @@ GPU_URL_KEY: Final = "gpu_api_base_url"
 
 # How many job ids go into one query, so a large project stays under SQLite's variable limit.
 _QUERY_BATCH: Final = 500
+
+
+PurgeOutcome = Literal["purged", "already_gone", "skipped", "failed"]
+
+
+@dataclass(frozen=True)
+class JobPurgeResult:
+    """What a manual purge did for one job."""
+
+    job_id: int
+    outcome: PurgeOutcome
+    message: str
 
 
 @dataclass(frozen=True)
@@ -143,3 +158,119 @@ async def purge(plan: PurgePlan) -> None:
                 failed += len(plan.server_job_ids) - position - 1
                 break
     _logger.info("server cleanup: %d purged, %d already gone, %d not purged", removed, gone, failed)
+
+
+# --- the manual purge (Activity page) ---------------------------------------------------------
+
+
+def can_purge(job: Job) -> bool:
+    """Whether a purge would do something for this job: it is a GPU job that is not queued or
+    running, it reached the server (it has a server job id), and its own purge has not worked
+    yet.
+    """
+    return (
+        job.provider == "gpu"
+        and job.status not in store.ACTIVE_STATUSES
+        and len(_server_ids_of(job.provider_job_id, job.input)) > 0
+        and not _already_purged(job.output)
+    )
+
+
+def _server_url_of(job: Job, default: str) -> str:
+    """The server a job was sent to (a transcription job may go to its own server), as the job
+    recorded it when it submitted; the GPU server's address when it recorded none.
+    """
+    recorded = job.input.get("server_url") if isinstance(job.input, dict) else None
+    return recorded if isinstance(recorded, str) and recorded.strip() else default
+
+
+def _not_tried(job_id: int) -> JobPurgeResult:
+    return JobPurgeResult(job_id, "failed", "Not tried: the server did not answer.")
+
+
+async def _purge_one(
+    job_id: int, base_url: str, server_ids: list[str]
+) -> tuple[JobPurgeResult, list[dict[str, Any]], bool]:
+    """Purges the server jobs of one job. Returns the result, one answer per server job (for
+    `job.output.purge`), and whether the server did not answer (so the caller stops).
+    """
+    answers: list[dict[str, Any]] = []
+    gone = 0
+    first_error: str | None = None
+    for server_id in server_ids:
+        try:
+            answers.append((await gpu_server.purge_job(base_url, server_id)).to_json())
+        except GpuCallError as exc:
+            if exc.kind == "not_found":
+                # The server no longer has it. Recorded as a purge that worked, so the job
+                # is not offered again.
+                gone += 1
+                answers.append(
+                    {"removed_asset_ids": [], "kept_asset_ids": [], "already_gone": True}
+                )
+                continue
+            _logger.warning("could not purge server job %s: %s", server_id, exc)
+            answers.append({"error": str(exc)})
+            first_error = first_error or str(exc)
+            if exc.kind == "unreachable":
+                return JobPurgeResult(job_id, "failed", str(exc)), answers, True
+    if first_error is not None:
+        return JobPurgeResult(job_id, "failed", first_error), answers, False
+    if gone == len(server_ids):
+        return (
+            JobPurgeResult(job_id, "already_gone", "The server no longer had this job."),
+            answers,
+            False,
+        )
+    return JobPurgeResult(job_id, "purged", "Purged on the server."), answers, False
+
+
+async def purge_jobs(session: AsyncSession, job_ids: Iterable[int]) -> list[JobPurgeResult]:
+    """Purges these jobs on the GPU server, one after the other, and records each answer in
+    `job.output.purge` (one answer for a job with one server job, a list for a speech job).
+
+    A job that cannot be purged (not a GPU job, still running, never reached the server, already
+    purged, or not found) is skipped with the reason. A server job the server does not know
+    counts as already gone. When the server does not answer, the rest is not tried. The results
+    are in the order of `job_ids`, without repeats.
+    """
+    wanted = list(dict.fromkeys(job_ids))
+    default_url = await settings_service.get_str(session, GPU_URL_KEY)
+    results: dict[int, JobPurgeResult] = {}
+    work: list[tuple[int, str, list[str]]] = []
+    for job_id in wanted:
+        job = await store.get_job(session, job_id)
+        if job is None:
+            results[job_id] = JobPurgeResult(job_id, "skipped", "This job does not exist.")
+        elif job.provider != "gpu":
+            results[job_id] = JobPurgeResult(
+                job_id, "skipped", "This job did not use the GPU server."
+            )
+        elif job.status in store.ACTIVE_STATUSES:
+            results[job_id] = JobPurgeResult(
+                job_id, "skipped", "The job is still queued or running."
+            )
+        elif not _server_ids_of(job.provider_job_id, job.input):
+            results[job_id] = JobPurgeResult(job_id, "skipped", "The job never reached the server.")
+        elif _already_purged(job.output):
+            results[job_id] = JobPurgeResult(job_id, "skipped", "Already purged.")
+        else:
+            work.append(
+                (
+                    job_id,
+                    _server_url_of(job, default_url),
+                    _server_ids_of(job.provider_job_id, job.input),
+                )
+            )
+    await session.commit()  # end the read before the calls to the server
+
+    for position, (job_id, base_url, server_ids) in enumerate(work):
+        result, answers, unreachable = await _purge_one(job_id, base_url, server_ids)
+        results[job_id] = result
+        recorded: Any = answers[0] if len(answers) == 1 else answers
+        await store.merge_output(session, job_id, {"purge": recorded})
+        if unreachable:
+            for later_id, _url, _ids in work[position + 1 :]:
+                results[later_id] = _not_tried(later_id)
+            break
+    return [results[job_id] for job_id in wanted]

@@ -509,9 +509,7 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
 
         probe = await ffmpeg.probe_video(dest)
         if probe is None or probe.frame_count is None:
-            await self._fail_and_purge(
-                job, base_url, "The downloaded clip could not be read. Run it again."
-            )
+            await self._fail(job.id, "The downloaded clip could not be read. Run it again.")
             return
 
         audio = (
@@ -597,13 +595,3 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
             probe.fps or 0.0,
             audio["codec"] if audio else "none",
         )
-
-        if lip_sync_requested and lip_sync_applied is False:
-            # The clip is kept (the user paid for it), but the server job that made it is kept
-            # too, unpurged, so a later re-sync can still name it as `source_job_id`.
-            purge: dict[str, Any] = {"skipped": "lip sync was not applied; kept for a re-sync"}
-        else:
-            # Best effort: a failure here is recorded and never fails the clip.
-            purge = await self._purge(base_url, job.provider_job_id)
-        async with SessionLocal() as session:
-            await store.merge_output(session, job.id, {"purge": purge})

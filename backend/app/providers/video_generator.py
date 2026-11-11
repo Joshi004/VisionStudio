@@ -514,8 +514,3 @@ async def download(base_url: str, provider_job_id: str, dest: Path) -> outbound.
 
 async def cancel(base_url: str, provider_job_id: str) -> gpu_server.CancelAnswer:
     return await gpu_server.cancel_job(base_url, provider_job_id)
-
-
-async def cleanup(base_url: str, provider_job_id: str) -> gpu_server.PurgeAnswer:
-    """Purges the finished job on the server, with the frames that were uploaded for it."""
-    return await gpu_server.purge_job(base_url, provider_job_id)

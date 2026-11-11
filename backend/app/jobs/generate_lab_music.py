@@ -8,7 +8,7 @@ is done here, right before the submit, because the server deletes an upload that
 60 minutes, and a job that is submitted again after a pre-emption uploads again. Everything after
 the submit is
 `RemoteVideoHandler`'s: it polls once per tick, downloads the result, resubmits after a
-pre-emption, handles an expired result, and purges and cancels on the server. Failure handling
+pre-emption, handles an expired result, and cancels on the server. Failure handling
 follows ANALYSIS.md Section 5.8: a dropped connection never fails the job. (The shared phases
 say "clip", although the file is audio.)
 
@@ -200,16 +200,14 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
     ) -> None:
         plan = _plan(job.input)
         if plan is None:
-            await self._fail_and_purge(job, base_url, "The request for this run is missing.")
+            await self._fail(job.id, "The request for this run is missing.")
             return
 
         probe = await ffmpeg.probe(dest)
         stream = probe.audio_streams[0] if probe is not None and probe.audio_streams else None
         duration = (probe.duration_s or stream.duration_s) if probe and stream else None
         if probe is None or stream is None or duration is None:
-            await self._fail_and_purge(
-                job, base_url, "The downloaded audio could not be read. Run it again."
-            )
+            await self._fail(job.id, "The downloaded audio could not be read. Run it again.")
             return
 
         audio = {
@@ -261,11 +259,6 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
         )
 
         await self._continue_story_music(job.id, plan.run_id)
-
-        # Best effort: a failure here is recorded and never fails the audio.
-        purge = await self._purge(base_url, job.provider_job_id)
-        async with SessionLocal() as session:
-            await store.merge_output(session, job.id, {"purge": purge})
 
     @staticmethod
     async def _continue_story_music(job_id: int, run_id: int) -> None:

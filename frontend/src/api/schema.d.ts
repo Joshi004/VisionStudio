@@ -1820,6 +1820,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Jobs
+         * @description Deletes finished GPU jobs on the server: their output, logs and the uploads no other job
+         *     uses. This cannot be undone, and it never touches the app's own files. The answer says what
+         *     happened to each job; a job that cannot be purged is skipped with the reason, and when the
+         *     server does not answer the rest are not tried. Nothing else purges a job by itself.
+         */
+        post: operations["purge_jobs_api_jobs_purge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/images/runs": {
         parameters: {
             query?: never;
@@ -10060,6 +10083,8 @@ export interface components {
             can_cancel: boolean;
             /** Can Resubmit */
             can_resubmit: boolean;
+            /** Can Purge */
+            can_purge: boolean;
             upload?: components["schemas"]["UploadProgressOut"] | null;
             download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
@@ -10133,6 +10158,18 @@ export interface components {
             feedback: string | null;
             media: components["schemas"]["MediaRequestOut"] | null;
         };
+        /** JobPurgeOut */
+        JobPurgeOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "purged" | "already_gone" | "skipped" | "failed";
+            /** Message */
+            message: string;
+        };
         /** JobRunOut */
         JobRunOut: {
             /** Job Id */
@@ -10182,6 +10219,8 @@ export interface components {
             can_cancel: boolean;
             /** Can Resubmit */
             can_resubmit: boolean;
+            /** Can Purge */
+            can_purge: boolean;
             upload?: components["schemas"]["UploadProgressOut"] | null;
             download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
@@ -13448,6 +13487,16 @@ export interface components {
             pictures: string[];
             /** Views */
             views: string[];
+        };
+        /** PurgeJobsRequest */
+        PurgeJobsRequest: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** PurgeJobsResponse */
+        PurgeJobsResponse: {
+            /** Results */
+            results: components["schemas"]["JobPurgeOut"][];
         };
         /**
          * PushSceneOut
@@ -22675,6 +22724,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_jobs_api_jobs_purge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeJobsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeJobsResponse"];
                 };
             };
             /** @description Validation Error */

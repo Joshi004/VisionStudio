@@ -185,10 +185,10 @@ class RemoteImageHandler(JobHandler):
 
         A pre-emption (or SIGTERM, exit 137 or 143) is resubmitted unchanged, up to 3 attempts
         in all. Any other failure stops here, with the server's text shown: the guide says not
-        to retry blindly in a loop. Either way the failed job is purged on the server first.
+        to retry blindly in a loop. The job stays on the server, so its logs can be read there
+        until the server's own retention deletes it.
         """
         message = error or "The server reported the job as failed."
-        purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
             if is_preemption(message) and job.attempt < phases.MAX_ATTEMPTS:
                 await store.requeue(
@@ -196,7 +196,6 @@ class RemoteImageHandler(JobHandler):
                 )
                 return
             await store.fail_job(session, job.id, f"The remote server reported an error: {message}")
-            await store.merge_output(session, job.id, {"purge": purge})
 
     # --- finish: download ------------------------------------------------------------------
 
@@ -275,24 +274,7 @@ class RemoteImageHandler(JobHandler):
                     f"after {phases.MAX_ATTEMPTS} attempts. Generate again to try once more.",
                 )
 
-    # --- The server's cleanup and cancel (best effort) ---------------------------------------
-
-    async def _fail_and_purge(self, job: Job, base_url: str, message: str) -> None:
-        purge = await self._purge(base_url, job.provider_job_id)
-        async with SessionLocal() as session:
-            await store.fail_job(session, job.id, message)
-            await store.merge_output(session, job.id, {"purge": purge})
-
-    @staticmethod
-    async def _purge(base_url: str, provider_job_id: str | None) -> dict[str, Any]:
-        """Deletes the finished job on the server. A failure is recorded and ignored."""
-        if not provider_job_id:
-            return {"skipped": "no server job"}
-        try:
-            return (await image_generator.cleanup(base_url, provider_job_id)).to_json()
-        except GpuCallError as exc:
-            _logger.warning("could not purge server job %s: %s", provider_job_id, exc)
-            return {"error": str(exc)}
+    # --- The server's cancel (best effort) ---------------------------------------------------
 
     @staticmethod
     async def _cancel_quietly(base_url: str, provider_job_id: str) -> None:

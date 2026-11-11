@@ -17,7 +17,7 @@ export function ServerCleanupCheckbox({ checked, onChange, disabled }: ServerCle
       disabled={disabled}
       onChange={(event) => onChange(event.currentTarget.checked)}
       label="Also delete what is left on the GPU server"
-      description="Best effort, done after the deletion. Most results are already removed from the server when they finish."
+      description="Best effort, done after the deletion. Jobs stay on the server until it removes them itself, so this frees them (and their logs) sooner."
     />
   );
 }

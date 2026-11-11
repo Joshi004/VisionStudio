@@ -14,6 +14,7 @@ export type PoolCapacity = components["schemas"]["PoolCapacity"];
 export type ModelCapacity = components["schemas"]["ModelCapacity"];
 export type JobDiagnostics = components["schemas"]["JobDiagnostics"];
 export type SeriesStats = components["schemas"]["SeriesStats"];
+export type JobPurgeResult = components["schemas"]["JobPurgeOut"];
 
 const DIAGNOSTICS_POLL_MS = 15_000;
 
@@ -219,6 +220,29 @@ export function useResubmitJob() {
         );
       }
       return data;
+    },
+    onSuccess: () => invalidateAfterJobAction(queryClient),
+  });
+}
+
+/**
+ * Deletes finished GPU jobs on the server (their output, logs and unused uploads). It answers
+ * what happened to each job: purged, already gone, skipped (with the reason) or failed.
+ */
+export function usePurgeJobs() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (jobIds: number[]) => {
+      const { data, error, response } = await api.POST("/api/jobs/purge", {
+        body: { job_ids: jobIds },
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not purge the jobs (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data.results;
     },
     onSuccess: () => invalidateAfterJobAction(queryClient),
   });

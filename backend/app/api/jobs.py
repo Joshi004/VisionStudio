@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
@@ -23,7 +23,7 @@ from app.jobs import dispatcher, handlers, live_status, phases, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import prompt_view, story_pipeline
+from app.services import prompt_view, server_cleanup, story_pipeline
 
 GPU_URL_KEY = "gpu_api_base_url"
 
@@ -164,6 +164,8 @@ class JobSummary(BaseModel):
     last_checked_at: datetime | None
     can_cancel: bool
     can_resubmit: bool
+    # A finished GPU job whose files and logs are still on the server (the Activity page's purge).
+    can_purge: bool
     # Only for a queued or running job, and only while there is something to say.
     upload: UploadProgressOut | None = None
     download: DownloadProgressOut | None = None
@@ -273,6 +275,7 @@ def job_summary(row: JobRow) -> JobSummary:
         last_checked_at=job.last_checked_at,
         can_cancel=store.can_cancel(job),
         can_resubmit=store.can_resubmit(job),
+        can_purge=server_cleanup.can_purge(job),
         upload=upload,
         download=download,
         connection=connection,
@@ -666,3 +669,38 @@ async def resubmit_job(job_id: int, session: SessionDep) -> JobDetail:
         raise HTTPException(exc.status_code, exc.message) from exc
     dispatcher.nudge()
     return job_detail(await _load_row(session, job_id))
+
+
+_MAX_PURGE_JOBS = 100
+
+
+class PurgeJobsRequest(BaseModel):
+    job_ids: list[Annotated[int, Field(ge=1, le=_MAX_JOB_ID)]] = Field(
+        min_length=1, max_length=_MAX_PURGE_JOBS
+    )
+
+
+class JobPurgeOut(BaseModel):
+    job_id: int
+    outcome: Literal["purged", "already_gone", "skipped", "failed"]
+    message: str
+
+
+class PurgeJobsResponse(BaseModel):
+    results: list[JobPurgeOut]
+
+
+@router.post("/jobs/purge", response_model=PurgeJobsResponse)
+async def purge_jobs(body: PurgeJobsRequest, session: SessionDep) -> PurgeJobsResponse:
+    """Deletes finished GPU jobs on the server: their output, logs and the uploads no other job
+    uses. This cannot be undone, and it never touches the app's own files. The answer says what
+    happened to each job; a job that cannot be purged is skipped with the reason, and when the
+    server does not answer the rest are not tried. Nothing else purges a job by itself.
+    """
+    results = await server_cleanup.purge_jobs(session, body.job_ids)
+    return PurgeJobsResponse(
+        results=[
+            JobPurgeOut(job_id=item.job_id, outcome=item.outcome, message=item.message)
+            for item in results
+        ]
+    )

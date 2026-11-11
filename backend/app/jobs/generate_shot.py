@@ -78,7 +78,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
     ) -> None:
         if job.project_id is None:
             # A shot's job is always made with its project; this only guards a damaged row.
-            await self._fail_and_purge(job, base_url, "The clip belongs to no project.")
+            await self._fail(job.id, "The clip belongs to no project.")
             return
         recorded = job.input if isinstance(job.input, dict) else {}
         request_body = recorded.get("request")
@@ -87,9 +87,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
         measured, probe = await shot_takes.measure_clip(dest)
         if probe is None or not measured.readable:
             take_id = await self._record_unreadable(job, measured, request_body)
-            await self._fail_and_purge(
-                job, base_url, "The downloaded clip could not be read. Generate it again."
-            )
+            await self._fail(job.id, "The downloaded clip could not be read. Generate it again.")
             await self._retry(take_id)
             return
 
@@ -192,11 +190,6 @@ class GenerateShotHandler(GenerateLabVideoHandler):
         )
         if queued_dialogue_check:
             dispatcher.nudge()
-
-        # Best effort: a failure here is recorded and never fails the clip.
-        purge = await self._purge(base_url, job.provider_job_id)
-        async with SessionLocal() as session:
-            await store.merge_output(session, job.id, {"purge": purge})
 
         await self._retry(retry_take_id)
         await start_dependents(selected_take_id)

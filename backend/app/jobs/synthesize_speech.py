@@ -10,8 +10,8 @@ It is a remote job, so the three steps follow `JobHandler`:
   first piece of the text that is not made yet, and save the server's job id.
 - `poll`: ask the server about the job once per tick.
 - `finish`: when the piece is made, submit the next one (and save its job id). After the last
-  one, download every piece, join them, hand the WAV to `store_result` and purge the jobs on
-  the server.
+  one, download every piece, join them, hand the WAV to `store_result`. The jobs stay on the server
+  (a purge is manual, `services/server_cleanup.py`).
 
 **A long script is several requests.** One request takes at most 1000 characters
 (`services/speech_chunks.split_script`). The pieces are made one after the other, so the job
@@ -20,8 +20,9 @@ guidance, so the voice stays the same across the pieces. `job.input.done` holds 
 job ids of the pieces that are made. A pre-emption or a restart continues with the first piece
 that is not in it, and the uploaded recording is reused.
 
-**Nothing is purged before the end**: purging a piece also deletes the uploads no other job
-uses, and the pieces share the recording.
+**Nothing is purged by the job**: the server's own retention deletes the pieces. A manual
+purge of a piece also deletes the uploads no other job uses, and the pieces share the
+recording, so it purges every piece (`input.done`) of the job together.
 
 Failure handling follows the other remote jobs: a dropped connection never fails the job. It
 fails when the server says it failed (other than pre-emption), refuses the request, or returns
@@ -37,7 +38,7 @@ import logging
 from abc import abstractmethod
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
@@ -158,7 +159,7 @@ class SpeechHandler(JobHandler):
     async def store_result(self, job: Job, speech: SpeechFile) -> bool:
         """Stores the finished speech and finishes the job, in one transaction. True when it
         did; False when it failed the job itself or the job was no longer running (the
-        server's jobs are then not purged). The WAV is a temp file: move it, do not copy it.
+        server's jobs stay as they are). The WAV is a temp file: move it, do not copy it.
         """
 
     # --- start: upload and submit ------------------------------------------------------------
@@ -362,15 +363,13 @@ class SpeechHandler(JobHandler):
                 try:
                     await speech_audio.join_wavs(temps[: len(plan.done)], list_path, joined)
                 except speech_audio.JoinError as exc:
-                    await self._fail_and_purge(job, base_url, plan, str(exc))
+                    await self._fail(job.id, str(exc))
                     return
 
             await self._phase(job.id, phases.CHECKING_SPEECH)
             probe = await ffmpeg.probe(joined)
             if probe is None or not probe.audio_streams or not probe.duration_s:
-                await self._fail_and_purge(
-                    job, base_url, plan, "The speech could not be read. Make it again."
-                )
+                await self._fail(job.id, "The speech could not be read. Make it again.")
                 return
             stream = probe.audio_streams[0]
             speech = SpeechFile(
@@ -381,15 +380,10 @@ class SpeechHandler(JobHandler):
                 parts=len(plan.chunks),
             )
             await self._phase(job.id, phases.SAVING_SPEECH)
-            stored = await self.store_result(job, speech)
+            await self.store_result(job, speech)
         finally:
             for temp in temps:
                 storage.discard(temp)
-
-        if stored:
-            purged = await self._purge_all(base_url, plan.done)
-            async with SessionLocal() as session:
-                await store.merge_output(session, job.id, {"purge": purged})
 
     async def _result_not_downloaded(self, job: Job, exc: GpuCallError) -> None:
         """A piece could not be downloaded. Only a result that cannot be had fails the job."""
@@ -407,28 +401,6 @@ class SpeechHandler(JobHandler):
                 await store.fail_job(session, job.id, f"The speech could not be used: {exc}")
             else:
                 await record_poll_error(job.id, exc)
-
-    # --- the server's cleanup (best effort) ---------------------------------------------------
-
-    @staticmethod
-    async def _purge_all(base_url: str, remote_ids: list[str]) -> list[dict[str, Any]]:
-        """Deletes the finished jobs and the uploads on the server. A failure is recorded and
-        ignored.
-        """
-        answers: list[dict[str, Any]] = []
-        for remote_id in remote_ids:
-            try:
-                answers.append((await gpu_server.purge_job(base_url, remote_id)).to_json())
-            except GpuCallError as exc:
-                _logger.warning("could not purge server job %s: %s", remote_id, exc)
-                answers.append({"error": str(exc)})
-        return answers
-
-    async def _fail_and_purge(self, job: Job, base_url: str, plan: Plan, message: str) -> None:
-        purged = await self._purge_all(base_url, plan.done)
-        async with SessionLocal() as session:
-            await store.fail_job(session, job.id, message)
-            await store.merge_output(session, job.id, {"purge": purged})
 
     # --- small helpers ------------------------------------------------------------------------
 
