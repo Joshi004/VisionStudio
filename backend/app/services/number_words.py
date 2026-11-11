@@ -8,7 +8,8 @@ Pure functions, no I/O. Covered forms:
 - digits: `1,000`, `3.5`, `73%`, `$5`, and a scale glued on (`5k`, `2m`, `5bn`, `3cr`) or spoken
   after them (`2.5 million`, `10 lakh`);
 - English words: "twenty five", "twenty-five", "one hundred and five", "ten lakh", "three
-  crore", "two thousand", "three point five".
+  crore", "two thousand", "three point five", and "a" or "an" for one before "hundred" or a
+  scale word ("a million", "a hundred thousand").
 
 Not covered, so they are never found: ordinals ("fifth"), fractions ("half"), ranges, and years
 said in two parts ("twenty twenty four" is read as 44). The caller treats a missing number as a
@@ -135,6 +136,14 @@ def numbers_in(text: str) -> set[Decimal]:
             if in_run and not fits:
                 flush()
             current += value
+            in_run = True
+        elif (
+            token in ("a", "an")
+            and index + 1 < len(tokens)
+            and (tokens[index + 1] == _HUNDRED or tokens[index + 1] in _SCALES)
+        ):
+            flush()
+            current = 1
             in_run = True
         elif token == _HUNDRED:
             current = max(current, 1) * 100

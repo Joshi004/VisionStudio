@@ -6378,12 +6378,12 @@ export interface components {
              * Unit
              * @enum {string}
              */
-            unit: "usd" | "percent" | "points" | "multiple" | "count" | "none";
+            unit: "usd" | "inr" | "percent" | "points" | "multiple" | "count" | "none";
             /**
              * Scale
              * @enum {string}
              */
-            scale: "none" | "thousand" | "million" | "billion" | "trillion";
+            scale: "none" | "thousand" | "lakh" | "million" | "crore" | "billion" | "trillion";
             /** Said As */
             said_as: string;
         };

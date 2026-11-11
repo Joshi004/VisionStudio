@@ -19,9 +19,11 @@ words, so it can be run again when a voice's timing arrives, with no new model c
 
 **Number text** (G-7, `display_text`), US style: `$` before dollars, `%`, `x` and ` pts` after
 percents, multiples and points; `K`, `M`, `B` and `T` for dollars and counts from 1,000 up; a
-minus sign for a negative number. A fact shows at most two decimals, a derived value none at 10
-or more and one below 10. Trailing zeros are dropped. A change (`pct_change`, `difference`)
-always shows its sign: `+158%`, `-6.5%`. A plain number (a year) stays plain digits.
+minus sign for a negative number. Rupees are Indian style: `₹` before them, and ` lakh` and
+` crore` from 1,00,000 up (`₹5 lakh`, `₹1000 crore`). A fact shows at most two decimals, a
+derived value none at 10 or more and one below 10. Trailing zeros are dropped. A change
+(`pct_change`, `difference`) always shows its sign: `+158%`, `-6.5%`. A plain number (a year)
+stays plain digits.
 
 **Colours.** The palettes below are all readable on their background (contrast at least 4.5).
 The director's accent must reach a contrast of 3.0 with the background (the WCAG minimum for
@@ -80,7 +82,7 @@ COLOURS: Final[dict[str, dict[str, str]]] = {
     },
 }
 
-_PREFIX: Final = {"usd": "$"}
+_PREFIX: Final = {"usd": "$", "inr": "₹"}
 _SUFFIX: Final = {"percent": "%", "multiple": "x", "points": " pts"}
 # The letters of a number from 1,000 up, smallest first.
 _LADDER: Final = (
@@ -89,6 +91,12 @@ _LADDER: Final = (
     (Decimal(10) ** 6, "M"),
     (Decimal(10) ** 9, "B"),
     (Decimal(10) ** 12, "T"),
+)
+# The words of a rupee amount from 1,00,000 up, smallest first.
+_INR_LADDER: Final = (
+    (Decimal(1), ""),
+    (Decimal(10) ** 5, " lakh"),
+    (Decimal(10) ** 7, " crore"),
 )
 _FACT_PLACES: Final = 2
 _COMMAS_FROM: Final = Decimal(10_000)
@@ -186,13 +194,18 @@ def _rounded(mantissa: Decimal, derived: bool) -> Decimal:
 
 def display_text(value: Decimal, unit: str, *, signed: bool, derived: bool) -> str:
     """The on-screen text of a number. `value` is the full value (the scale applied)."""
-    ladder = _LADDER if unit in SCALED_UNITS else _LADDER[:1]
+    if unit == "inr":
+        ladder = _INR_LADDER
+    elif unit in SCALED_UNITS:
+        ladder = _LADDER
+    else:
+        ladder = _LADDER[:1]
     position = max((i for i, (size, _) in enumerate(ladder) if abs(value) >= size), default=0)
     while True:
         size, letter = ladder[position]
         rounded = _rounded(value / size, derived)
-        # 999,999 rounds to 1000K: that is 1M.
-        if abs(rounded) >= 1000 and position + 1 < len(ladder):
+        # 999,999 rounds to 1000K: that is 1M. 99.999 lakh rounds to 100 lakh: that is 1 crore.
+        if position + 1 < len(ladder) and abs(rounded) * size >= ladder[position + 1][0]:
             position += 1
             continue
         break

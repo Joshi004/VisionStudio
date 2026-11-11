@@ -55,8 +55,9 @@ from app.services.text_limits import fit_text, length_rule
 parse_answer = discovery_writer.parse_answer
 
 # Hidden reasoning is billed as output, and the answer repeats the scene's speech, so this
-# leaves room for both. Qwen3.8 ignores it and uses its own limit (`providers/qwen38.py`).
-MAX_TOKENS: Final = 16000
+# leaves room for both. It is a ceiling, not a target: a long scene used all of 16,000 on
+# reasoning alone. Qwen3.8 ignores it and uses its own limit (`providers/qwen38.py`).
+MAX_TOKENS: Final = 48000
 REASONING_EFFORT: Final = "high"
 
 EVENT_TYPES: Final = ("narration", "dialogue", "action", "sound_event", "pause")
@@ -82,7 +83,7 @@ def allowed_types(speech_mode: str) -> tuple[str, ...]:
     return tuple(kind for kind in EVENT_TYPES if kind != forbidden)
 
 
-MAX_EVENTS: Final = 100
+MAX_EVENTS: Final = 250
 # The most characters each text field of an event may have.
 SPEECH_MAX_CHARS: Final = 2000
 DESCRIPTION_MAX_CHARS: Final = 300

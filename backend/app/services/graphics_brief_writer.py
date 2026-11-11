@@ -40,13 +40,15 @@ from app.services.text_limits import length_rule
 LINE: Final = "the line"
 
 KINDS: Final = ("kpi", "comparison", "trend", "process", "list", "statement", "concept")
-UNITS: Final = ("usd", "percent", "points", "multiple", "count", "none")
-# The units that may carry a scale ("12 billion dollars", "2.5 million users").
-SCALED_UNITS: Final = ("usd", "count")
+UNITS: Final = ("usd", "inr", "percent", "points", "multiple", "count", "none")
+# The units that may carry a scale ("12 billion dollars", "₹5 lakh", "2.5 million users").
+SCALED_UNITS: Final = ("usd", "inr", "count")
 SCALE_FACTORS: Final[dict[str, Decimal]] = {
     "none": Decimal(1),
     "thousand": Decimal(10) ** 3,
+    "lakh": Decimal(10) ** 5,
     "million": Decimal(10) ** 6,
+    "crore": Decimal(10) ** 7,
     "billion": Decimal(10) ** 9,
     "trillion": Decimal(10) ** 12,
 }
@@ -126,10 +128,13 @@ brief. You never draw anything and you never write any time.
 {kind_rules}FACTS (the numbers on screen)
 - Every number on screen must come from the line. A fact is a number the line says.
 - "value" is the number as the line says it and "scale" is the word after it. "12 billion \
-dollars": value 12, unit "usd", scale "billion". "6.5 percent": value 6.5, unit "percent", scale \
-"none". When the line says a number fell, give a negative value ("down 6.5 percent" is -6.5).
-- "unit" is one of usd, percent, points, multiple, count, none. Use "none" for a plain number \
-such as a year. A scale other than "none" is only for the units usd and count.
+dollars": value 12, unit "usd", scale "billion". "₹5 lakhs": value 5, unit "inr", scale "lakh". \
+"6.5 percent": value 6.5, unit "percent", scale "none". When the line says a number fell, give a \
+negative value ("down 6.5 percent" is -6.5).
+- "unit" is one of usd, inr, percent, points, multiple, count, none. "usd" is for dollars and \
+"inr" for rupees. Use "none" for a plain number such as a year. "scale" is one of none, \
+thousand, lakh, million, crore, billion, trillion, and a scale other than "none" is only for the \
+units usd, inr and count.
 - "said_as" is the words of the line where the fact is said, copied exactly as written, with \
 the number in them.
 - Never invent, round, add up or work out a number yourself. Never use a number the line does \
@@ -328,7 +333,7 @@ def _check_fact(
     if scale != "none" and unit not in SCALED_UNITS:
         raise ValueError(
             f'The {name} has the scale "{scale}" with the unit "{unit}". A scale goes only with '
-            'the units "usd" and "count".'
+            'the units "usd", "inr" and "count".'
         )
     said_as = _text(item.get("said_as"), f"said_as of {name}", SAID_AS_MAX_CHARS)
     _check_said(name, value, scale, said_as, words, tokens, place)

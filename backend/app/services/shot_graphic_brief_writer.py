@@ -183,10 +183,13 @@ the words say otherwise.
 in the SHOT WORDS, the WORDS BEFORE THE SHOT or the WORDS AFTER THE SHOT. Prefer a number said in \
 the SHOT WORDS.
 - "value" is the number as the words say it and "scale" is the word after it. "12 billion \
-dollars": value 12, unit "usd", scale "billion". "6.5 percent": value 6.5, unit "percent", scale \
-"none". When the words say a number fell, give a negative value ("down 6.5 percent" is -6.5).
-- "unit" is one of usd, percent, points, multiple, count, none. Use "none" for a plain number \
-such as a year. A scale other than "none" is only for the units usd and count.
+dollars": value 12, unit "usd", scale "billion". "₹5 lakhs": value 5, unit "inr", scale "lakh". \
+"6.5 percent": value 6.5, unit "percent", scale "none". When the words say a number fell, give a \
+negative value ("down 6.5 percent" is -6.5).
+- "unit" is one of usd, inr, percent, points, multiple, count, none. "usd" is for dollars and \
+"inr" for rupees. Use "none" for a plain number such as a year. "scale" is one of none, \
+thousand, lakh, million, crore, billion, trillion, and a scale other than "none" is only for the \
+units usd, inr and count.
 - "said_as" is the words where the fact is said, copied exactly as written, with the number in \
 them.
 - Never invent, round, add up or work out a number yourself. Never use a number that none of the \

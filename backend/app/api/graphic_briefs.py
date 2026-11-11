@@ -44,8 +44,8 @@ _INVALID = {
 
 Status = Literal["none", "writing", "ready", "failed", "out_of_date"]
 Kind = Literal["kpi", "comparison", "trend", "process", "list", "statement", "concept"]
-Unit = Literal["usd", "percent", "points", "multiple", "count", "none"]
-Scale = Literal["none", "thousand", "million", "billion", "trillion"]
+Unit = Literal["usd", "inr", "percent", "points", "multiple", "count", "none"]
+Scale = Literal["none", "thousand", "lakh", "million", "crore", "billion", "trillion"]
 Op = Literal["pct_change", "difference", "ratio", "sum"]
 
 
