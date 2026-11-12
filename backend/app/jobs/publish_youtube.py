@@ -9,19 +9,27 @@ everything it sends is read from the `youtube_upload` row's `sent` snapshot, nev
    id is stored the moment the insert returns, in its own transaction. A restart during this step
    starts it again from the beginning (`start_again`): YouTube makes the video only when an upload
    is complete.
-2. **Processing.** `videos.list` says whether YouTube has processed the video. The job does not
-   hold its place while it waits: between two checks it is queued again (`store.requeue`), with
-   `next_check_at` and `waiting_since` kept in its input (clock times, so they survive a
-   restart). A start before `next_check_at` queues it again at once without asking Google. When
-   the video is processed it goes on to steps 3 and 4; when YouTube fails or rejects it, the job
-   fails; after `MAX_WAIT_S` it records `gave_up` and succeeds, keeping the video.
+2. **Processing.** `videos.list` says whether YouTube has processed the video: `uploadStatus` is
+   `processed` **and** `processingDetails.processingStatus` is `succeeded` (a Short's thumbnail
+   is only applied after that, YTF-001; an answer with no `processingDetails` goes by
+   `uploadStatus` alone). `processingStatus` `failed` or `terminated` fails the upload. The job
+   does not hold its place while it waits: between two checks it is queued again
+   (`store.requeue`), with `next_check_at` and `waiting_since` kept in its input (clock times,
+   so they survive a restart). A start before `next_check_at` queues it again at once without
+   asking Google. When the video is processed it goes on to steps 3 and 4; when YouTube fails
+   or rejects it, the job fails; after `MAX_WAIT_S` it records `gave_up` and succeeds, keeping
+   the video.
 3. **The thumbnail** (`thumbnails.set`) and 4. **the captions** (`captions.insert`, the render's
    SRT sent from memory, or `skipped` when not ticked), only after processing. Each result is
    stored in `thumbnail_result` or `captions_result` the moment it ends. An error in either is
    recorded on its step and never fails the upload. The thumbnail sent is the one recorded at
    Upload when its file is unchanged, otherwise the project's chosen one. A job whose upload is
    already `processed` goes straight to these steps; `steps` in its input (Try again on one step)
-   limits it to those steps.
+   limits it to those steps. With `later: true` as well (YTF-001, Send captions now / Set the
+   thumbnail again) the step is done whatever its last result was, the thumbnail sent is the
+   project's chosen one now, the captions are sent whether or not they were ticked, and the
+   result stored carries `later: true`. The upload's `sent` snapshot is never changed.
+   A 409 `captionExists` is stored as `done` with a message.
 
 A step already done is never done again: a stored `video_id` skips step 1, `processed` skips
 step 2, and a step whose result is `done` or `skipped` is skipped. A failed job is tried again
@@ -244,19 +252,38 @@ class PublishYouTubeHandler(JobHandler):
                 return
             if status.privacy_status in youtube_publish.PRIVACY_VALUES:
                 await self._store_privacy(upload_id, status.privacy_status)
-            if status.upload_status == youtube_api.UPLOAD_PROCESSED:
-                await self._store_processing(upload_id, youtube_publish.PROCESSING_PROCESSED)
-                await self._run_steps(job_id, upload_id, channel, video_id, sent, job_input)
-                await self._end_succeeded(
-                    job_id, upload_id, video_id, youtube_publish.PROCESSING_PROCESSED
-                )
-                return
             if status.upload_status in (youtube_api.UPLOAD_FAILED, youtube_api.UPLOAD_REJECTED):
                 detail = f" ({status.problem})" if status.problem else ""
                 await self._end_failed(
                     job_id, upload_id, f"YouTube {status.upload_status} the video{detail}."
                 )
                 return
+            if status.upload_status == youtube_api.UPLOAD_PROCESSED:
+                # `processed` is not enough: a Short's thumbnail is only applied once
+                # `processingStatus` is `succeeded` (F-6).
+                if status.processing_status in youtube_api.PROCESSING_FAILED_STATUSES:
+                    reason = f" ({status.processing_problem})" if status.processing_problem else ""
+                    await self._end_failed(
+                        job_id, upload_id, f"YouTube could not process the video{reason}."
+                    )
+                    return
+                if status.processing_status is None:
+                    _logger.info(
+                        "job %d: no processingDetails for video %s, going by uploadStatus",
+                        job_id,
+                        video_id,
+                    )
+                if (
+                    status.processing_status is None
+                    or status.processing_status == youtube_api.PROCESSING_SUCCEEDED
+                ):
+                    await self._store_processing(upload_id, youtube_publish.PROCESSING_PROCESSED)
+                    await self._run_steps(job_id, upload_id, channel, video_id, sent, job_input)
+                    await self._end_succeeded(
+                        job_id, upload_id, video_id, youtube_publish.PROCESSING_PROCESSED
+                    )
+                    return
+                # Still `processing`: keep waiting under the same rules as for `uploaded`.
 
         if now - waiting_since >= MAX_WAIT_S:
             _logger.info("job %d: gave up waiting for video %s to be processed", job_id, video_id)
@@ -300,12 +327,15 @@ class PublishYouTubeHandler(JobHandler):
             }
             await session.commit()
         wanted = job_input.get("steps")
+        # Sending later (F-7): the step is done again whatever its last result was.
+        later = job_input.get("later") is True
         todo: list[str] = []
         for step, result in results.items():
             if isinstance(wanted, list):
-                if step in wanted and youtube_publish.result_status(result) not in (
-                    youtube_publish.RESULT_DONE,
-                    youtube_publish.RESULT_SKIPPED,
+                if step in wanted and (
+                    later
+                    or youtube_publish.result_status(result)
+                    not in (youtube_publish.RESULT_DONE, youtube_publish.RESULT_SKIPPED)
                 ):
                     todo.append(step)
             elif result is None:
@@ -328,16 +358,20 @@ class PublishYouTubeHandler(JobHandler):
 
         for step in todo:
             if blocked is not None:
-                await self._store_result(upload_id, step, _result(RESULT_FAILED, blocked))
+                await self._store_result(
+                    upload_id, step, _result(RESULT_FAILED, blocked, **_later_mark(later))
+                )
                 continue
             assert channel is not None
             try:
                 if step == youtube_publish.STEP_THUMBNAIL:
                     await phase_writer.note(job_id, phases.SETTING_YOUTUBE_THUMBNAIL)
-                    result = await self._thumbnail_step(service, video_id, project_id, sent)
+                    result = await self._thumbnail_step(
+                        service, video_id, project_id, sent, later=later
+                    )
                 else:
                     await phase_writer.note(job_id, phases.SENDING_YOUTUBE_CAPTIONS)
-                    result = await self._captions_step(service, video_id, sent)
+                    result = await self._captions_step(service, video_id, sent, later=later)
             except Exception as exc:
                 failure = youtube_api.classify(exc)
                 _logger.warning(
@@ -358,6 +392,8 @@ class PublishYouTubeHandler(JobHandler):
                 else:
                     message = youtube_api.step_failure_message(failure, channel.title, step)
                 result = _result(RESULT_FAILED, message)
+            if later:
+                result["later"] = True
             await self._store_result(upload_id, step, result)
             _logger.info(
                 "job %d: the %s step ended: %s (video %s)",
@@ -388,13 +424,14 @@ class PublishYouTubeHandler(JobHandler):
 
     @staticmethod
     async def _thumbnail_file(
-        project_id: int, sent: dict[str, Any]
+        project_id: int, sent: dict[str, Any], *, later: bool = False
     ) -> tuple[str, int, str, bool] | None:
         """The thumbnail to send: the one recorded at Upload when its file is still there with
-        the recorded hash, otherwise the project's chosen thumbnail. Returns its stored path, id,
-        SHA-256 and whether it is the recorded one; None when there is no usable thumbnail.
+        the recorded hash, otherwise the project's chosen thumbnail; when sending later, always
+        the project's chosen thumbnail now. Returns its stored path, id, SHA-256 and whether it
+        is the recorded one; None when there is no usable thumbnail.
         """
-        recorded = sent.get("thumbnail")
+        recorded = None if later else sent.get("thumbnail")
         storage = get_storage()
         if isinstance(recorded, dict):
             path, sha256 = recorded.get("path"), recorded.get("sha256")
@@ -425,9 +462,15 @@ class PublishYouTubeHandler(JobHandler):
         return chosen_path, chosen_id, actual, False
 
     async def _thumbnail_step(
-        self, service: Any, video_id: str, project_id: int, sent: dict[str, Any]
+        self,
+        service: Any,
+        video_id: str,
+        project_id: int,
+        sent: dict[str, Any],
+        *,
+        later: bool = False,
     ) -> dict[str, Any]:
-        found = await self._thumbnail_file(project_id, sent)
+        found = await self._thumbnail_file(project_id, sent, later=later)
         if found is None:
             return _result(
                 RESULT_FAILED,
@@ -442,9 +485,10 @@ class PublishYouTubeHandler(JobHandler):
         return _result(RESULT_DONE, None, **extra)
 
     async def _captions_step(
-        self, service: Any, video_id: str, sent: dict[str, Any]
+        self, service: Any, video_id: str, sent: dict[str, Any], *, later: bool = False
     ) -> dict[str, Any]:
-        if not sent.get("captions"):
+        # Sending later ignores what was ticked at Upload: the owner asked for it now.
+        if not sent.get("captions") and not later:
             return _result(RESULT_SKIPPED, "Captions were not ticked for this upload.")
         render_id = sent["render"]["id"]
         async with SessionLocal() as session:
@@ -460,7 +504,19 @@ class PublishYouTubeHandler(JobHandler):
         if track is None:
             return _result(RESULT_FAILED, "This render has no caption track.")
         srt = srt_document(track).encode("utf-8")
-        await anyio.to_thread.run_sync(youtube_api.insert_captions, service, video_id, srt)
+        try:
+            await anyio.to_thread.run_sync(youtube_api.insert_captions, service, video_id, srt)
+        except Exception as exc:
+            failure = youtube_api.classify(exc)
+            if (
+                failure is not None
+                and failure.status == 409
+                and failure.reason == youtube_api.CAPTION_EXISTS_REASON
+            ):
+                # The track is already there (sent before a restart, or added by hand): it is
+                # not sent twice.
+                return _result(RESULT_DONE, youtube_api.CAPTION_EXISTS_MESSAGE)
+            raise
         return _result(RESULT_DONE, None)
 
     # --- Ending --------------------------------------------------------------------------
@@ -556,6 +612,11 @@ class PublishYouTubeHandler(JobHandler):
 
 def _reconnect_message(title: str) -> str:
     return f"Reconnect {title} in Settings, then press Try again."
+
+
+def _later_mark(later: bool) -> dict[str, Any]:
+    """The `later` key of a result written by a send-later job (F-7)."""
+    return {"later": True} if later else {}
 
 
 def _step_reconnect_message(title: str) -> str:

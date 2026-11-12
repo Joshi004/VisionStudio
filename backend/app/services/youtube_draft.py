@@ -472,6 +472,10 @@ class UploadEntry:
     job: Job | None
     # Whether the upload's channel is still connected (and usable), for Try again and Finish.
     channel_connected: bool = False
+    # For Send captions now and Set the thumbnail again (YTF-001): whether the render has a
+    # readable caption track, and whether the project has a chosen thumbnail with a picture.
+    render_has_captions: bool = False
+    thumbnail_chosen: bool = False
 
 
 @dataclass(frozen=True)
@@ -505,9 +509,26 @@ def default_channel(channels: list[YouTubeChannel]) -> int | None:
     return best.id
 
 
+async def has_chosen_thumbnail(session: AsyncSession, project_id: int) -> bool:
+    """Whether the project has a chosen thumbnail with a picture (what Set the thumbnail again
+    would send).
+    """
+    found = await session.scalar(
+        select(Thumbnail.id)
+        .where(
+            Thumbnail.project_id == project_id,
+            Thumbnail.chosen.is_(True),
+            Thumbnail.path.is_not(None),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def _uploads(session: AsyncSession, project_id: int) -> list[UploadEntry]:
+    thumbnail_chosen = await has_chosen_thumbnail(session, project_id)
     statement = (
-        select(YouTubeUpload, StoryRender.render_number, Job, YouTubeChannel.status)
+        select(YouTubeUpload, StoryRender, Job, YouTubeChannel.status)
         .join(StoryRender, StoryRender.id == YouTubeUpload.render_id)
         .outerjoin(Job, Job.id == YouTubeUpload.job_id)
         .outerjoin(YouTubeChannel, YouTubeChannel.id == YouTubeUpload.channel_row_id)
@@ -519,11 +540,13 @@ async def _uploads(session: AsyncSession, project_id: int) -> list[UploadEntry]:
     return [
         UploadEntry(
             row=row,
-            render_number=number,
+            render_number=render.render_number,
             job=job,
             channel_connected=channel_status == youtube_auth.STATUS_CONNECTED,
+            render_has_captions=captions_of(render)[0],
+            thumbnail_chosen=thumbnail_chosen,
         )
-        for row, number, job, channel_status in await session.execute(statement)
+        for row, render, job, channel_status in await session.execute(statement)
     ]
 
 

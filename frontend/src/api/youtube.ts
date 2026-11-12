@@ -336,6 +336,46 @@ export function useRetryYouTubeUpload(projectId: number) {
   });
 }
 
+/** Which upload, and which step to send now. */
+export type YouTubeSendRequest = {
+  uploadId: number;
+  step: "thumbnail" | "captions";
+};
+
+/**
+ * Send captions now / Set the thumbnail again: sends the render's captions, or the project's
+ * chosen thumbnail, to a video YouTube has processed. Nothing else is sent.
+ */
+export function useSendYouTubeStep(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ uploadId, step }: YouTubeSendRequest) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/youtube/uploads/{upload_id}/send",
+        {
+          params: { path: { project_id: projectId, upload_id: uploadId } },
+          body: { step },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not send it to YouTube (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
 /** Saves the owner's edit as the next version of the draft. */
 export function useSaveYouTubeDraft(projectId: number) {
   const queryClient = useQueryClient();

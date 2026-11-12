@@ -16,7 +16,9 @@ a `youtube_upload` row whose `sent` is a snapshot of exactly what will be sent, 
 The input of the job is `{"upload_id", "target"}` (`target` is `<render id>:<channel row id>`, so
 a second press for the same render and channel while one is waiting or running is the same
 upload), and the job adds `next_check_at` and `waiting_since` while it waits for YouTube. A Try
-again on one step (YT-005) adds `"steps": ["thumbnail"]` or `["captions"]`.
+again on one step (YT-005) adds `"steps": ["thumbnail"]` or `["captions"]`. Sending a step later
+(`send_later`, YTF-001) adds `"later": true` next to `steps`: the step is done whatever its last
+result was, and the result stored carries `"later": true`. `sent` is never changed by it.
 
 After processing the job stores `thumbnail_result` and `captions_result`, each
 `{"status": "done" | "skipped" | "failed", "message", "at"}`; the thumbnail's also has
@@ -83,6 +85,11 @@ class UploadView:
     can_finish: bool = False
     # The steps whose last result is `failed`, each of which can be tried again on its own.
     retry_steps: tuple[str, ...] = ()
+    # The steps that can be sent now on a processed upload (Send captions now, Set the thumbnail
+    # again; YTF-001).
+    send_steps: tuple[str, ...] = ()
+    # The steps the job that is waiting or running will send: the ones in its `steps`, or both.
+    sending_steps: tuple[str, ...] = ()
 
 
 def result_status(result: object) -> str | None:
@@ -91,19 +98,47 @@ def result_status(result: object) -> str | None:
     return status if isinstance(status, str) else None
 
 
-def upload_state(row: YouTubeUpload, job: Job | None, channel_connected: bool) -> UploadView:
+def _sending_steps(row: YouTubeUpload, job: Job) -> tuple[str, ...]:
+    """The steps an active job will (still) send, as the job decides it: with `later` every
+    step in its `steps`; with `steps` only the ones not `done` or `skipped`; without `steps`
+    only the ones with no result yet.
+    """
+    job_input = job.input if isinstance(job.input, dict) else {}
+    steps = job_input.get("steps")
+    results = {STEP_THUMBNAIL: row.thumbnail_result, STEP_CAPTIONS: row.captions_result}
+    wanted = [step for step in STEPS if not isinstance(steps, list) or step in steps]
+    if job_input.get("later") is True:
+        return tuple(wanted)
+    finished = (RESULT_DONE, RESULT_SKIPPED)
+    if isinstance(steps, list):
+        return tuple(step for step in wanted if result_status(results[step]) not in finished)
+    return tuple(step for step in wanted if results[step] is None)
+
+
+def upload_state(
+    row: YouTubeUpload,
+    job: Job | None,
+    channel_connected: bool,
+    *,
+    render_has_captions: bool = False,
+    thumbnail_chosen: bool = False,
+) -> UploadView:
     """`uploading` is while the job is queued or running before the video id is stored,
     `processing` after it, and `finishing` once YouTube has processed the video (the thumbnail
     and the captions are being sent). Otherwise the job's result decides. A failed upload can be
-    tried again unless YouTube itself failed or rejected the video. Finish and the Try again of
-    one step are only offered while the upload's channel is connected.
+    tried again unless YouTube itself failed or rejected the video. Finish, the Try again of
+    one step and sending a step later (YTF-001) are only offered while the upload's channel is
+    connected. Sending later is offered on a processed upload: the captions when their result
+    is `skipped` or `failed` and the render has a caption track, the thumbnail whatever its
+    result is when the project has a chosen thumbnail with a picture.
     """
     if job is not None and job.status in store.ACTIVE_STATUSES:
+        sending = _sending_steps(row, job)
         if row.video_id is None:
-            return UploadView("uploading", False)
+            return UploadView("uploading", False, sending_steps=sending)
         if row.processing == PROCESSING_PROCESSED:
-            return UploadView("finishing", False)
-        return UploadView("processing", False)
+            return UploadView("finishing", False, sending_steps=sending)
+        return UploadView("processing", False, sending_steps=sending)
     usable = channel_connected and row.channel_row_id is not None and row.video_id is not None
     if row.processing == PROCESSING_PROCESSED:
         results = (row.thumbnail_result, row.captions_result)
@@ -113,11 +148,21 @@ def upload_state(row: YouTubeUpload, job: Job | None, channel_connected: bool) -
             if result_status(result) == RESULT_FAILED
         )
         unfinished = any(result is None for result in results)
+        send: list[str] = []
+        if usable and thumbnail_chosen:
+            send.append(STEP_THUMBNAIL)
+        if (
+            usable
+            and render_has_captions
+            and result_status(row.captions_result) in (RESULT_SKIPPED, RESULT_FAILED)
+        ):
+            send.append(STEP_CAPTIONS)
         return UploadView(
             "processed",
             False,
             can_finish=usable and unfinished,
             retry_steps=failed if usable else (),
+            send_steps=tuple(send),
         )
     if row.processing == PROCESSING_GAVE_UP:
         return UploadView("gave_up", False, can_finish=usable)
@@ -146,6 +191,8 @@ async def _entry(session: AsyncSession, row: YouTubeUpload) -> youtube_draft.Upl
         render_number=render.render_number if render is not None else 0,
         job=job,
         channel_connected=channel is not None and channel.status == youtube_auth.STATUS_CONNECTED,
+        render_has_captions=youtube_draft.captions_of(render)[0] if render is not None else False,
+        thumbnail_chosen=await youtube_draft.has_chosen_thumbnail(session, row.project_id),
     )
 
 
@@ -328,6 +375,10 @@ async def retry(
         if step not in view.retry_steps:
             raise YouTubePublishError("That step cannot be tried again.")
         job_input["steps"] = [step]
+        # A step that failed while sending later is tried again the same way.
+        failed_result = row.thumbnail_result if step == STEP_THUMBNAIL else row.captions_result
+        if isinstance(failed_result, dict) and failed_result.get("later") is True:
+            job_input["later"] = True
     await _connected_channel(session, row.channel_row_id)
 
     new_job, created = await store.create_job(
@@ -342,5 +393,64 @@ async def retry(
     if created:
         row.job_id = new_job.id
         row.error = None
+    await session.commit()
+    return await _entry(session, row)
+
+
+async def send_later(
+    session: AsyncSession, project: Project, upload_id: int, step: str
+) -> youtube_draft.UploadEntry:
+    """Send captions now / Set the thumbnail again (YTF-001, F-7): queues a job that sends one
+    step to a video YouTube has processed, and commits. The job input is
+    `{"steps": [step], "later": true}`. The captions are the render's track, whatever was ticked
+    at Upload; the thumbnail is the project's chosen one now. `sent` is never changed. An upload
+    that is still waiting or running is returned as it is. Raises `NoSuchUploadError` or
+    `YouTubePublishError`.
+    """
+    row = await session.get(YouTubeUpload, upload_id)
+    if row is None or row.project_id != project.id:
+        raise NoSuchUploadError("There is no such upload.")
+    job = await session.get(Job, row.job_id) if row.job_id is not None else None
+    if job is not None and job.status in store.ACTIVE_STATUSES:
+        return await _entry(session, row)
+    if step not in STEPS:
+        raise YouTubePublishError("Choose the thumbnail or the captions.")
+    if not youtube_auth.config_status().ready:
+        raise YouTubePublishError(
+            "YouTube is not set up. Fix the values listed in Settings, then try again."
+        )
+    if row.processing != PROCESSING_PROCESSED or not row.video_id:
+        raise YouTubePublishError("YouTube has not finished processing this video yet.")
+    if row.channel_row_id is None:
+        raise YouTubePublishError(
+            "The channel was disconnected. Connect it again, then send it from the upload."
+        )
+    await _connected_channel(session, row.channel_row_id)
+
+    if step == STEP_CAPTIONS:
+        if result_status(row.captions_result) == RESULT_DONE:
+            raise YouTubePublishError("The captions were already sent.")
+        render = await session.get(StoryRender, row.render_id)
+        if render is None or not youtube_draft.captions_of(render)[0]:
+            raise YouTubePublishError(
+                "This render has no caption track, so captions cannot be uploaded."
+            )
+    elif not await youtube_draft.has_chosen_thumbnail(session, project.id):
+        raise YouTubePublishError("There is no chosen thumbnail with a picture. Choose one first.")
+
+    job_input = _job_input(row.id, row.render_id, row.channel_row_id)
+    job_input["steps"] = [step]
+    job_input["later"] = True
+    new_job, created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="local",
+        input=job_input,
+        commit=False,
+        dedupe_key="target",
+    )
+    if created:
+        row.job_id = new_job.id
     await session.commit()
     return await _entry(session, row)

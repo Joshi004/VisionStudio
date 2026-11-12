@@ -13,8 +13,9 @@ The project's draft, all under `/projects/{project_id}/youtube`:
 4. `POST .../uploads` (YT-004) checks everything again, stores a snapshot of what will be sent and
    queues the `publish_youtube` job; `POST .../uploads/{upload_id}/retry` tries a failed upload
    again, finishes the thumbnail and captions of one that gave up waiting (YT-005), or, with
-   `step` in the body, tries one failed step again. The upload itself is done by the job, never
-   by a route.
+   `step` in the body, tries one failed step again; `POST .../uploads/{upload_id}/send` (YTF-001)
+   sends the captions or the chosen thumbnail again to a video YouTube has processed. The
+   upload itself is done by the job, never by a route.
 
 The answers never return ORM objects.
 """
@@ -271,6 +272,8 @@ class YouTubeStepResultOut(BaseModel):
     # pressed (false: that file had changed, so the chosen thumbnail of the project was sent).
     thumbnail_id: int | None = None
     from_snapshot: bool | None = None
+    # True when the result comes from Send captions now / Set the thumbnail again (YTF-001).
+    later: bool = False
 
 
 class YouTubeUploadProgressOut(BaseModel):
@@ -311,6 +314,10 @@ class YouTubeUploadOut(BaseModel):
     can_finish: bool
     # The steps that failed and can each be tried again on their own.
     retry_steps: list[UploadStep]
+    # The steps that can be sent now to the processed video (Send captions now, Set the
+    # thumbnail again), and the steps the job that is running will send.
+    send_steps: list[UploadStep]
+    sending_steps: list[UploadStep]
     job: DiscoveryJobOut | None
     progress: YouTubeUploadProgressOut | None
 
@@ -373,6 +380,14 @@ class YouTubeRetryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step: UploadStep | None = None
+
+
+class YouTubeSendIn(BaseModel):
+    """Send one step again to a video that YouTube has processed (YTF-001)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step: UploadStep
 
 
 class YouTubeDraftEditIn(BaseModel):
@@ -462,12 +477,19 @@ def _step_out(result: object) -> YouTubeStepResultOut | None:
         if isinstance(thumbnail_id, int) and not isinstance(thumbnail_id, bool)
         else None,
         from_snapshot=from_snapshot if isinstance(from_snapshot, bool) else None,
+        later=result.get("later") is True,
     )
 
 
 def _upload_out(entry: youtube_draft.UploadEntry) -> YouTubeUploadOut:
     row = entry.row
-    view = youtube_publish.upload_state(row, entry.job, entry.channel_connected)
+    view = youtube_publish.upload_state(
+        row,
+        entry.job,
+        entry.channel_connected,
+        render_has_captions=entry.render_has_captions,
+        thumbnail_chosen=entry.thumbnail_chosen,
+    )
     live = live_status.upload_of(entry.job.id) if entry.job is not None else None
     privacy_sent = _sent_text(row.sent, "privacy")
     return YouTubeUploadOut(
@@ -494,6 +516,8 @@ def _upload_out(entry: youtube_draft.UploadEntry) -> YouTubeUploadOut:
         captions_sent=bool(row.sent.get("captions")) if isinstance(row.sent, dict) else False,
         can_finish=view.can_finish,
         retry_steps=[cast(UploadStep, step) for step in view.retry_steps],
+        send_steps=[cast(UploadStep, step) for step in view.send_steps],
+        sending_steps=[cast(UploadStep, step) for step in view.sending_steps],
         job=_job_out(entry.job),
         progress=(
             YouTubeUploadProgressOut(sent_bytes=live.sent_bytes, total_bytes=live.total_bytes)
@@ -670,6 +694,33 @@ async def retry_youtube_upload(
         entry = await youtube_publish.retry(
             session, project, upload_id, step=body.step if body is not None else None
         )
+    except youtube_publish.NoSuchUploadError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except youtube_publish.YouTubePublishError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return _upload_out(entry)
+
+
+@router.post(
+    "/projects/{project_id}/youtube/uploads/{upload_id}/send",
+    response_model=YouTubeUploadOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_UPLOAD_REFUSED,
+)
+async def send_youtube_step(
+    project_id: int, upload_id: int, body: YouTubeSendIn, session: SessionDep
+) -> YouTubeUploadOut:
+    """Send captions now / Set the thumbnail again: sends the render's captions, or the
+    project's chosen thumbnail, to a video YouTube has processed. Nothing else is sent and the
+    upload's snapshot is not changed. If a job for this upload is waiting or running, it is
+    returned and no second job is made.
+    """
+    if not 1 <= upload_id <= _MAX_INT:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There is no such upload.")
+    project = await load_project(session, project_id)
+    try:
+        entry = await youtube_publish.send_later(session, project, upload_id, body.step)
     except youtube_publish.NoSuchUploadError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except youtube_publish.YouTubePublishError as exc:

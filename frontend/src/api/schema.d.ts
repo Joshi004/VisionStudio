@@ -6189,6 +6189,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/youtube/uploads/{upload_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Youtube Step
+         * @description Send captions now / Set the thumbnail again: sends the render's captions, or the
+         *     project's chosen thumbnail, to a video YouTube has processed. Nothing else is sent and the
+         *     upload's snapshot is not changed. If a job for this upload is waiting or running, it is
+         *     returned and no second job is made.
+         */
+        post: operations["send_youtube_step_api_projects__project_id__youtube_uploads__upload_id__send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -18820,6 +18843,17 @@ export interface components {
             step?: ("thumbnail" | "captions") | null;
         };
         /**
+         * YouTubeSendIn
+         * @description Send one step again to a video that YouTube has processed (YTF-001).
+         */
+        YouTubeSendIn: {
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "thumbnail" | "captions";
+        };
+        /**
          * YouTubeStepResultOut
          * @description How the thumbnail or the captions step ended.
          */
@@ -18837,6 +18871,11 @@ export interface components {
             thumbnail_id?: number | null;
             /** From Snapshot */
             from_snapshot?: boolean | null;
+            /**
+             * Later
+             * @default false
+             */
+            later: boolean;
         };
         /**
          * YouTubeSuggestionOut
@@ -18952,6 +18991,10 @@ export interface components {
             can_finish: boolean;
             /** Retry Steps */
             retry_steps: ("thumbnail" | "captions")[];
+            /** Send Steps */
+            send_steps: ("thumbnail" | "captions")[];
+            /** Sending Steps */
+            sending_steps: ("thumbnail" | "captions")[];
             job: components["schemas"]["DiscoveryJobOut"] | null;
             progress: components["schemas"]["YouTubeUploadProgressOut"] | null;
         };
@@ -32986,6 +33029,60 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["YouTubeRetryIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YouTubeUploadOut"];
+                };
+            };
+            /** @description No such project, render or upload. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A YOUTUBE_* value is missing or invalid. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A check before uploading failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    send_youtube_step_api_projects__project_id__youtube_uploads__upload_id__send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                upload_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["YouTubeSendIn"];
             };
         };
         responses: {

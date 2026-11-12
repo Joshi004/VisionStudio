@@ -47,6 +47,21 @@ UPLOAD_FAILED: Final = "failed"
 UPLOAD_REJECTED: Final = "rejected"
 UPLOAD_DELETED: Final = "deleted"
 
+# What `videos.list` says about `processingDetails.processingStatus` (YTF-001). A Short's
+# thumbnail is only applied once this is `succeeded`.
+PROCESSING_SUCCEEDED: Final = "succeeded"
+PROCESSING_FAILED_STATUSES: Final = ("failed", "terminated")
+
+# `captions.insert` answers 409 with this reason when a track with the same language and name
+# is already on the video. `thumbnails.set` answers 429 with the other when a channel changed
+# thumbnails too often.
+CAPTION_EXISTS_REASON: Final = "captionExists"
+THUMBNAIL_RATE_REASON: Final = "uploadRateLimitExceeded"
+CAPTION_EXISTS_MESSAGE: Final = "The video already has an English caption track named English."
+THUMBNAIL_RATE_MESSAGE: Final = (
+    "YouTube says this channel changed thumbnails too often. Try again later."
+)
+
 FailureKind = Literal[
     "needs_reconnect", "quota", "upload_limit", "refused", "unreachable", "server_error"
 ]
@@ -173,6 +188,11 @@ class VideoStatus:
     # YouTube's own words for why it failed or was rejected (a code such as `codec`), or None.
     problem: str | None
     privacy_status: str | None
+    # `processingDetails.processingStatus` (`processing`, `succeeded`, `failed`, `terminated`),
+    # or None when the answer has no `processingDetails`.
+    processing_status: str | None = None
+    # `processingDetails.processingFailureReason` (a code such as `streamingFailure`), or None.
+    processing_problem: str | None = None
 
 
 def read_status(service: Resource, video_id: str) -> VideoStatus | None:
@@ -184,10 +204,17 @@ def read_status(service: Resource, video_id: str) -> VideoStatus | None:
     if not items:
         return None
     status = items[0].get("status") or {}
+    details = items[0].get("processingDetails")
+    if not isinstance(details, dict):
+        details = {}
+    processing_status = details.get("processingStatus")
+    processing_problem = details.get("processingFailureReason")
     return VideoStatus(
         upload_status=status.get("uploadStatus"),
         problem=status.get("failureReason") or status.get("rejectionReason"),
         privacy_status=status.get("privacyStatus"),
+        processing_status=processing_status if isinstance(processing_status, str) else None,
+        processing_problem=processing_problem if isinstance(processing_problem, str) else None,
     )
 
 
@@ -227,6 +254,8 @@ def step_failure_message(failure: ApiFailure, channel_title: str, what: str) -> 
         return f"Reconnect {channel_title} in Settings, then press Try again on the {what}."
     if failure.kind == "quota":
         return "YouTube's daily limit for this app is used up. It resets at midnight Pacific time."
+    if what == "thumbnail" and (failure.reason == THUMBNAIL_RATE_REASON or failure.status == 429):
+        return THUMBNAIL_RATE_MESSAGE
     if failure.kind in ("refused", "upload_limit"):
         detail = f"HTTP {failure.status}" if failure.status is not None else "no status"
         if failure.reason:

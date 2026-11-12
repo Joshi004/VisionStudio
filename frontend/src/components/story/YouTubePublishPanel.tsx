@@ -28,12 +28,14 @@ import {
   useDraftForYouTube,
   useRetryYouTubeUpload,
   useSaveYouTubeDraft,
+  useSendYouTubeStep,
   useUploadToYouTube,
   useYouTubePanel,
   type YouTubeDraft,
   type YouTubePanel,
   type YouTubePrivacy,
   type YouTubeRetryRequest,
+  type YouTubeSendRequest,
   type YouTubeThumbnail,
   type YouTubeUpload,
 } from "../../api/youtube";
@@ -88,6 +90,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const [note, setNote] = useState("");
   const upload = useUploadToYouTube(projectId);
   const retry = useRetryYouTubeUpload(projectId);
+  const send = useSendYouTubeStep(projectId);
   const [confirmOwn, setConfirmOwn] = useState(false);
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [notify, setNotify] = useState(true);
@@ -480,6 +483,9 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
           retrying={retry.isPending ? retry.variables : null}
           retryError={retry.isError ? describeError(retry.error) : null}
           onRetry={(request) => retry.mutate(request)}
+          sending={send.isPending ? send.variables : null}
+          sendError={send.isError ? describeError(send.error) : null}
+          onSend={(request) => send.mutate(request)}
         />
       )}
 
@@ -625,12 +631,26 @@ function UploadsCard({
   retrying,
   retryError,
   onRetry,
+  sending,
+  sendError,
+  onSend,
 }: {
   uploads: YouTubeUpload[];
   retrying: YouTubeRetryRequest | null | undefined;
   retryError: string | null;
   onRetry: (request: YouTubeRetryRequest) => void;
+  // The send-later request now being sent, or null.
+  sending: YouTubeSendRequest | null | undefined;
+  sendError: string | null;
+  onSend: (request: YouTubeSendRequest) => void;
 }) {
+  // The send-later action waiting for the owner's confirmation.
+  const [toConfirm, setToConfirm] = useState<YouTubeSendRequest | null>(null);
+  const confirming =
+    toConfirm !== null
+      ? (uploads.find((upload) => upload.id === toConfirm.uploadId) ?? null)
+      : null;
+  const channelName = confirming?.channel_title ?? "the channel";
   return (
     <Paper withBorder p="md" radius="md">
       <Stack gap="md">
@@ -640,15 +660,58 @@ function UploadsCard({
             {retryError}
           </Alert>
         )}
+        {sendError !== null && (
+          <Alert color="red" title="Could not send it">
+            {sendError}
+          </Alert>
+        )}
         {uploads.map((upload) => (
           <UploadRow
             key={upload.id}
             upload={upload}
             retrying={retrying?.uploadId === upload.id ? retrying : null}
             onRetry={(step) => onRetry({ uploadId: upload.id, step })}
+            sendingStep={sending?.uploadId === upload.id ? sending.step : null}
+            onSend={(step) => setToConfirm({ uploadId: upload.id, step })}
           />
         ))}
       </Stack>
+      <Modal
+        opened={confirming !== null && toConfirm !== null}
+        onClose={() => setToConfirm(null)}
+        title={
+          toConfirm?.step === "captions"
+            ? "Send the captions now?"
+            : "Set the thumbnail again?"
+        }
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            {toConfirm?.step === "captions"
+              ? `The captions of render ${confirming?.render_number} will be uploaded to this video on ${channelName} as an English track.`
+              : `The thumbnail chosen for this project now will be set on this video on ${channelName}.`}{" "}
+            Nothing else about the video is changed.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setToConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (toConfirm !== null) {
+                  onSend(toConfirm);
+                }
+                setToConfirm(null);
+              }}
+            >
+              {toConfirm?.step === "captions"
+                ? "Send captions"
+                : "Set thumbnail"}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Paper>
   );
 }
@@ -657,14 +720,25 @@ function UploadRow({
   upload,
   retrying,
   onRetry,
+  sendingStep,
+  onSend,
 }: {
   upload: YouTubeUpload;
   // The retry now being sent for this upload, or null.
   retrying: YouTubeRetryRequest | null;
   onRetry: (step?: "thumbnail" | "captions") => void;
+  // The step whose send-later request is being sent now, or null.
+  sendingStep: "thumbnail" | "captions" | null;
+  onSend: (step: "thumbnail" | "captions") => void;
 }) {
   const state = UPLOAD_STATE[upload.state];
   const finishing = upload.state === "finishing";
+  // Offered on a processed upload; the captions one is left out while their own Try again is
+  // shown, because both would do the same.
+  const canSendThumbnail = upload.send_steps.includes("thumbnail");
+  const canSendCaptions =
+    upload.send_steps.includes("captions") &&
+    !upload.retry_steps.includes("captions");
   const progress = upload.progress;
   const percent =
     progress !== null && progress.total_bytes > 0
@@ -722,13 +796,17 @@ function UploadRow({
             label="Thumbnail"
             doneText="Set on the video."
             result={upload.thumbnail_result}
-            working={finishing}
+            working={finishing && upload.sending_steps.includes("thumbnail")}
             canRetry={upload.retry_steps.includes("thumbnail")}
             retrying={retrying?.step === "thumbnail"}
             onRetry={() => onRetry("thumbnail")}
+            sendLabel={canSendThumbnail ? "Set the thumbnail again" : null}
+            sending={sendingStep === "thumbnail"}
+            onSend={() => onSend("thumbnail")}
           />
           {upload.thumbnail_result?.status === "done" &&
-            upload.thumbnail_result.from_snapshot === false && (
+            upload.thumbnail_result.from_snapshot === false &&
+            !upload.thumbnail_result.later && (
               <Text size="xs" c="dimmed">
                 The picture recorded when you pressed Upload had changed, so the
                 thumbnail chosen now was set instead.
@@ -738,10 +816,13 @@ function UploadRow({
             label="Captions"
             doneText="Uploaded as an English track."
             result={upload.captions_result}
-            working={finishing}
+            working={finishing && upload.sending_steps.includes("captions")}
             canRetry={upload.retry_steps.includes("captions")}
             retrying={retrying?.step === "captions"}
             onRetry={() => onRetry("captions")}
+            sendLabel={canSendCaptions ? "Send captions now" : null}
+            sending={sendingStep === "captions"}
+            onSend={() => onSend("captions")}
           />
         </Stack>
       )}
@@ -822,24 +903,36 @@ function StepLine({
   canRetry,
   retrying,
   onRetry,
+  sendLabel,
+  sending,
+  onSend,
 }: {
   label: string;
   doneText: string;
   result: YouTubeUpload["thumbnail_result"];
-  // The job is sending the steps now, so an earlier failure is being tried again.
+  // The job is sending this step now (an earlier failure is being tried again, or it is being
+  // sent again).
   working: boolean;
   canRetry: boolean;
   retrying: boolean;
   onRetry: () => void;
+  // The text of the send-later button, or null when it is not offered.
+  sendLabel: string | null;
+  sending: boolean;
+  onSend: () => void;
 }) {
   let text: string;
   let color = "dimmed";
-  if (working && (result === null || result.status === "failed")) {
-    text = result === null ? "Being sent." : "Trying again.";
+  if (working) {
+    if (result === null) {
+      text = "Being sent.";
+    } else {
+      text = result.status === "failed" ? "Trying again." : "Sending again.";
+    }
   } else if (result === null) {
     text = "Not sent yet.";
   } else if (result.status === "done") {
-    text = doneText;
+    text = result.message ?? doneText;
   } else if (result.status === "skipped") {
     text = result.message ?? "Not sent.";
   } else {
@@ -854,9 +947,24 @@ function StepLine({
       <Text size="xs" c={color}>
         {text}
       </Text>
+      {!working && result?.later && result.at && (
+        <Text size="xs" c="dimmed">
+          Sent later, {formatDateTime(result.at)}.
+        </Text>
+      )}
       {canRetry && (
         <Button size="compact-xs" onClick={onRetry} loading={retrying}>
           Try again
+        </Button>
+      )}
+      {sendLabel !== null && (
+        <Button
+          size="compact-xs"
+          variant="light"
+          onClick={onSend}
+          loading={sending}
+        >
+          {sendLabel}
         </Button>
       )}
     </Group>
