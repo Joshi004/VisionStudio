@@ -184,7 +184,8 @@ class Job(Base):
         # revision 0080, and the reading of a reference photo, since revision 0083, and the render
         # of one scene, since revision 0085, and the writing of thumbnail concepts, since
         # revision 0086, and the writing of the callout look, since revision 0089, and the two
-        # callout component jobs, since revision 0090.
+        # callout component jobs, since revision 0090, and the two YouTube jobs, since revision
+        # 0096.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -210,7 +211,8 @@ class Job(Base):
             "'write_thumbnail_concepts', 'write_callout_look', 'write_callout_component', "
             "'render_callout_preview', 'write_callout_scene', "
             "'time_voice_recording', 'split_voice_recording', "
-            "'splice_voice_recording', 'write_chat_reply')",
+            "'splice_voice_recording', 'write_chat_reply', "
+            "'write_youtube_draft', 'publish_youtube')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -3349,3 +3351,105 @@ class LabChatMessage(Base):
     finish_reason: Mapped[str | None] = mapped_column(default=None)
     usage: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     history_dropped: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
+
+class YouTubeChannel(Base):
+    """One connected YouTube channel (migration 0096).
+
+    `token_encrypted` is the channel's refresh token as a Fernet token (key `YOUTUBE_TOKEN_KEY`);
+    it is never returned by the API, shown or logged. `status` is `needs_reconnect` once Google
+    refuses the token. Connecting a channel that is already here replaces its token.
+    """
+
+    __tablename__ = "youtube_channel"
+    __table_args__ = (
+        CheckConstraint("status IN ('connected', 'needs_reconnect')", name="status_valid"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # YouTube's own id for the channel.
+    channel_id: Mapped[str] = mapped_column(unique=True)
+    title: Mapped[str]
+    thumbnail_url: Mapped[str | None] = mapped_column(default=None)
+    token_encrypted: Mapped[str]
+    scopes: Mapped[Any] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(default="connected", server_default=text("'connected'"))
+    connected_at: Mapped[datetime] = mapped_column(
+        default=utcnow, server_default=_CURRENT_TIMESTAMP
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class YouTubeDraft(Base):
+    """One version of a project's YouTube publish draft (migration 0096).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every AI draft
+    or owner edit is a new row with the next `version`, and a stored row is never changed.
+    `render_id` is the render it was drafted for. `inputs` holds what it was written from, so
+    staleness is worked out on read. `content` is the title, description, hashtags and the two
+    suggested declarations.
+    """
+
+    __tablename__ = "youtube_draft"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_youtube_draft_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    render_id: Mapped[int] = mapped_column(ForeignKey("story_render.id", ondelete="CASCADE"))
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class YouTubeUpload(Base):
+    """One press of Upload (migration 0096).
+
+    `sent` is a snapshot of exactly what was sent (channel id and title, title, description with
+    hashtags, privacy, the two declarations, languages, captions on or off, the thumbnail and the
+    render's file and hash), so a later edit of the draft never changes the record. The other
+    result columns are filled in by the upload job as each step finishes. `channel_row_id` is
+    NULL once the channel is disconnected; `sent` still names it.
+    """
+
+    __tablename__ = "youtube_upload"
+    __table_args__ = (
+        CheckConstraint(
+            "privacy_applied IS NULL OR privacy_applied IN ('private', 'unlisted', 'public')",
+            name="privacy_applied_valid",
+        ),
+        CheckConstraint(
+            "processing IS NULL OR processing IN ('waiting', 'processed', 'failed', 'gave_up')",
+            name="processing_valid",
+        ),
+        Index("idx_youtube_upload_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    render_id: Mapped[int] = mapped_column(ForeignKey("story_render.id", ondelete="CASCADE"))
+    channel_row_id: Mapped[int | None] = mapped_column(
+        ForeignKey("youtube_channel.id", ondelete="SET NULL"), default=None
+    )
+    draft_version: Mapped[int]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    sent: Mapped[Any] = mapped_column(JSON)
+    video_id: Mapped[str | None] = mapped_column(default=None)
+    privacy_applied: Mapped[str | None] = mapped_column(default=None)
+    processing: Mapped[str | None] = mapped_column(default=None)
+    thumbnail_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    captions_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    error: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)

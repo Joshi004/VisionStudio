@@ -66,6 +66,7 @@ from app.api import (
     video_lab,
     voice_lab,
     voice_recordings,
+    youtube,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -130,3 +131,4 @@ api_router.include_router(pipeline_board.router, tags=["pipeline-board"])
 api_router.include_router(project_cast.router, tags=["project-cast"])
 api_router.include_router(staleness.router, tags=["staleness"])
 api_router.include_router(deletion.router, tags=["deletion"])
+api_router.include_router(youtube.router, tags=["youtube"])

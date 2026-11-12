@@ -215,6 +215,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (REC-006 patches, 2026-11-06):** migration `0094`. **A tight boundary can be fixed by recording a short passage again; the app splices the accepted passages into a new version of the full recording.** (1) **`job.type` gains `splice_voice_recording`**: the CHECK is rebuilt in batch mode as in `0093` and no row changes; the downgrade deletes jobs of that type. It is `provider='local'`, restart rule `start_again`, deduped by `input.voice_recording_id` (the version being patched) (Section 5). (2) **A patch is a `voice_recording` row with `scope = 'patch'`** (Section 4.85): `base_recording_id` is the full version it patches, `version` is NULL, `text` is the region's words, and `inputs.region` holds `{first_word, last_word, join_start_s, join_end_s, lead_s, trail_s, boundaries: [{after_scene_id, before_scene_id, local_index}]}`. `first_word` and `last_word` are positions (from 0) in the base version's timed words; `join_start_s` and `join_end_s` are the stretch of the base that the patch replaces, from the middle of the pause before the region to the middle of the pause after it (the start or the end of the file at its edges). The patch is timed by `time_voice_recording` and its `voice_recording_timing` row is stored; whether it is `transcribing`, `transcription_failed`, `refused` or `accepted` is worked out on every read, not stored. `POST /api/projects/{id}/voice-recordings/full/{recording_id}/patches?origin=&first_word=&last_word=` stores one (the region is named by its words and refused with 409 when it is no longer one of the recording's regions), `POST .../patches/splice` queues the splice and `POST .../patches/{patch_id}/retry` queues a failed transcription again. (3) **A spliced version is a `voice_recording` row with `scope = 'full'` and `origin = 'splice'`:** the next `version`, `base_recording_id` the version it was made from, `patch_id` the first patch used (lowest id), `text`, `inputs.scenes` and `inputs.artifacts` copied from the base, and `inputs.patches`: for each patch `{patch_id, patch_sha256, first_word, last_word, join_start_s, join_end_s, base_start_sample, base_end_sample, patch_start_sample, patch_end_sample, gain_db, delta_samples, boundaries}`, where `delta_samples` is the change of length the patch makes, including the 360 samples (15 ms) each of its joins takes off for the crossfade. Nothing stored is overwritten: the base version, its file and every patch stay. (4) **The decisions are carried when the new version is timed:** the decisions of the base on boundaries outside every spliced region, and tight in the new version, are copied to `recording_boundary_decision` rows of the new version; a `cut_at` cut point moves by the change of length of the stretches before it, and is dropped when it is no longer inside its window. The timing job now queues the split when no tight boundary is left undecided (it was: when none was tight). (5) **A new global setting** (Section 6, group `Speech`): `recording_patch_pause_ms` (300). No new table or column.
 
+**Update (YT-002 YouTube channels, 2026-11-12):** migration `0096`. **The tables of the YouTube publishing plan (`YouTube_publish_phases.md`) and the connected channels.** (1) `job.type` gains `write_youtube_draft` (YT-003: a paid language-model call, `provider='llm'`, `never_rerun`) and `publish_youtube` (YT-004: `provider='local'`, `start_again`, one at a time); no handler is registered for either yet, and nothing queues them yet. (2) Three tables: `youtube_channel` (one connected channel; the refresh token is stored encrypted; Section 4.90), `youtube_draft` (one version of a project's publish draft; Section 4.91) and `youtube_upload` (one press of Upload with a snapshot of what was sent and the results; Section 4.92). Only `youtube_channel` is written in this phase. (3) One new setting, `youtube_default_privacy`, in the new group `YouTube` (Section 6). (4) The values `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REDIRECT_URI` and `YOUTUBE_TOKEN_KEY` are read from `.env` and never stored in the database or returned by the API. (5) Section 5 documents the JSON shapes of the new columns.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -4174,6 +4176,118 @@ CREATE INDEX idx_lab_chat_message_chat ON lab_chat_message (chat_id, id);
 CREATE INDEX idx_lab_chat_message_job ON lab_chat_message (job_id);
 ```
 
+### 4.90 `youtube_channel`
+
+*Added for YouTube publishing (migration `0096`).* One connected YouTube channel of the owner. Each Google sign-in grants one channel. Connecting a channel that is already here (same `channel_id`) replaces its token and keeps one row. The refresh token is a Fernet token made with the key `YOUTUBE_TOKEN_KEY` from `.env`; it is never returned by the API, shown or logged, and the access token is never stored. If the key changes, the token cannot be read and the channel becomes `needs_reconnect`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `channel_id` | TEXT | NOT NULL | — | YouTube's id for the channel (`UC...`). `UNIQUE` |
+| `title` | TEXT | NOT NULL | — | The channel's title, refreshed by **Check** |
+| `thumbnail_url` | TEXT | NULL | — | The channel's picture (an `https` address), for the list in Settings |
+| `token_encrypted` | TEXT | NOT NULL | — | The refresh token, encrypted |
+| `scopes` | JSON | NOT NULL | — | The scopes Google granted, a list of strings (Section 5) |
+| `status` | TEXT | NOT NULL | `'connected'` | `connected` or `needs_reconnect` (`CHECK`). `needs_reconnect` once Google refuses the token or it cannot be decrypted |
+| `connected_at` | DATETIME | NOT NULL | now | When the channel was connected or last reconnected |
+| `last_used_at` | DATETIME | NULL | — | When a call with the token last succeeded (**Check** in YT-002) |
+
+```sql
+CREATE TABLE youtube_channel (
+    id              INTEGER PRIMARY KEY,
+    channel_id      TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    thumbnail_url   TEXT,
+    token_encrypted TEXT NOT NULL,
+    scopes          JSON NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'connected',
+    connected_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at    DATETIME,
+    CONSTRAINT ck_youtube_channel_status_valid CHECK (status IN ('connected', 'needs_reconnect')),
+    CONSTRAINT uq_youtube_channel_channel_id UNIQUE (channel_id)
+);
+```
+
+### 4.91 `youtube_draft`
+
+*Added for YouTube publishing (migration `0096`; written from YT-003).* One version of a project's publish draft, following the provenance convention of Section 2.1: every AI draft or owner edit is a new row with the next `version`, and a stored row is never changed. `render_id` is the render it was drafted for. Whether it is out of date is worked out on read from `inputs` (the Story Bible, the script or the scenes changed, or another render is being published); nothing is stored.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per project |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_youtube_draft` job that wrote it; NULL for a manual version. `ON DELETE SET NULL` |
+| `render_id` | INTEGER, FK → `story_render.id` | NOT NULL | — | The render the draft is for. `ON DELETE CASCADE` |
+| `inputs` | JSON | NOT NULL | — | What it was written from (Section 5) |
+| `content` | JSON | NOT NULL | — | Title, description, hashtags and the two suggested declarations (Section 5) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE youtube_draft (
+    id         INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version    INTEGER NOT NULL,
+    source     TEXT NOT NULL,
+    job_id     INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    render_id  INTEGER NOT NULL REFERENCES story_render(id) ON DELETE CASCADE,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_youtube_draft_source_valid CHECK (source IN ('ai', 'manual')),
+    CONSTRAINT uq_youtube_draft_project_id UNIQUE (project_id, version)
+);
+CREATE INDEX idx_youtube_draft_project ON youtube_draft (project_id);
+```
+
+### 4.92 `youtube_upload`
+
+*Added for YouTube publishing (migration `0096`; written from YT-004).* One press of Upload. `sent` is a snapshot of exactly what was sent, so a later edit of the draft never changes the record. The result columns are filled in by the `publish_youtube` job as each step finishes. Deleting a channel sets `channel_row_id` to NULL; `sent` still names the channel. Deleting a project removes its upload rows and never touches the videos on YouTube.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `render_id` | INTEGER, FK → `story_render.id` | NOT NULL | — | The render that was uploaded. `ON DELETE CASCADE` |
+| `channel_row_id` | INTEGER, FK → `youtube_channel.id` | NULL | — | The channel it went to. `ON DELETE SET NULL` |
+| `draft_version` | INTEGER | NOT NULL | — | The `youtube_draft.version` the owner started from |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `publish_youtube` job. `ON DELETE SET NULL` |
+| `sent` | JSON | NOT NULL | — | The snapshot (Section 5) |
+| `video_id` | TEXT | NULL | — | YouTube's video id, stored the moment the insert returns |
+| `privacy_applied` | TEXT | NULL | — | The visibility YouTube reports after the upload: `private`, `unlisted` or `public` (`CHECK`) |
+| `processing` | TEXT | NULL | — | `waiting`, `processed`, `failed` or `gave_up` (`CHECK`). A video YouTube rejects is `failed`, with the reason in `error` |
+| `thumbnail_result` | JSON | NULL | — | `{status, message}`, `status` one of `done`, `skipped`, `failed` (Section 5) |
+| `captions_result` | JSON | NULL | — | The same shape, for the SRT captions |
+| `error` | TEXT | NULL | — | The sentence the upload failed with |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `finished_at` | DATETIME | NULL | — | |
+
+```sql
+CREATE TABLE youtube_upload (
+    id               INTEGER PRIMARY KEY,
+    project_id       INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    render_id        INTEGER NOT NULL REFERENCES story_render(id) ON DELETE CASCADE,
+    channel_row_id   INTEGER REFERENCES youtube_channel(id) ON DELETE SET NULL,
+    draft_version    INTEGER NOT NULL,
+    job_id           INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    sent             JSON NOT NULL,
+    video_id         TEXT,
+    privacy_applied  TEXT,
+    processing       TEXT,
+    thumbnail_result JSON,
+    captions_result  JSON,
+    error            TEXT,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at      DATETIME,
+    CONSTRAINT ck_youtube_upload_privacy_applied_valid
+        CHECK (privacy_applied IS NULL OR privacy_applied IN ('private', 'unlisted', 'public')),
+    CONSTRAINT ck_youtube_upload_processing_valid
+        CHECK (processing IS NULL OR processing IN ('waiting', 'processed', 'failed', 'gave_up'))
+);
+CREATE INDEX idx_youtube_upload_project ON youtube_upload (project_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -5579,6 +5693,20 @@ A provisional placement has one more optional key in the timeline: `music.provis
 
 `job.input` of a `render_scene` job: `{ "requested": "...", "scene_id": "the_warning", "timeline": { ... }, "no_music_reason": null }`. `job.output`: the story render's output plus `scene_id` and `placeholders` (their count). The handler is `RenderSceneHandler`, a subclass of `RenderStoryHandler` (`allows_placeholders=True`), so the clip trimming, the narration, the music mix and the loudness step are the same code as the full render.
 
+### YouTube publishing columns (`YouTubeChannel`, `YouTubeDraft`, `YouTubeUpload`)
+
+`youtube_channel.scopes` is a list of the scope addresses Google granted, for example `["https://www.googleapis.com/auth/youtube.force-ssl"]`. The app asks for that one scope only: it covers `channels.list`, `videos.insert`, `videos.list`, `thumbnails.set` and `captions.insert`.
+
+`youtube_draft.inputs` (written by YT-003): `{"story_bible_version": 3, "script_hash": "<sha256>", "scenes_version": 2, "render_id": 14}`. A draft is out of date when the Story Bible, the script or the scene discovery changed since, or when its `render_id` is not the render being published.
+
+`youtube_draft.content` (YT-003): `{"title": "...", "description": "...", "hashtags": ["one", "two", "three"], "made_for_kids": {"value": false, "reason": "..."}, "synthetic_media": {"value": true, "reason": "..."}}`. `hashtags` are words without `#`; the code appends them to the end of the description when it is sent. The two `value`s are the model's suggestions; the owner confirms each one when uploading and a suggestion is never sent unconfirmed.
+
+`youtube_upload.sent` (YT-004): `{"channel": {"channel_id": "UC...", "title": "..."}, "title": "...", "description": "... with the hashtags", "privacy": "private", "made_for_kids": false, "synthetic_media": true, "default_language": "en", "default_audio_language": "en", "notify_subscribers": true, "captions": true, "thumbnail": {"id": 5, "path": "...", "sha256": "..."}, "render": {"id": 14, "path": "...", "sha256": "..."}}`.
+
+`youtube_upload.thumbnail_result` and `captions_result` (YT-005): `{"status": "done"}`, `{"status": "skipped"}` or `{"status": "failed", "message": "YouTube's own message"}`. A failed step never fails the upload.
+
+The two job types: `write_youtube_draft` (YT-003) is a paid language-model call with the rules of `jobs/llm_call.py`, `provider='llm'`, restart rule `never_rerun`; `publish_youtube` (YT-004) is `provider='local'`, restart rule `start_again`, one running at a time, and continues from the first step not done (a stored `video_id` means the video is never sent twice). Their `input` and `output` shapes are documented when YT-003 and YT-004 add the handlers.
+
 ---
 
 ## 6. Global settings stored in `setting`
@@ -5643,6 +5771,7 @@ A provisional placement has one more optional key in the timeline: `music.provis
 | `max_parallel_uploads` | `2` | from 1 to 10 (group `Limits`). How many files are sent to the GPU server at once, all jobs together (`gpu_server.set_transfer_limits`, read by the dispatcher on every tick). Through one SSH tunnel every transfer shares one connection, so a higher number moves no more data. Lowering it stops no running upload. A free place goes to the job that began uploading first (`gpu_server.begin_uploads`, called by `gpu_job.note_uploading`), so each job sends all its files and submits before later jobs take their turn. |
 | `max_parallel_downloads` | `2` | from 1 to 10 (group `Limits`). How many results are fetched from the GPU server at once, all jobs together, as `max_parallel_uploads` does for uploads. |
 | `reference_selection_method` | `llm` | `llm` or `deterministic` (PHASE-033, group `Story`; a choice list on the Settings page). Who chooses a shot's reference pictures: the language model (the story provider; one paid call per shot, with the fixed rule as the fallback when its answer cannot be used or the call fails), or the fixed rule alone, which uses no model. It applies to the next choice; manifests already made are kept and are not marked out of date. |
+| `youtube_default_privacy` | `private` | `private`, `unlisted` or `public` (YT-002, group `YouTube`; a choice list on the Settings page). The visibility the Publish panel starts from for an upload; the owner can change it for each upload. The `YOUTUBE_*` values are read from `.env` only (secrets, never stored here). |
 | `max_parallel_paid_api_calls` | `8` | from 1 to 100. How many calls run on the paid inference API (Bitdeer) at once, **all kinds together**: the story stages and the Video lab and Character lab prompts, for the roles whose provider is Bitdeer |
 | `poll_interval_seconds` | `15` | |
 | `api_contract_sources` | `[{"name": "guide", "base": "gpu", "path": "/v1/guide?format=json"}, {"name": "openapi", "base": "gpu", "path": "/openapi.json"}]` | the two sources shown, no environment variable (Phase 4) |

@@ -112,6 +112,11 @@ GROUP_MUSIC = "Music"
 GROUP_GRAPHICS = "Graphics lab"
 GROUP_LIMITS = "Job limits"
 GROUP_MODEL_LIMITS = "Remote server limits per model"
+GROUP_YOUTUBE = "YouTube"
+
+# The visibility a YouTube upload starts from in the Publish panel (YT-002). The owner can change
+# it for every upload; nothing is ever sent as public unless the owner chose it.
+YOUTUBE_DEFAULT_PRIVACY_KEY = "youtube_default_privacy"
 
 # The most themes a story's Music Bible may hold, the main theme included (MUSIC-006, QM-6). The
 # model decides how many the story needs and is asked for fewer in a short story; code refuses
@@ -1224,6 +1229,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         "Qwen3.8 text: maximum parallel calls",
         "Language-model calls answered by Qwen3.8 on your remote server (the roles whose provider "
         "is the remote server). Each call counts as one job of the overall limit.",
+    ),
+    SettingSpec(
+        key=YOUTUBE_DEFAULT_PRIVACY_KEY,
+        group=GROUP_YOUTUBE,
+        label="Visibility an upload starts from",
+        help=(
+            "The visibility the Publish panel starts from when you upload a render to YouTube. "
+            "You can change it for each upload before you press Upload."
+        ),
+        value_type="string",
+        default="private",
+        choices=(
+            SettingChoice("private", "Private: only you can see it"),
+            SettingChoice("unlisted", "Unlisted: anyone with the link can see it"),
+            SettingChoice("public", "Public: everyone can see it"),
+        ),
     ),
 )
 

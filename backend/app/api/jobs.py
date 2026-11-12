@@ -99,6 +99,8 @@ JobType = Literal[
     "split_voice_recording",
     "splice_voice_recording",
     "write_chat_reply",
+    "write_youtube_draft",
+    "publish_youtube",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

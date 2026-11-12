@@ -144,6 +144,10 @@ backend container reads it, through `env_file: .env` in
 container and share the output.** Both print resolved environment values,
 including the secrets from `.env`.
 
+The `YOUTUBE_*` values (client id, client secret, redirect address and the
+token key) are secrets too. Connected channels' tokens are stored encrypted in
+the database with `YOUTUBE_TOKEN_KEY` and are never shown or logged.
+
 
 
 

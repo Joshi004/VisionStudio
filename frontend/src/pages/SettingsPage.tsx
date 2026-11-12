@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Badge,
@@ -11,15 +11,19 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import { useSearchParams } from "react-router";
 
 import { describeError } from "../api/errors";
 import { useSettings, type SettingItem } from "../api/settings";
 import { ContractSection } from "../components/settings/ContractSection";
 import { GpuConnectionTest } from "../components/settings/GpuConnectionTest";
 import { SettingRow } from "../components/settings/SettingRow";
+import { YouTubeChannelsSection } from "../components/settings/YouTubeChannelsSection";
 
 /** The group (tab) that also holds the connection test and the API contract. */
 const GPU_GROUP = "Remote server";
+/** The group (tab) that also holds the connected YouTube channels. */
+const YOUTUBE_GROUP = "YouTube";
 const SECRETS_TAB = "Secrets";
 
 /** Groups settings by their `group`, keeping the order the backend sent them in. */
@@ -35,7 +39,20 @@ function groupSettings(settings: SettingItem[]): [string, SettingItem[]][] {
 
 export function SettingsPage() {
   const { data, isLoading, isError, error } = useSettings();
-  const [chosenTab, setChosenTab] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Google sends the browser back with `?youtube=<result>`. Keep the result, open the YouTube tab
+  // and take the parameter out of the address so a reload does not show it again.
+  const [signInResult, setSignInResult] = useState<string | null>(() =>
+    searchParams.get("youtube"),
+  );
+  const [chosenTab, setChosenTab] = useState<string | null>(() =>
+    searchParams.has("youtube") ? YOUTUBE_GROUP : null,
+  );
+  useEffect(() => {
+    if (searchParams.has("youtube")) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const groups = data ? groupSettings(data.settings) : [];
   // Until a tab is chosen, the first group is shown.
@@ -85,6 +102,12 @@ export function SettingsPage() {
                     <GpuConnectionTest />
                     <ContractSection />
                   </>
+                )}
+                {group === YOUTUBE_GROUP && (
+                  <YouTubeChannelsSection
+                    signInResult={signInResult}
+                    onDismissSignInResult={() => setSignInResult(null)}
+                  />
                 )}
                 <Paper withBorder p="md" radius="md">
                   <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg" verticalSpacing="lg">
