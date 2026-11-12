@@ -63,6 +63,11 @@ NO_CONCEPT_MESSAGE: Final = "Choose at least one idea to make a picture of."
 NO_THUMBNAIL_MESSAGE: Final = "There is no such thumbnail."
 NOT_READY_MESSAGE: Final = "This thumbnail has no picture yet."
 
+# The key on a picture's `lab_image` job input that asks for the picture to be chosen once it is
+# ready (the YouTube draft, YT-003): `{"chosen_before": id or None}`, the thumbnail that was the
+# chosen one when the draft was asked for. It is chosen only if that is still the chosen one.
+CHOOSE_WHEN_READY_KEY: Final = "choose_when_ready"
+
 
 class ThumbnailError(ValueError):
     """A request that cannot be done. The message is meant to be shown to the user."""
@@ -123,8 +128,11 @@ async def _start_one(
     concept: dict[str, Any],
     options: dict[str, thumbnail_concepts.CastOption],
     mode: image_models.ImageMode,
+    choose_when_ready: dict[str, Any] | None = None,
 ) -> Thumbnail:
-    """Starts the Image lab run of one concept and adds its `thumbnails` row. Flushes only."""
+    """Starts the Image lab run of one concept and adds its `thumbnails` row. Flushes only.
+    `choose_when_ready` is written on the picture's job (see `on_thumbnail_image_stored`).
+    """
     shape = image_models.pick_aspect_ratio(*thumbnail_compose.size_for(project.orientation))
     people: list[tuple[str, dict[str, str]]] = []
     references: list[Ref] = []
@@ -141,7 +149,7 @@ async def _start_one(
     prompt = image_prompt(concept, people, shape)
     try:
         if references:
-            run, _job = await image_lab.create_qwen_edit_run(
+            run, job = await image_lab.create_qwen_edit_run(
                 session,
                 QwenEditForm(
                     prompt=prompt,
@@ -154,13 +162,19 @@ async def _start_one(
                 commit=False,
             )
         else:
-            run, _job = await image_lab.create_qwen_run(
+            run, job = await image_lab.create_qwen_run(
                 session,
                 QwenLabForm(prompt=prompt, mode=mode, aspect_ratio=shape, seed=None, steps=None),
                 commit=False,
             )
     except LabInputError as exc:
         raise ThumbnailError(f"Idea {index + 1}: {exc}") from exc
+    if choose_when_ready is not None:
+        # The job has not run yet, and nothing rewrites its input afterwards.
+        job.input = {
+            **(job.input if isinstance(job.input, dict) else {}),
+            CHOOSE_WHEN_READY_KEY: choose_when_ready,
+        }
     row = Thumbnail(
         project_id=project.id,
         concept_version=version,
@@ -175,11 +189,16 @@ async def _start_one(
 
 
 async def start_images(
-    session: AsyncSession, project: Project, concept_version: int, indexes: list[int]
+    session: AsyncSession,
+    project: Project,
+    concept_version: int,
+    indexes: list[int],
+    *,
+    choose_when_ready: dict[str, Any] | None = None,
 ) -> list[Thumbnail]:
     """Starts one picture for each chosen concept of a version, and commits. Everything is
     checked before any run is made, and a failure undoes all of them. The caller nudges the
-    dispatcher. Raises ThumbnailError.
+    dispatcher. `choose_when_ready` is written on each picture's job. Raises ThumbnailError.
     """
     chosen = sorted(set(indexes))
     if not chosen:
@@ -199,7 +218,14 @@ async def start_images(
         for index in chosen:
             started.append(
                 await _start_one(
-                    session, project, concept_version, index, _concept_at(row, index), options, mode
+                    session,
+                    project,
+                    concept_version,
+                    index,
+                    _concept_at(row, index),
+                    options,
+                    mode,
+                    choose_when_ready,
                 )
             )
     except ThumbnailError:
@@ -213,6 +239,47 @@ async def start_images(
         concept_version,
     )
     return started
+
+
+async def chosen_id(session: AsyncSession, project_id: int) -> int | None:
+    """The id of the project's chosen thumbnail, or None when none is chosen."""
+    statement = (
+        select(Thumbnail.id)
+        .where(Thumbnail.project_id == project_id, Thumbnail.chosen.is_(True))
+        .limit(1)
+    )
+    return (await session.execute(statement)).scalars().first()
+
+
+async def start_follow_up_picture(
+    project_id: int, concept_version: int, then_picture: dict[str, Any]
+) -> bool:
+    """Called (best effort) by the job that wrote thumbnail concepts for a YouTube draft, once
+    the concepts are stored: starts the picture of the first concept, to be chosen when it is
+    ready. Does nothing (False) when the chosen thumbnail is no longer the one that was chosen
+    when the draft was asked for, because the owner has chosen one since. The caller nudges the
+    dispatcher when this returns True.
+    """
+    before = then_picture.get("chosen_before")
+    async with SessionLocal() as session:
+        project = await session.get(Project, project_id)
+        if project is None or await chosen_id(session, project_id) != before:
+            await session.commit()
+            return False
+        try:
+            await start_images(
+                session,
+                project,
+                concept_version,
+                [0],
+                choose_when_ready={"chosen_before": before},
+            )
+        except ThumbnailError as exc:
+            _logger.warning(
+                "project %d: the thumbnail picture was not started: %s", project_id, exc
+            )
+            return False
+    return True
 
 
 # --- Drawing the headline ------------------------------------------------------------------
@@ -306,9 +373,32 @@ async def on_thumbnail_image_stored(run_id: int) -> bool:
             _logger.warning("thumbnail %d: %s", row.id, exc)
             await session.commit()
             return False
+        await _choose_if_asked(session, row, run_id)
         await session.commit()
     _logger.info("thumbnail %d: finished from run %d", row.id, run_id)
     return True
+
+
+async def _choose_if_asked(session: AsyncSession, row: Thumbnail, run_id: int) -> None:
+    """Makes the finished thumbnail the chosen one when its picture's job asks for it
+    (`choose_when_ready`) and the chosen thumbnail is still the one that was chosen when it was
+    asked for. A choice the owner made meanwhile is never replaced. Does not commit.
+    """
+    run = await session.get(LabRun, run_id)
+    job = await session.get(Job, run.job_id) if run is not None and run.job_id is not None else None
+    marker = (
+        job.input.get(CHOOSE_WHEN_READY_KEY)
+        if job is not None and isinstance(job.input, dict)
+        else None
+    )
+    if not isinstance(marker, dict) or row.path is None:
+        return
+    if await chosen_id(session, row.project_id) != marker.get("chosen_before"):
+        return
+    await session.execute(
+        update(Thumbnail).where(Thumbnail.project_id == row.project_id).values(chosen=False)
+    )
+    row.chosen = True
 
 
 # --- Editing and choosing ------------------------------------------------------------------

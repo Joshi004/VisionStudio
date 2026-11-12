@@ -179,6 +179,10 @@ SAVING_CALLOUT_LOOK: Final = "saving the callout look"
 TAKING_FRAMES: Final = "taking frames from the video"
 SAVING_THUMBNAIL_CONCEPTS: Final = "saving the thumbnail ideas"
 
+# --- Running: the YouTube draft (YT-003) --------------------------------------------------
+# `write_youtube_draft` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_YOUTUBE_DRAFT: Final = "saving the YouTube draft"
+
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 # `write_shot_graphic_brief` (EXG-004) uses the same three phases, one call per graphic shot.

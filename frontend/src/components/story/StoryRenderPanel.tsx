@@ -24,6 +24,7 @@ import {
 } from "../../api/storyRenders";
 import { formatBytes, formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { useProjectPanels } from "./projectPanels";
 import { SceneRenderList } from "./SceneRenderList";
 
 type StoryRenderPanelProps = {
@@ -269,6 +270,18 @@ export function StoryRenderPanel({
   const { data, isLoading, isError, error } = useStoryRenders(projectId);
   const render = useRenderStory(projectId);
   const [showAll, setShowAll] = useState(false);
+  const { openPanel } = useProjectPanels();
+
+  // On the board this goes to the "Publish to YouTube" step; on the classic page it opens the
+  // panel and scrolls to it.
+  const openPublishPanel = () => {
+    openPanel("youtube");
+    requestAnimationFrame(() =>
+      document
+        .getElementById("pipeline-step-youtube")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  };
 
   const renders = data?.renders ?? [];
   const newest = renders[0] ?? null;
@@ -366,6 +379,13 @@ export function StoryRenderPanel({
               <Anchor href={newest.url} download size="xs">
                 Download
               </Anchor>
+              <Button
+                size="compact-xs"
+                variant="default"
+                onClick={openPublishPanel}
+              >
+                Publish to YouTube
+              </Button>
             </Group>
             {newest.reasons.map((text) => (
               <Text key={text} size="xs" c="yellow.8">

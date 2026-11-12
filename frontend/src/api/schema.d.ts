@@ -6099,6 +6099,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/youtube": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Youtube Panel
+         * @description What the Publish panel shows. `render_number` is the render being published (the newest
+         *     when left out).
+         */
+        get: operations["get_youtube_panel_api_projects__project_id__youtube_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/youtube/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Youtube Draft
+         * @description Saves the owner's edit of the title, description and hashtags as the next version.
+         */
+        put: operations["save_youtube_draft_api_projects__project_id__youtube_draft_put"];
+        /**
+         * Run Youtube Draft
+         * @description Starts the job that writes the draft for a render, and makes sure the render has a
+         *     thumbnail. If a draft is already being written, its job is returned and no second job is
+         *     made.
+         */
+        post: operations["run_youtube_draft_api_projects__project_id__youtube_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -18598,6 +18645,179 @@ export interface components {
             missing: string[];
             /** Invalid */
             invalid: components["schemas"]["ConfigProblemOut"][];
+        };
+        /**
+         * YouTubeDraftEditIn
+         * @description The owner's edit. The service checks it again with the model's rules.
+         */
+        YouTubeDraftEditIn: {
+            /** Render Number */
+            render_number: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Hashtags */
+            hashtags: string[];
+        };
+        /**
+         * YouTubeDraftOut
+         * @description One version of the draft.
+         */
+        YouTubeDraftOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /** Render Number */
+            render_number: number | null;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Hashtags */
+            hashtags: string[];
+            /** Description Sent */
+            description_sent: string;
+            made_for_kids: components["schemas"]["YouTubeSuggestionOut"];
+            synthetic_media: components["schemas"]["YouTubeSuggestionOut"];
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Feedback */
+            feedback: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** YouTubeDraftRunIn */
+        YouTubeDraftRunIn: {
+            /** Render Number */
+            render_number: number;
+            /** Feedback */
+            feedback?: string | null;
+        };
+        /** YouTubeDraftRunOut */
+        YouTubeDraftRunOut: {
+            /** Job Id */
+            job_id: number;
+            /** Thumbnail Note */
+            thumbnail_note: string | null;
+        };
+        /** YouTubePanelOut */
+        YouTubePanelOut: {
+            /** Renders */
+            renders: components["schemas"]["YouTubeRenderOut"][];
+            /** Render Number */
+            render_number: number | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            draft: components["schemas"]["YouTubeDraftOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            thumbnail: components["schemas"]["YouTubeThumbnailOut"];
+            /** Channels */
+            channels: components["schemas"]["YouTubeChannelOut"][];
+            /** Default Channel Row Id */
+            default_channel_row_id: number | null;
+            /**
+             * Default Privacy
+             * @enum {string}
+             */
+            default_privacy: "private" | "unlisted" | "public";
+            /** Uploads */
+            uploads: components["schemas"]["YouTubeUploadOut"][];
+        };
+        /**
+         * YouTubeRenderOut
+         * @description A finished render that can be published.
+         */
+        YouTubeRenderOut: {
+            /** Render Number */
+            render_number: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "current" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration S */
+            duration_s: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Is Short */
+            is_short: boolean;
+        };
+        /**
+         * YouTubeSuggestionOut
+         * @description The model's suggested answer to a declaration. The owner confirms it before uploading.
+         */
+        YouTubeSuggestionOut: {
+            /** Value */
+            value: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * YouTubeThumbnailOut
+         * @description The thumbnail that would be uploaded: the project's chosen one.
+         */
+        YouTubeThumbnailOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "out_of_date" | "making" | "none";
+            /** Thumbnail Id */
+            thumbnail_id: number | null;
+            /** Url */
+            url: string | null;
+            /** Headline */
+            headline: string | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Reasons */
+            reasons: string[];
+            /** Error */
+            error: string | null;
+        };
+        /**
+         * YouTubeUploadOut
+         * @description An earlier press of Upload.
+         */
+        YouTubeUploadOut: {
+            /** Id */
+            id: number;
+            /** Render Number */
+            render_number: number;
+            /** Channel Title */
+            channel_title: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Video Id */
+            video_id: string | null;
+            /** Privacy Applied */
+            privacy_applied: ("private" | "unlisted" | "public") | null;
         };
         /** SkippedOut */
         app__api__character_definitions__SkippedOut: {
@@ -32420,6 +32640,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_youtube_panel_api_projects__project_id__youtube_get: {
+        parameters: {
+            query?: {
+                render_number?: number | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YouTubePanelOut"];
+                };
+            };
+            /** @description No such project or render. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_youtube_draft_api_projects__project_id__youtube_draft_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["YouTubeDraftEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YouTubePanelOut"];
+                };
+            };
+            /** @description No such project or render. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible or the render is missing, the note or the edit cannot be used, or a draft is being written. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_youtube_draft_api_projects__project_id__youtube_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["YouTubeDraftRunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YouTubeDraftRunOut"];
+                };
+            };
+            /** @description No such project or render. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible or the render is missing, the note or the edit cannot be used, or a draft is being written. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

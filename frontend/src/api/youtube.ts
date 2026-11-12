@@ -1,11 +1,27 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef } from "react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { invalidateAfterJobAction } from "./jobs";
+import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { PROJECTS_KEY, isValidProjectId } from "./projects";
 import type { components } from "./schema";
+import { thumbnailsKey } from "./thumbnails";
 
 export type YouTubeConfig = components["schemas"]["YouTubeConfig"];
 export type YouTubeChannel = components["schemas"]["YouTubeChannelOut"];
+export type YouTubePanel = components["schemas"]["YouTubePanelOut"];
+export type YouTubeDraft = components["schemas"]["YouTubeDraftOut"];
+export type YouTubeRender = components["schemas"]["YouTubeRenderOut"];
+export type YouTubeThumbnail = components["schemas"]["YouTubeThumbnailOut"];
+export type YouTubeUpload = components["schemas"]["YouTubeUploadOut"];
+export type YouTubePrivacy = YouTubePanel["default_privacy"];
 
 const CONFIG_KEY = ["youtube", "config"] as const;
 const CHANNELS_KEY = ["youtube", "channels"] as const;
@@ -99,5 +115,154 @@ export function useDisconnectYouTubeChannel() {
       return data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CHANNELS_KEY }),
+  });
+}
+
+// --- The publish draft of a project --------------------------------------------------------
+
+/** Every Publish panel query of a project starts with this key, whatever render it shows. */
+export function youtubePanelKey(projectId: number) {
+  return [...PROJECTS_KEY, projectId, "youtube"] as const;
+}
+
+function youtubePanelRenderKey(projectId: number, renderNumber: number | null) {
+  return [...youtubePanelKey(projectId), renderNumber] as const;
+}
+
+async function fetchPanel(projectId: number, renderNumber: number | null) {
+  const { data, error, response } = await api.GET(
+    "/api/projects/{project_id}/youtube",
+    {
+      params: {
+        path: { project_id: projectId },
+        query: renderNumber === null ? {} : { render_number: renderNumber },
+      },
+    },
+  );
+  if (!data) {
+    throw new ApiError(
+      detailMessage(
+        error,
+        `Could not load the YouTube draft (HTTP ${response.status}).`,
+      ),
+      response.status,
+    );
+  }
+  return data;
+}
+
+/** Extra loads after the last busy one: the thumbnail's picture starts a moment after its ideas end. */
+const GRACE_POLLS = 2;
+
+/**
+ * What the Publish panel shows for one render (the newest when `renderNumber` is null). It is
+ * loaded again every few seconds while the draft is being written or a thumbnail is being made,
+ * and twice more after that, because the picture of a new thumbnail is started just after its
+ * ideas are stored and nothing is "making" in between.
+ */
+export function useYouTubePanel(projectId: number, renderNumber: number | null) {
+  const gracePolls = useRef(0);
+  return useQuery({
+    queryKey: youtubePanelRenderKey(projectId, renderNumber),
+    queryFn: () => fetchPanel(projectId, renderNumber),
+    enabled: isValidProjectId(projectId),
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) => {
+      const state = query.state.data;
+      const busy =
+        isJobActive(state?.job) || state?.thumbnail.status === "making";
+      if (busy) {
+        gracePolls.current = GRACE_POLLS;
+        return ACTIVE_POLL_MS;
+      }
+      if (gracePolls.current > 0) {
+        gracePolls.current -= 1;
+        return ACTIVE_POLL_MS;
+      }
+      return false;
+    },
+  });
+}
+
+/** Starts the job that writes the draft (and makes sure the render has a thumbnail). */
+export function useDraftForYouTube(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      renderNumber: number;
+      feedback: string | null;
+    }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/youtube/draft",
+        {
+          params: { path: { project_id: projectId } },
+          body: {
+            render_number: input.renderNumber,
+            feedback: input.feedback,
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not start the draft (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: thumbnailsKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** Saves the owner's edit as the next version of the draft. */
+export function useSaveYouTubeDraft(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      renderNumber: number;
+      title: string;
+      description: string;
+      hashtags: string[];
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/youtube/draft",
+        {
+          params: { path: { project_id: projectId } },
+          body: {
+            render_number: input.renderNumber,
+            title: input.title,
+            description: input.description,
+            hashtags: input.hashtags,
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not save the draft (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: (state, input) => {
+      queryClient.setQueryData(
+        youtubePanelRenderKey(projectId, input.renderNumber),
+        state,
+      );
+      return queryClient.invalidateQueries({
+        queryKey: youtubePanelKey(projectId),
+      });
+    },
   });
 }

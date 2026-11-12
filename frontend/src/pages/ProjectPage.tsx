@@ -50,6 +50,7 @@ import { ShotPromptsPanel } from "../components/story/ShotPromptsPanel";
 import { ShotReferencesPanel } from "../components/story/ShotReferencesPanel";
 import { ShotTakesPanel } from "../components/story/ShotTakesPanel";
 import { StoryRenderPanel } from "../components/story/StoryRenderPanel";
+import { YouTubePublishPanel } from "../components/story/YouTubePublishPanel";
 import { SpeechUnitsPanel } from "../components/story/SpeechUnitsPanel";
 import { StageList } from "../components/story/StageList";
 import { StalenessPanel } from "../components/story/StalenessPanel";
@@ -318,6 +319,13 @@ export function ProjectPage() {
               projectId={project.id}
               isExplainer={project.kind === "explainer"}
             />
+          </CollapsiblePanel>
+          <CollapsiblePanel
+            panelKey="youtube"
+            anchorId="pipeline-step-youtube"
+            title="Publish to YouTube"
+          >
+            <YouTubePublishPanel projectId={project.id} />
           </CollapsiblePanel>
           <StageList />
         </>

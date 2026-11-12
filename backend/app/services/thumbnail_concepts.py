@@ -381,7 +381,8 @@ def _feedback_on(text: str, newest: ThumbnailConcepts | None) -> user_feedback.F
     )
 
 
-async def _scene_titles(session: AsyncSession, project_id: int) -> list[str]:
+async def scene_titles(session: AsyncSession, project_id: int) -> list[str]:
+    """The titles of the project's newest scene discovery, in order; empty when it has none."""
     row = await discovery.latest(session, "scenes", project_id)
     content = row.content if row is not None else None
     scenes = content.get("scenes") if isinstance(content, dict) else None
@@ -393,24 +394,36 @@ async def _scene_titles(session: AsyncSession, project_id: int) -> list[str]:
     return titles
 
 
-async def start_run(session: AsyncSession, project: Project, *, feedback: str | None = None) -> Job:
+async def start_run(
+    session: AsyncSession,
+    project: Project,
+    *,
+    feedback: str | None = None,
+    render: StoryRender | None = None,
+    then_picture: dict[str, Any] | None = None,
+) -> Job:
     """Queues the job that writes the concepts, from a copy of what it is made from, and
     commits. If a job is already waiting or running for the project, that job is returned and no
     new one is made; a note is never dropped silently, so a note is refused in that case.
 
     `feedback` is the owner's note on the newest version: the model writes the four concepts
-    again with the note and that version in its request. Raises ThumbnailConceptsError.
+    again with the note and that version in its request. `render` is the render whose frames
+    are used (the newest when None). `then_picture` (`{"chosen_before": id or None}`) asks the
+    job, once the concepts are stored, to make the picture of the first concept and choose it
+    when it is ready, unless the chosen thumbnail changed meanwhile (the YouTube draft, YT-003).
+    Raises ThumbnailConceptsError.
     """
     bible = await story_bible.latest(session, project.id)
     if bible is None:
         raise ThumbnailConceptsError(NO_BIBLE_MESSAGE)
     note = _feedback_on(feedback, await latest(session, project.id)) if feedback else None
     options = await cast_options(session, project)
-    render = await newest_render(session, project.id)
+    if render is None:
+        render = await newest_render(session, project.id)
     context = writer.context_for_model(
         bible.content,
         project.orientation,
-        await _scene_titles(session, project.id),
+        await scene_titles(session, project.id),
         [option.for_model() for option in options],
     )
     job_input: dict[str, Any] = {
@@ -421,6 +434,8 @@ async def start_run(session: AsyncSession, project: Project, *, feedback: str | 
     }
     if note is not None:
         job_input["feedback"] = note.for_job()
+    if then_picture is not None:
+        job_input["then_picture"] = then_picture
     job, created = await store.create_job(
         session, project_id=project.id, type=JOB_TYPE, provider="llm", input=job_input
     )

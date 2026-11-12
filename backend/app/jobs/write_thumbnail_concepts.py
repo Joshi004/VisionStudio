@@ -31,10 +31,10 @@ from typing import Any, Final
 from app.core.urls import docker_mapped
 from app.db.models import StoryRender
 from app.db.session import SessionLocal
-from app.jobs import llm_call, phase_writer, phases, store
+from app.jobs import dispatcher, llm_call, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
-from app.services import ffmpeg, llm_target, thumbnail_compose, user_feedback
+from app.services import ffmpeg, llm_target, thumbnail_compose, thumbnails, user_feedback
 from app.services import thumbnail_concept_writer as writer
 from app.services import thumbnail_concepts as concepts_service
 from app.services.llm_target import VISION_MODEL_KEY
@@ -250,6 +250,26 @@ class WriteThumbnailConceptsHandler(JobHandler):
             len(jpegs),
             outcome.usage,
         )
+        await self._start_follow_up_picture(job_id, project_id, row.version, job_input)
+
+    @staticmethod
+    async def _start_follow_up_picture(
+        job_id: int, project_id: int, version: int, job_input: dict[str, Any]
+    ) -> None:
+        """When the job was started for a YouTube draft (`then_picture`), starts the picture of
+        the first concept. Best effort: a failure never fails the concepts (they are stored), and
+        the owner can make a picture in the Thumbnails panel.
+        """
+        then_picture = job_input.get("then_picture")
+        if not isinstance(then_picture, dict):
+            return
+        try:
+            started = await thumbnails.start_follow_up_picture(project_id, version, then_picture)
+        except Exception:
+            _logger.exception("job %d: the thumbnail picture could not be started", job_id)
+            return
+        if started:
+            dispatcher.nudge()
 
     # --- Small helpers ------------------------------------------------------------------
 

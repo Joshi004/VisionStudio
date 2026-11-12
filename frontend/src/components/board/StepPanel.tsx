@@ -100,6 +100,10 @@ const MusicBiblePanel = lazyNamed(() => import("../music/MusicBiblePanel"), "Mus
 const MusicThemesPanel = lazyNamed(() => import("../music/MusicThemesPanel"), "MusicThemesPanel");
 const MusicPlanPanel = lazyNamed(() => import("../music/MusicPlanPanel"), "MusicPlanPanel");
 const ThumbnailsPanel = lazyNamed(() => import("../story/ThumbnailsPanel"), "ThumbnailsPanel");
+const YouTubePublishPanel = lazyNamed(
+  () => import("../story/YouTubePublishPanel"),
+  "YouTubePublishPanel",
+);
 const CalloutPlanPanel = lazyNamed(() => import("../story/CalloutPlanPanel"), "CalloutPlanPanel");
 const GraphicThemePanel = lazyNamed(
   () => import("../story/GraphicThemePanel"),
@@ -151,6 +155,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <StoryPipelinePanel projectId={projectId} />;
       case "thumbnail":
         return <ThumbnailsPanel projectId={projectId} />;
+      case "youtube":
+        return <YouTubePublishPanel projectId={projectId} />;
       case "out_of_date":
         return <StalenessPanel projectId={projectId} />;
       case "story_bible":

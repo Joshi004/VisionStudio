@@ -123,6 +123,7 @@ def register_handlers() -> None:
     from app.jobs.write_shot_graphic_scene import WriteShotGraphicSceneHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
     from app.jobs.write_thumbnail_concepts import WriteThumbnailConceptsHandler
+    from app.jobs.write_youtube_draft import WriteYouTubeDraftHandler
 
     handlers.register(GenerateLabVideoHandler())
     handlers.register(WriteLabVideoPromptHandler())
@@ -190,6 +191,7 @@ def register_handlers() -> None:
     handlers.register(WriteShotGraphicSceneHandler())
     handlers.register(RenderShotGraphicHandler())
     handlers.register(WriteThumbnailConceptsHandler())
+    handlers.register(WriteYouTubeDraftHandler())
     handlers.register(TimeVoiceRecordingHandler())
     handlers.register(SplitVoiceRecordingHandler())
     handlers.register(SpliceVoiceRecordingHandler())
