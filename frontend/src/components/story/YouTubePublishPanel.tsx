@@ -64,18 +64,20 @@ const THUMBNAIL_STATUS: Record<
   none: { label: "None yet", color: "gray" },
 };
 
-type Answer = "yes" | "no" | "";
+type Answer = "yes" | "no";
 
 /** The owner's answers to the two declarations, for one version of the draft. */
 type Answers = { version: number | null; kids: Answer; synthetic: Answer };
 
-const NO_ANSWERS: Answers = { version: null, kids: "", synthetic: "" };
+// The declarations start at "Made for kids: No" and "Contains realistic AI content: Yes" (F-2).
+// The owner can change either one; a new version of the draft starts at these again.
+const DEFAULT_ANSWERS: Answers = { version: null, kids: "no", synthetic: "yes" };
 
 /**
  * Publishing a finished render to YouTube. The app writes a draft (title, description, hashtags,
- * a suggestion for the two declarations) and a thumbnail; the owner edits everything, picks the
- * channel and visibility, and answers both declarations. Upload is disabled with its reason
- * until all of that is done, asks for a confirmation, and sends the render; the Uploads card
+ * tags) and a thumbnail; the owner edits everything, picks the channel and visibility, and may
+ * change the two declarations, which start at No and Yes. Upload is disabled with its reason
+ * until the rest is done, asks for a confirmation, and sends the render; the Uploads card
  * follows each upload, including the thumbnail and the captions that are sent once YouTube has
  * processed the video.
  */
@@ -100,7 +102,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
     value: boolean;
   } | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [answers, setAnswers] = useState<Answers>(NO_ANSWERS);
+  const [answers, setAnswers] = useState<Answers>(DEFAULT_ANSWERS);
   const [channelChoice, setChannelChoice] = useState<string | null>(null);
   const [privacyChoice, setPrivacyChoice] = useState<YouTubePrivacy | null>(
     null,
@@ -115,9 +117,11 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const blocked = data?.blocked_reason ?? null;
   const job = data?.job ?? null;
 
-  // Nothing is preselected, and a new version of the draft starts with nothing answered.
+  // A new version of the draft starts again at the defaults.
   const current: Answers =
-    draft !== null && answers.version === draft.version ? answers : NO_ANSWERS;
+    draft !== null && answers.version === draft.version
+      ? answers
+      : DEFAULT_ANSWERS;
   const answer = (patch: Partial<Answers>) =>
     setAnswers({
       ...current,
@@ -181,7 +185,6 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
         draft,
         dirty,
         writing,
-        answers: current,
         channelValue,
       })
     : "Loading.";
@@ -190,9 +193,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
     if (
       data?.render_number == null ||
       draft === null ||
-      channelValue === null ||
-      current.kids === "" ||
-      current.synthetic === ""
+      channelValue === null
     ) {
       return;
     }
@@ -216,9 +217,9 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
             <Title order={4}>Publish to YouTube</Title>
             <Text size="sm" c="dimmed">
               Pick a finished render and the app drafts its title, description,
-              hashtags and thumbnail. You check and edit everything, answer two
-              questions YouTube asks, and choose the channel. Nothing is
-              uploaded unless you press Upload.
+              hashtags, tags and thumbnail. You check and edit everything,
+              check the two questions YouTube asks, and choose the channel.
+              Nothing is uploaded unless you press Upload.
             </Text>
           </Stack>
           {isLoading && <Loader size="sm" />}
@@ -382,14 +383,12 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
             <Declaration
               label="Made for kids"
               question="Is this video made for children as its main audience? (YouTube asks this for every video.)"
-              suggestion={draft.made_for_kids}
               value={current.kids}
               onChange={(value) => answer({ kids: value })}
             />
             <Declaration
               label="Contains realistic AI content"
               question="Does it show realistic people, places, events or voices that were made or changed by AI, so that a viewer could take them for real?"
-              suggestion={draft.synthetic_media}
               value={current.synthetic}
               onChange={(value) => answer({ synthetic: value })}
             />
@@ -507,9 +506,14 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
               ? "The captions will be uploaded too."
               : "No captions will be uploaded."}
           </Text>
+          <Text size="sm">
+            Made for kids: <strong>{current.kids === "yes" ? "Yes" : "No"}</strong>
+            . Contains realistic AI content:{" "}
+            <strong>{current.synthetic === "yes" ? "Yes" : "No"}</strong>.
+          </Text>
           <Text size="sm" c="dimmed">
-            Your answers to the two questions are sent with it, and YouTube may
-            act on them. You can follow the upload below.
+            These two answers are sent with the video, and YouTube may act on
+            them. You can follow the upload below.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirmUpload(false)}>
@@ -564,10 +568,9 @@ function whyNotUpload(input: {
   draft: YouTubeDraft | null;
   dirty: boolean;
   writing: boolean;
-  answers: Answers;
   channelValue: string | null;
 }): string | null {
-  const { data, draft, dirty, writing, answers, channelValue } = input;
+  const { data, draft, dirty, writing, channelValue } = input;
   if (draft === null) {
     return "Write the draft first.";
   }
@@ -595,12 +598,6 @@ function whyNotUpload(input: {
     )
   ) {
     return "This render is already being uploaded to that channel.";
-  }
-  if (answers.kids === "") {
-    return 'Answer "Made for kids".';
-  }
-  if (answers.synthetic === "") {
-    return 'Answer "Contains realistic AI content".';
   }
   return null;
 }
@@ -1087,13 +1084,11 @@ function ThumbnailCard({
 function Declaration({
   label,
   question,
-  suggestion,
   value,
   onChange,
 }: {
   label: string;
   question: string;
-  suggestion: { value: boolean; reason: string };
   value: Answer;
   onChange: (value: Answer) => void;
 }) {
@@ -1104,17 +1099,12 @@ function Declaration({
         description={question}
         value={value}
         onChange={(next) => onChange(next as Answer)}
-        withAsterisk
       >
         <Group mt="xs">
           <Radio value="yes" label="Yes" />
           <Radio value="no" label="No" />
         </Group>
       </Radio.Group>
-      <Text size="xs" c="dimmed">
-        The model suggests {suggestion.value ? "Yes" : "No"}:{" "}
-        {suggestion.reason} It is your answer that counts.
-      </Text>
     </Stack>
   );
 }

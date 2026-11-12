@@ -6130,7 +6130,7 @@ export interface paths {
         get?: never;
         /**
          * Save Youtube Draft
-         * @description Saves the owner's edit of the title, description and hashtags as the next version.
+         * @description Saves the owner's edit of the title, description, hashtags and tags as the next version.
          */
         put: operations["save_youtube_draft_api_projects__project_id__youtube_draft_put"];
         /**
@@ -18725,6 +18725,8 @@ export interface components {
             description: string;
             /** Hashtags */
             hashtags: string[];
+            /** Tags */
+            tags: string[];
         };
         /**
          * YouTubeDraftOut
@@ -18748,10 +18750,10 @@ export interface components {
             description: string;
             /** Hashtags */
             hashtags: string[];
+            /** Tags */
+            tags: string[];
             /** Description Sent */
             description_sent: string;
-            made_for_kids: components["schemas"]["YouTubeSuggestionOut"];
-            synthetic_media: components["schemas"]["YouTubeSuggestionOut"];
             /** Out Of Date */
             out_of_date: boolean;
             /** Reasons */
@@ -18876,16 +18878,6 @@ export interface components {
              * @default false
              */
             later: boolean;
-        };
-        /**
-         * YouTubeSuggestionOut
-         * @description The model's suggested answer to a declaration. The owner confirms it before uploading.
-         */
-        YouTubeSuggestionOut: {
-            /** Value */
-            value: boolean;
-            /** Reason */
-            reason: string;
         };
         /**
          * YouTubeThumbnailOut

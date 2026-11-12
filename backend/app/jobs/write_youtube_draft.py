@@ -1,6 +1,6 @@
-"""The `write_youtube_draft` job: a language model writes the title, the description, the hashtags
-and a suggested answer for "made for kids" and for "realistic AI content", and code checks them
-(YT-003, `YouTube_publish_phases.md` §4.5).
+"""The `write_youtube_draft` job: a language model writes the title, the description, the
+hashtags and the tags, and code checks them (YT-003, `YouTube_publish_phases.md` §4.5; the two
+declarations are not drafted since YTF-002).
 
 `services/youtube_draft.start_run` creates the job with a copy of everything it needs, taken when
 the button was pressed: `render_id` (the render the draft is for), `context` (what the model is

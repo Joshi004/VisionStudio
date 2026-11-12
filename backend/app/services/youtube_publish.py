@@ -8,8 +8,8 @@ a `youtube_upload` row whose `sent` is a snapshot of exactly what will be sent, 
 `sent`:
 
     {"channel": {"row_id", "channel_id", "title"}, "title", "description" (with the hashtags),
-     "hashtags", "privacy", "made_for_kids", "synthetic_media", "default_language",
-     "default_audio_language", "notify_subscribers", "captions",
+     "hashtags" (lowercase), "tags", "privacy", "made_for_kids", "synthetic_media",
+     "default_language", "default_audio_language", "notify_subscribers", "captions",
      "thumbnail": {"id", "path", "sha256"},
      "render": {"id", "number", "path", "size_bytes", "sha256"}}
 
@@ -257,6 +257,13 @@ async def start_upload(
             min_hashtags=0,
             allow_empty_description=True,
         )
+        # A version made before tags existed has none, and sends none.
+        tags = writer.check_tags(
+            list(content.get("tags", [])),
+            minimum=0,
+            maximum=None,
+            max_chars=writer.TAGS_MAX_CHARS,
+        )
     except ValueError as exc:
         raise YouTubePublishError(f"The draft cannot be uploaded: {exc}") from exc
 
@@ -296,6 +303,7 @@ async def start_upload(
         "title": title,
         "description": writer.description_with_hashtags(description, hashtags),
         "hashtags": hashtags,
+        "tags": tags,
         "privacy": privacy,
         "made_for_kids": made_for_kids,
         "synthetic_media": synthetic_media,

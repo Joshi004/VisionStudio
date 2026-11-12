@@ -9,7 +9,8 @@ The project's draft, all under `/projects/{project_id}/youtube`:
    and whether it is out of date, the thumbnail, the connected channels and the earlier uploads.
 2. `POST .../draft` starts the `write_youtube_draft` job for a render (and makes sure the render
    has a thumbnail). The body may hold `feedback`, the owner's note on the newest draft.
-3. `PUT .../draft` saves the owner's edit of the title, description and hashtags as a new version.
+3. `PUT .../draft` saves the owner's edit of the title, description, hashtags and tags as a new
+   version.
 4. `POST .../uploads` (YT-004) checks everything again, stores a snapshot of what will be sent and
    queues the `publish_youtube` job; `POST .../uploads/{upload_id}/retry` tries a failed upload
    again, finishes the thumbnail and captions of one that gave up waiting (YT-005), or, with
@@ -212,13 +213,6 @@ class YouTubeRenderOut(BaseModel):
     captions_burned: bool
 
 
-class YouTubeSuggestionOut(BaseModel):
-    """The model's suggested answer to a declaration. The owner confirms it before uploading."""
-
-    value: bool
-    reason: str
-
-
 class YouTubeDraftOut(BaseModel):
     """One version of the draft."""
 
@@ -231,10 +225,10 @@ class YouTubeDraftOut(BaseModel):
     description: str
     # Words without the `#`.
     hashtags: list[str]
+    # The search tags (`snippet.tags`); empty for a version that has none.
+    tags: list[str]
     # The description as YouTube will get it: the text, then the hashtags on one line.
     description_sent: str
-    made_for_kids: YouTubeSuggestionOut
-    synthetic_media: YouTubeSuggestionOut
     out_of_date: bool
     reasons: list[str]
     # The owner's note this version was made with, or None.
@@ -363,7 +357,7 @@ class YouTubeUploadIn(BaseModel):
     channel_row_id: int = Field(ge=1, le=_MAX_INT)
     draft_version: int = Field(ge=1, le=_MAX_INT)
     privacy: Privacy
-    # None means not answered, which is refused: the owner must choose yes or no.
+    # The panel starts them at No and Yes (F-2). None means not sent, which is refused.
     made_for_kids: bool | None = None
     synthetic_media: bool | None = None
     notify_subscribers: bool = True
@@ -399,6 +393,8 @@ class YouTubeDraftEditIn(BaseModel):
     title: str = Field(max_length=1000)
     description: str = Field(max_length=20_000)
     hashtags: list[str] = Field(max_length=50)
+    # Required, so an edit cannot drop the tags by leaving the field out.
+    tags: list[str] = Field(max_length=100)
 
 
 def _job_out(job: Job | None) -> DiscoveryJobOut | None:
@@ -412,7 +408,8 @@ def _job_out(job: Job | None) -> DiscoveryJobOut | None:
 def _draft_out(entry: youtube_draft.DraftEntry) -> YouTubeDraftOut:
     row = entry.row
     content = row.content
-    hashtags = list(content["hashtags"])
+    # Hashtags are lowercase (F-3): an older version in CamelCase is shown as it will be sent.
+    hashtags = [tag.lower() for tag in content["hashtags"]]
     return YouTubeDraftOut(
         version=row.version,
         source=cast(Literal["ai", "manual"], row.source),
@@ -421,9 +418,8 @@ def _draft_out(entry: youtube_draft.DraftEntry) -> YouTubeDraftOut:
         title=content["title"],
         description=content["description"],
         hashtags=hashtags,
+        tags=list(content.get("tags", [])),
         description_sent=draft_writer.description_with_hashtags(content["description"], hashtags),
-        made_for_kids=YouTubeSuggestionOut.model_validate(content["made_for_kids"]),
-        synthetic_media=YouTubeSuggestionOut.model_validate(content["synthetic_media"]),
         out_of_date=bool(entry.reasons),
         reasons=entry.reasons,
         feedback=user_feedback.text_of(row.inputs),
@@ -612,7 +608,7 @@ async def run_youtube_draft(
 async def save_youtube_draft(
     project_id: int, body: YouTubeDraftEditIn, session: SessionDep
 ) -> YouTubePanelOut:
-    """Saves the owner's edit of the title, description and hashtags as the next version."""
+    """Saves the owner's edit of the title, description, hashtags and tags as the next version."""
     project = await load_project(session, project_id)
     try:
         await youtube_draft.save_manual(
@@ -622,6 +618,7 @@ async def save_youtube_draft(
             title=body.title,
             description=body.description,
             hashtags=body.hashtags,
+            tags=body.tags,
         )
     except youtube_draft.NoSuchRenderError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

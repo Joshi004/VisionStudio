@@ -136,14 +136,19 @@ def build_service(credentials: Credentials) -> Resource:
 
 
 def insert_body(sent: dict[str, Any]) -> dict[str, Any]:
-    """The `videos.insert` body, from the upload's snapshot (Y-5). No tags, no category."""
+    """The `videos.insert` body, from the upload's snapshot (Y-5, F-4). No category. The tags
+    are sent only when there are some: a snapshot made before tags existed has none.
+    """
+    snippet: dict[str, Any] = {
+        "title": sent["title"],
+        "description": sent["description"],
+        "defaultLanguage": sent["default_language"],
+        "defaultAudioLanguage": sent["default_audio_language"],
+    }
+    if sent.get("tags"):
+        snippet["tags"] = list(sent["tags"])
     return {
-        "snippet": {
-            "title": sent["title"],
-            "description": sent["description"],
-            "defaultLanguage": sent["default_language"],
-            "defaultAudioLanguage": sent["default_audio_language"],
-        },
+        "snippet": snippet,
         "status": {
             "privacyStatus": sent["privacy"],
             "selfDeclaredMadeForKids": sent["made_for_kids"],

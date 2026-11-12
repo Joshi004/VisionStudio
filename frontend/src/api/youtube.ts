@@ -385,6 +385,7 @@ export function useSaveYouTubeDraft(projectId: number) {
       title: string;
       description: string;
       hashtags: string[];
+      tags: string[];
     }) => {
       const { data, error, response } = await api.PUT(
         "/api/projects/{project_id}/youtube/draft",
@@ -395,6 +396,7 @@ export function useSaveYouTubeDraft(projectId: number) {
             title: input.title,
             description: input.description,
             hashtags: input.hashtags,
+            tags: input.tags,
           },
         },
       );

@@ -4,7 +4,8 @@ edits, the thumbnail that goes with it, and what the Publish panel shows (YT-003
 
 Every version is a new `youtube_draft` row and a stored row is never changed (the artifact
 provenance convention, DATABASE_STRUCTURE.md Section 2.1). `content` is
-`{title, description, hashtags, made_for_kids, synthetic_media}` (`services/youtube_draft_writer`).
+`{title, description, hashtags, tags}` (`services/youtube_draft_writer`). An older version may also
+carry `made_for_kids` and `synthetic_media`; they are ignored, and a missing `tags` reads as `[]`.
 `inputs` records what the draft was written from, so whether it is out of date is worked out when
 it is read and never stored:
 
@@ -188,7 +189,12 @@ def _feedback_on(text: str, newest: YouTubeDraft | None) -> user_feedback.Feedba
         raise YouTubeDraftError(str(exc)) from exc
     if newest is None:
         raise YouTubeDraftError(NO_DRAFT_MESSAGE)
-    return user_feedback.Feedback(text=note, previous=newest.content, base_version=newest.version)
+    # Only the fields that are still drafted: an older version may carry the two suggestions.
+    previous = {
+        key: newest.content.get(key, [] if key == "tags" else "")
+        for key in ("title", "description", "hashtags", "tags")
+    }
+    return user_feedback.Feedback(text=note, previous=previous, base_version=newest.version)
 
 
 # --- The thumbnail ---------------------------------------------------------------------------
@@ -338,11 +344,13 @@ async def save_manual(
     title: str,
     description: str,
     hashtags: list[str],
+    tags: list[str],
 ) -> YouTubeDraft:
     """Stores the owner's edit of the newest draft as the next version (`source` is `manual`),
     and commits. The checks are the model's, except that the description may be empty and there
-    may be no hashtags. What the draft was written from is copied from the version that was
-    edited, so an edit never makes an old draft look new; the two suggestions are copied too.
+    may be no hashtags or tags (and tags may fill YouTube's whole limit). What the draft was
+    written from is copied from the version that was edited, so an edit never makes an old draft
+    look new.
     `render_number` is the render being published. Refused while a job is writing the draft.
     Raises YouTubeDraftError.
     """
@@ -361,6 +369,9 @@ async def save_manual(
             min_hashtags=0,
             allow_empty_description=True,
         )
+        checked_search_tags = writer.check_tags(
+            tags, minimum=0, maximum=None, max_chars=writer.TAGS_MAX_CHARS
+        )
     except ValueError as exc:
         raise YouTubeDraftError(str(exc)) from exc
     inputs: dict[str, Any] = {
@@ -374,8 +385,7 @@ async def save_manual(
         "title": checked_title,
         "description": checked_description,
         "hashtags": checked_tags,
-        "made_for_kids": newest.content["made_for_kids"],
-        "synthetic_media": newest.content["synthetic_media"],
+        "tags": checked_search_tags,
     }
     row = await _add_version(
         session,

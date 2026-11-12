@@ -16,12 +16,15 @@ import type { YouTubeDraft } from "../../api/youtube";
 import {
   DESCRIPTION_MAX_BYTES,
   HASHTAGS_MAX,
+  TAGS_MAX_CHARS,
   TITLE_MAX_CHARS,
   descriptionBytes,
   draftProblems,
   normalizedDescription,
   normalizedHashtag,
   normalizedTitle,
+  parseTags,
+  tagsLength,
   titleLength,
 } from "./youtubeLimits";
 
@@ -29,6 +32,7 @@ export type YouTubeDraftEdit = {
   title: string;
   description: string;
   hashtags: string[];
+  tags: string[];
 };
 
 type YouTubeDraftEditorProps = {
@@ -43,7 +47,7 @@ type YouTubeDraftEditorProps = {
 };
 
 /**
- * The title, the description and the hashtags of a draft, with YouTube's limits shown as the
+ * The title, the description, the hashtags and the tags of a draft, with YouTube's limits shown as the
  * owner types. Saving adds a version written by the owner; a draft that breaks a limit cannot be
  * saved. The panel remounts it with the draft's version as the key, so a new version starts clean.
  */
@@ -58,16 +62,20 @@ export function YouTubeDraftEditor({
   const [title, setTitle] = useState(draft.title);
   const [description, setDescription] = useState(draft.description);
   const [hashtags, setHashtags] = useState<string[]>(draft.hashtags);
+  const [tagsText, setTagsText] = useState(draft.tags.join(", "));
+  const tags = parseTags(tagsText);
 
   const changed =
     normalizedTitle(title) !== draft.title ||
     normalizedDescription(description) !== draft.description ||
-    hashtags.join(" ") !== draft.hashtags.join(" ");
+    hashtags.join(" ") !== draft.hashtags.join(" ") ||
+    tags.join(",") !== draft.tags.join(",");
   useEffect(() => {
     onDirtyChange(changed);
   }, [changed, onDirtyChange]);
 
-  const problems = draftProblems({ title, description, hashtags });
+  const problems = draftProblems({ title, description, hashtags, tags });
+  const tagChars = tagsLength(tags);
   const titleChars = titleLength(title);
   const bytes = descriptionBytes(description, hashtags);
 
@@ -75,6 +83,7 @@ export function YouTubeDraftEditor({
     setTitle(draft.title);
     setDescription(draft.description);
     setHashtags(draft.hashtags);
+    setTagsText(draft.tags.join(", "));
   };
 
   return (
@@ -108,6 +117,17 @@ export function YouTubeDraftEditor({
           setHashtags(values.map(normalizedHashtag).filter((tag) => tag !== ""))
         }
       />
+      <Textarea
+        label="Tags"
+        description={`${tagChars} of ${TAGS_MAX_CHARS} characters, as YouTube counts them. Separate tags with commas; they help people find the video and are not shown on it.`}
+        autosize
+        minRows={2}
+        maxRows={6}
+        value={tagsText}
+        disabled={busy}
+        error={tagChars > TAGS_MAX_CHARS}
+        onChange={(event) => setTagsText(event.currentTarget.value)}
+      />
       {changed && problems.length > 0 && (
         <Alert color="red" title="This cannot be saved yet">
           <List size="sm">
@@ -124,7 +144,7 @@ export function YouTubeDraftEditor({
       )}
       <Group>
         <Button
-          onClick={() => onSave({ title, description, hashtags })}
+          onClick={() => onSave({ title, description, hashtags, tags })}
           loading={saving}
           disabled={busy || !changed || problems.length > 0}
         >

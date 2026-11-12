@@ -3386,8 +3386,8 @@ class YouTubeDraft(Base):
     Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every AI draft
     or owner edit is a new row with the next `version`, and a stored row is never changed.
     `render_id` is the render it was drafted for. `inputs` holds what it was written from, so
-    staleness is worked out on read. `content` is the title, description, hashtags and the two
-    suggested declarations.
+    staleness is worked out on read. `content` is the title, description, hashtags and tags (a
+    version made before YTF-002 may also carry the two suggested declarations, which are ignored).
     """
 
     __tablename__ = "youtube_draft"

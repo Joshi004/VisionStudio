@@ -5,13 +5,13 @@ Pure functions, no I/O.
 
 One call reads the Story Bible, the script, the scene titles and what the render is (story or
 explainer, orientation, length, whether YouTube will show it as a Short), and answers the title,
-the description (without hashtags), the hashtags, and a suggested yes or no with a one-line
-reason for "made for kids" and for "altered or synthetic content that looks real". The owner
-confirms both answers before anything is uploaded; a suggestion is never sent as it is.
+the description (without hashtags), the hashtags (lowercase) and the tags. The two declarations
+("made for kids", "contains realistic AI content") are not drafted: the panel has fixed defaults
+(YTF-002).
 
-The same checks (`check_fields`) are used for the model's answer and for the owner's edit, so a
-draft that is stored never breaks a YouTube limit. The stored content is
-`{title, description, hashtags, made_for_kids, synthetic_media}`; see `check_content`.
+The same checks (`check_fields`, `check_tags`) are used for the model's answer and for the
+owner's edit, so a draft that is stored never breaks a YouTube limit. The stored content is
+`{title, description, hashtags, tags}`; see `check_content`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,14 @@ DESCRIPTION_MAX_BYTES: Final = 5000
 # What the model is asked for, and what the owner may keep.
 HASHTAGS_MIN_AI: Final = 3
 HASHTAGS_MAX: Final = 5
-REASON_MAX_CHARS: Final = 300
+# Tags (`snippet.tags`). YouTube's total is 500 characters, counted by `tags_length`. The model
+# is held to a lower total so the owner has room to add some. One tag is limited to 100
+# characters: Google's reference gives no limit per tag, so this is a safe assumption (YFQ-3).
+TAGS_MIN_AI: Final = 5
+TAGS_MAX_AI: Final = 15
+TAGS_MAX_CHARS_AI: Final = 400
+TAGS_MAX_CHARS: Final = 500
+TAG_MAX_CHARS: Final = 100
 # A short is a vertical or square video of up to three minutes.
 SHORT_MAX_SECONDS: Final = 180
 
@@ -50,8 +57,7 @@ DESCRIPTION_TARGET_CHARS: Final = 1500
 
 LIMIT_NAMES: Final = {
     "title": TITLE_MAX_CHARS,
-    "made_for_kids.reason": REASON_MAX_CHARS,
-    "synthetic_media.reason": REASON_MAX_CHARS,
+    "tags[]": TAG_MAX_CHARS,
 }
 
 _HASHTAG = re.compile(r"[A-Za-z0-9_]+")
@@ -79,24 +85,16 @@ inputs do not give.
 
 THE HASHTAGS
 - "hashtags" is a list of {min_tags} to {max_tags} words, each one word of letters, digits or \
-underscores, with no "#" and no spaces. Join the words of a phrase together (for example \
-"SpaceHistory"). Each one must describe the video directly. Put the most important one first.
+underscores, with no "#" and no spaces. Write every hashtag in lowercase, and join the words of \
+a phrase together (for example "spacehistory"). Each one must describe the video directly. Put \
+the most important one first.
 
-THE TWO DECLARATIONS
-You only suggest an answer; the owner decides. Each is an object with "value" (true or false) \
-and "reason" (one short sentence that says why).
-- "made_for_kids": true only when the video is made for children as its main audience: it is \
-meant for children, or children are clearly the main viewers it speaks to, as with nursery \
-rhymes, children's cartoons or learning videos for young children. It is false for a video \
-that merely has animation, a fairy tale feel or a character a child might like, when the \
-audience is general or adult. When in doubt because the audience is mixed, say false and give \
-the reason.
-- "synthetic_media": true when the video shows realistic-looking people, places, events or \
-voices that were made or changed by artificial intelligence, so that a viewer could take them \
-for real. It is false when the pictures are clearly not real: animation, illustration, cartoon, \
-fantasy creatures, obviously stylised art, or text and graphics only. Use the visual style and \
-genre of the Story Bible: the pictures of these videos are made by an AI model, so decide by \
-how realistic the style is. Using AI only for the script, captions or editing does not count.
+THE TAGS
+- "tags" is a list of {min_tag_count} to {max_tag_count} search tags: the words and short phrases \
+people would type into YouTube to find this video. Put the most important one first. A tag has \
+no "#", no comma and no "<" or ">", and is at most {tag_max} characters. Do not repeat the title \
+word for word, and do not repeat a tag. All the tags together, counting one comma between each \
+two, must be at most {tags_total} characters.
 
 THE FACTS OF THE VIDEO
 - "kind" says whether it is a story or an explainer, and "orientation" and "duration_s" give its \
@@ -111,10 +109,9 @@ for the rest, and do not say the video ends where the script given ends.
 
 _SHAPE: Final = """{"title": "The Day the Lighthouse Went Dark", "description": "A keeper \
 finds the lamp has failed on the night of the worst storm in fifty years. A short story about \
-duty and fear.", "hashtags": ["ShortStory", "Lighthouse", "Storm"], "made_for_kids": \
-{"value": false, "reason": "It is a suspense story for a general audience."}, \
-"synthetic_media": {"value": true, "reason": "The pictures look like real people and a real \
-coast, made by an AI model."}} (the values here only show the form, never copy them)"""
+duty and fear.", "hashtags": ["shortstory", "lighthouse", "storm"], "tags": ["short story", \
+"lighthouse keeper", "storm at sea", "suspense", "duty and fear"]} (the values here only show \
+the form, never copy them)"""
 
 
 def _instructions() -> str:
@@ -124,6 +121,10 @@ def _instructions() -> str:
             description_target=DESCRIPTION_TARGET_CHARS,
             min_tags=HASHTAGS_MIN_AI,
             max_tags=HASHTAGS_MAX,
+            min_tag_count=TAGS_MIN_AI,
+            max_tag_count=TAGS_MAX_AI,
+            tag_max=TAG_MAX_CHARS,
+            tags_total=TAGS_MAX_CHARS_AI,
             feedback=user_feedback.INSTRUCTION,
             length_rule=length_rule(LIMIT_NAMES),
         )
@@ -265,7 +266,9 @@ def _hashtags(value: object, *, minimum: int) -> list[str]:
                 f'The hashtag "{item}" must be one word of letters, digits or underscores, '
                 "with no spaces."
             )
-        if word.lower() in (tag.lower() for tag in tags):
+        # Hashtags are stored in lowercase (F-3), so an older CamelCase draft goes up lowercase.
+        word = word.lower()
+        if word in tags:
             raise ValueError(f'The hashtag "{word}" appears more than once.')
         tags.append(word)
     if len(tags) < minimum:
@@ -300,27 +303,58 @@ def check_fields(
     return checked_title, checked_description, checked_tags
 
 
-def _suggestion(value: object, name: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f'The "{name}" answer was missing.')
-    answer = value.get("value")
-    if not isinstance(answer, bool):
-        raise ValueError(f'The "{name}" value must be true or false.')
-    reason = value.get("reason")
-    text = " ".join(reason.split()) if isinstance(reason, str) else ""
-    if not text:
-        raise ValueError(f'The "{name}" answer needs a reason.')
-    if len(text) > REASON_MAX_CHARS:
+def tags_length(tags: list[str]) -> int:
+    """The length of the tags as YouTube counts it (`snippet.tags`): the characters of every tag,
+    one comma between each two, and two more for a tag that contains a space (it is counted as
+    if it were in quotation marks).
+    """
+    quotes = sum(2 for tag in tags if " " in tag)
+    commas = max(len(tags) - 1, 0)
+    return sum(len(tag) for tag in tags) + quotes + commas
+
+
+def check_tags(value: object, *, minimum: int, maximum: int | None, max_chars: int) -> list[str]:
+    """The tags as they will be stored, or ValueError with a sentence fit for the owner and for
+    the model's corrected retry. Each tag is trimmed with its spaces collapsed. `maximum` is the
+    most tags (None: no limit) and `max_chars` the most `tags_length` allows.
+    """
+    if not isinstance(value, list):
+        raise ValueError('The "tags" were missing or were not a list.')
+    tags: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("A tag was not text.")
+        tag = " ".join(item.split())
+        if not tag:
+            raise ValueError("A tag is empty.")
+        if "<" in tag or ">" in tag or "," in tag:
+            raise ValueError(f'The tag "{tag}" cannot hold the characters < > or a comma.')
+        if _has_bad_control(tag):
+            raise ValueError(f'The tag "{tag}" has a character that cannot be sent to YouTube.')
+        if len(tag) > TAG_MAX_CHARS:
+            raise ValueError(
+                f'The tag "{tag}" was {len(tag)} characters; the most allowed is {TAG_MAX_CHARS}.'
+            )
+        if tag.lower() in (other.lower() for other in tags):
+            raise ValueError(f'The tag "{tag}" appears more than once.')
+        tags.append(tag)
+    if len(tags) < minimum:
+        raise ValueError(f"There must be at least {minimum} tags; there were {len(tags)}.")
+    if maximum is not None and len(tags) > maximum:
+        raise ValueError(f"There can be at most {maximum} tags; there were {len(tags)}.")
+    size = tags_length(tags)
+    if size > max_chars:
         raise ValueError(
-            f'The "{name}" reason was {len(text)} characters; the most allowed is '
-            f"{REASON_MAX_CHARS}."
+            f"The tags are {size} characters as YouTube counts them (the commas count, and a tag "
+            f"with a space counts two more); the most allowed is {max_chars}."
         )
-    return {"value": answer, "reason": text}
+    return tags
 
 
 def check_content(answer: dict[str, Any], *, min_hashtags: int = HASHTAGS_MIN_AI) -> dict[str, Any]:
     """The model's answer as the stored content, or ValueError with a message fit for the
-    owner and for the model's corrected retry.
+    owner and for the model's corrected retry. Keys that are not drafted any more (the two
+    declarations) are ignored.
     """
     title, description, hashtags = check_fields(
         answer.get("title"),
@@ -329,10 +363,10 @@ def check_content(answer: dict[str, Any], *, min_hashtags: int = HASHTAGS_MIN_AI
         min_hashtags=min_hashtags,
         allow_empty_description=False,
     )
-    return {
-        "title": title,
-        "description": description,
-        "hashtags": hashtags,
-        "made_for_kids": _suggestion(answer.get("made_for_kids"), "made_for_kids"),
-        "synthetic_media": _suggestion(answer.get("synthetic_media"), "synthetic_media"),
-    }
+    tags = check_tags(
+        answer.get("tags"),
+        minimum=TAGS_MIN_AI,
+        maximum=TAGS_MAX_AI,
+        max_chars=TAGS_MAX_CHARS_AI,
+    )
+    return {"title": title, "description": description, "hashtags": hashtags, "tags": tags}
