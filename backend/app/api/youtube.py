@@ -219,8 +219,13 @@ class YouTubeDraftOut(BaseModel):
     version: int
     source: Literal["ai", "manual"]
     job_id: int | None
-    # The render the draft was written for; None when that render is no longer listed.
+    # The render the draft was written for; None while it is still being made, when it was not
+    # made, or when that render is no longer listed.
     render_number: int | None
+    # Where that render stands (`made`, `rendering`, `not_made`), and whether the draft was
+    # started by pressing Render (YTF-004). `render_state` is None when it is no longer listed.
+    render_state: Literal["made", "rendering", "not_made"] | None
+    started_at_render: bool
     title: str
     description: str
     # Words without the `#`.
@@ -316,10 +321,21 @@ class YouTubeUploadOut(BaseModel):
     progress: YouTubeUploadProgressOut | None
 
 
+class YouTubeRenderingOut(BaseModel):
+    """The story render that is waiting or running (YTF-004)."""
+
+    job_id: int
+    status: JobStatus
+    phase: str | None
+
+
 class YouTubePanelOut(BaseModel):
     renders: list[YouTubeRenderOut]
-    # The render being published; None when the project has no render.
+    # The finished render being published; None when the project has no render, or when the
+    # render being made now (`rendering`) is the one shown.
     render_number: int | None
+    # The render that is waiting or running, or None. While it is, Upload is refused.
+    rendering: YouTubeRenderingOut | None
     # Why a draft cannot be written yet, or None.
     blocked_reason: str | None
     draft: YouTubeDraftOut | None
@@ -335,7 +351,8 @@ class YouTubePanelOut(BaseModel):
 class YouTubeDraftRunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    render_number: int = Field(ge=1, le=_MAX_INT)
+    # A finished render, or null for the render being made now (YTF-004).
+    render_number: int | None = Field(default=None, ge=1, le=_MAX_INT)
     # The owner's note on the newest draft. `user_feedback.clean` checks it again.
     feedback: str | None = Field(default=None, max_length=user_feedback.MAX_CHARS)
 
@@ -389,7 +406,8 @@ class YouTubeDraftEditIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    render_number: int = Field(ge=1, le=_MAX_INT)
+    # A finished render, or null for the render being made now (YTF-004).
+    render_number: int | None = Field(default=None, ge=1, le=_MAX_INT)
     title: str = Field(max_length=1000)
     description: str = Field(max_length=20_000)
     hashtags: list[str] = Field(max_length=50)
@@ -415,6 +433,8 @@ def _draft_out(entry: youtube_draft.DraftEntry) -> YouTubeDraftOut:
         source=cast(Literal["ai", "manual"], row.source),
         job_id=row.job_id,
         render_number=entry.render_number,
+        render_state=entry.render_state,
+        started_at_render=entry.started_at_render,
         title=content["title"],
         description=content["description"],
         hashtags=hashtags,
@@ -547,6 +567,15 @@ async def _panel(
             for choice in state.renders
         ],
         render_number=state.selected.row.render_number if state.selected is not None else None,
+        rendering=(
+            YouTubeRenderingOut(
+                job_id=state.rendering.id,
+                status=cast(JobStatus, state.rendering.status),
+                phase=state.rendering.phase,
+            )
+            if state.rendering is not None
+            else None
+        ),
         blocked_reason=state.blocked_reason,
         draft=_draft_out(state.draft) if state.draft is not None else None,
         job=_job_out(state.job),

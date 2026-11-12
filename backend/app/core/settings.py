@@ -118,6 +118,12 @@ GROUP_YOUTUBE = "YouTube"
 # it for every upload; nothing is ever sent as public unless the owner chose it.
 YOUTUBE_DEFAULT_PRIVACY_KEY = "youtube_default_privacy"
 
+# Whether pressing Render also starts the YouTube draft and thumbnails (YTF-004, F-1). A string
+# setting with two choices, because settings are only text or whole numbers.
+YOUTUBE_AUTO_DRAFT_KEY = "youtube_auto_draft"
+YOUTUBE_AUTO_DRAFT_ON = "on"
+YOUTUBE_AUTO_DRAFT_OFF = "off"
+
 # The most themes a story's Music Bible may hold, the main theme included (MUSIC-006, QM-6). The
 # model decides how many the story needs and is asked for fewer in a short story; code refuses
 # an answer above this.
@@ -1244,6 +1250,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
             SettingChoice("private", "Private: only you can see it"),
             SettingChoice("unlisted", "Unlisted: anyone with the link can see it"),
             SettingChoice("public", "Public: everyone can see it"),
+        ),
+    ),
+    SettingSpec(
+        key=YOUTUBE_AUTO_DRAFT_KEY,
+        group=GROUP_YOUTUBE,
+        label="Write the YouTube draft and thumbnails when a render starts",
+        help=(
+            "When on, pressing Render also starts the YouTube draft (one language-model call) "
+            "and, when the project has no current chosen thumbnail, the four thumbnails, so they "
+            "are ready about when the video is. Nothing is uploaded: Upload stays your press."
+        ),
+        value_type="string",
+        default=YOUTUBE_AUTO_DRAFT_ON,
+        choices=(
+            SettingChoice(YOUTUBE_AUTO_DRAFT_ON, "On: start them when a render starts"),
+            SettingChoice(YOUTUBE_AUTO_DRAFT_OFF, "Off: draft from the Publish panel"),
         ),
     ),
 )

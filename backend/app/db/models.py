@@ -3405,7 +3405,11 @@ class YouTubeDraft(Base):
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
-    render_id: Mapped[int] = mapped_column(ForeignKey("story_render.id", ondelete="CASCADE"))
+    # NULL for a draft started when Render was pressed (YTF-004, migration 0097): the render did
+    # not exist yet, and `inputs.render_job_id` names the render job instead.
+    render_id: Mapped[int | None] = mapped_column(
+        ForeignKey("story_render.id", ondelete="CASCADE"), default=None
+    )
     inputs: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

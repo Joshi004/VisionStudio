@@ -1117,7 +1117,8 @@ async def timing_sources(session: AsyncSession, project: Project) -> RenderSourc
 
 async def start_render(session: AsyncSession, project: Project) -> Job:
     """Queues the job that renders the story, with the timeline as it is now, and commits. If a
-    render is already waiting or running, that job is returned. Raises StoryRendersError.
+    render is already waiting or running, that job is returned. For a new job it also starts the
+    YouTube draft and thumbnails, best effort (`_start_youtube_draft`). Raises StoryRendersError.
     """
     active = await store.latest_job(session, project.id, JOB_TYPE)
     if active is not None and active.status in store.ACTIVE_STATUSES:
@@ -1163,7 +1164,43 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
             len(plan.timeline["shots"]),
             plan.timeline["total_frames"],
         )
+        await _start_youtube_draft(session, project, job)
     return job
+
+
+async def _start_youtube_draft(session: AsyncSession, project: Project, job: Job) -> None:
+    """Starts the YouTube draft and the thumbnail work for the render job just queued (F-1,
+    YTF-004), so they are ready about when the video is. Best effort: the render job is already
+    committed, and any error here is logged and changes nothing about it or about the answer of
+    the route or the pipeline. Uploads nothing.
+    """
+    project_id, job_id = project.id, job.id
+    try:
+        # Imported here: `youtube_draft` imports this module. The dispatcher imports the
+        # handlers, which import the services.
+        from app.jobs import dispatcher
+        from app.services import youtube_draft
+
+        draft_job_id = await youtube_draft.start_for_render_job(session, project, job)
+        if draft_job_id is not None:
+            _logger.info(
+                "render job %d of project %d: YouTube draft job %d started",
+                job_id,
+                project_id,
+                draft_job_id,
+            )
+            dispatcher.nudge()
+    except Exception:
+        _logger.exception(
+            "render job %d of project %d: the YouTube draft could not be started",
+            job_id,
+            project_id,
+        )
+        # Whatever the draft had begun is dropped; the caller's objects are read again, since a
+        # rollback expires them.
+        await session.rollback()
+        await session.refresh(job)
+        await session.refresh(project)
 
 
 # --- Storing a render -----------------------------------------------------------------------

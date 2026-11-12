@@ -64,6 +64,7 @@ _STALE_DRAFT_MESSAGE: Final = (
     "The draft changed since the page loaded. Check it and press Upload again."
 )
 _NO_DRAFT_MESSAGE: Final = "There is no draft yet. Write the draft first."
+RENDERING_MESSAGE: Final = "The video is still rendering."
 
 
 class YouTubePublishError(ValueError):
@@ -228,13 +229,18 @@ async def start_upload(
     captions: bool,
 ) -> youtube_draft.UploadEntry:
     """Checks, stores the snapshot, queues the job and commits. Returns the upload, which is the
-    one already waiting or running when there is one for this render and channel. Raises
+    one already waiting or running when there is one for this render and channel. Refused while
+    a render is being made (`RENDERING_MESSAGE`). Raises
     `youtube_draft.NoSuchRenderError` (no such render) or `YouTubePublishError` (a check failed).
     """
     if not youtube_auth.config_status().ready:
         raise YouTubePublishError(
             "YouTube is not set up. Fix the values listed in Settings, then try again."
         )
+    # The draft and the thumbnails start with the render (YTF-004), so they can be ready before
+    # the video is: nothing is sent while a render is still being made.
+    if await youtube_draft.active_render_job(session, project.id) is not None:
+        raise YouTubePublishError(RENDERING_MESSAGE)
     channel = await _connected_channel(session, channel_row_id)
     if made_for_kids is None:
         raise YouTubePublishError('Answer "Made for kids" before uploading.')

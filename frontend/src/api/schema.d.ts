@@ -18734,7 +18734,7 @@ export interface components {
          */
         YouTubeDraftEditIn: {
             /** Render Number */
-            render_number: number;
+            render_number?: number | null;
             /** Title */
             title: string;
             /** Description */
@@ -18760,6 +18760,10 @@ export interface components {
             job_id: number | null;
             /** Render Number */
             render_number: number | null;
+            /** Render State */
+            render_state: ("made" | "rendering" | "not_made") | null;
+            /** Started At Render */
+            started_at_render: boolean;
             /** Title */
             title: string;
             /** Description */
@@ -18785,7 +18789,7 @@ export interface components {
         /** YouTubeDraftRunIn */
         YouTubeDraftRunIn: {
             /** Render Number */
-            render_number: number;
+            render_number?: number | null;
             /** Feedback */
             feedback?: string | null;
         };
@@ -18802,6 +18806,7 @@ export interface components {
             renders: components["schemas"]["YouTubeRenderOut"][];
             /** Render Number */
             render_number: number | null;
+            rendering: components["schemas"]["YouTubeRenderingOut"] | null;
             /** Blocked Reason */
             blocked_reason: string | null;
             draft: components["schemas"]["YouTubeDraftOut"] | null;
@@ -18850,6 +18855,21 @@ export interface components {
             has_captions: boolean;
             /** Captions Burned */
             captions_burned: boolean;
+        };
+        /**
+         * YouTubeRenderingOut
+         * @description The story render that is waiting or running (YTF-004).
+         */
+        YouTubeRenderingOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
         };
         /**
          * YouTubeRetryIn

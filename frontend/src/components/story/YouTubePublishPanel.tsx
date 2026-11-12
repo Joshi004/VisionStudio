@@ -60,7 +60,14 @@ type Answers = { version: number | null; kids: Answer; synthetic: Answer };
 
 // The declarations start at "Made for kids: No" and "Contains realistic AI content: Yes" (F-2).
 // The owner can change either one; a new version of the draft starts at these again.
-const DEFAULT_ANSWERS: Answers = { version: null, kids: "no", synthetic: "yes" };
+const DEFAULT_ANSWERS: Answers = {
+  version: null,
+  kids: "no",
+  synthetic: "yes",
+};
+
+// The Select's value for the render that is being made now (the others are render numbers).
+const RENDERING_VALUE = "rendering";
 
 /**
  * Publishing a finished render to YouTube. The app writes a draft (title, description, hashtags,
@@ -106,6 +113,12 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const writing = isJobActive(data?.job);
   const blocked = data?.blocked_reason ?? null;
   const job = data?.job ?? null;
+  // The story render that is waiting or running: its draft and thumbnails are already being
+  // made, and the panel shows them while Upload waits for the video.
+  const rendering = data?.rendering ?? null;
+  const showingRendering = data?.render_number === null && rendering !== null;
+  const hasSomethingToPublish =
+    data !== undefined && (data.renders.length > 0 || rendering !== null);
 
   // A new version of the draft starts again at the defaults.
   const current: Answers =
@@ -120,7 +133,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
     });
 
   const startDraft = () => {
-    if (data?.render_number == null) {
+    if (data === undefined) {
       return;
     }
     const trimmed = note.trim();
@@ -186,6 +199,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
         writing,
         picturesMaking,
         channelValue,
+        rendering: rendering !== null,
       })
     : ["Loading."];
 
@@ -216,10 +230,11 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
           <Stack gap={2}>
             <Title order={4}>Publish to YouTube</Title>
             <Text size="sm" c="dimmed">
-              Pick a finished render and the app drafts its title, description,
-              hashtags, tags and four thumbnails. You check and edit everything,
-              check the two questions YouTube asks, and choose the channel.
-              Nothing is uploaded unless you press Upload.
+              The app drafts the title, description, hashtags, tags and four
+              thumbnails for a render, starting when Render is pressed. You
+              check and edit everything, check the two questions YouTube asks,
+              and choose the channel. Nothing is uploaded unless you press
+              Upload, which waits for the video to be finished.
             </Text>
           </Stack>
           {isLoading && <Loader size="sm" />}
@@ -233,25 +248,48 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
               {blocked}
             </Text>
           )}
-          {data && data.renders.length > 0 && (
+          {data && hasSomethingToPublish && (
             <Select
               label="Render to publish"
               allowDeselect={false}
-              data={data.renders.map((render) => ({
-                value: String(render.render_number),
-                label: [
-                  `Render ${render.render_number}`,
-                  render.is_short ? "a Short" : null,
-                  render.status === "out_of_date" ? "out of date" : null,
-                ]
-                  .filter((part) => part !== null)
-                  .join(", "),
-              }))}
+              data={[
+                ...(rendering !== null
+                  ? [{ value: RENDERING_VALUE, label: "Render being made now" }]
+                  : []),
+                ...data.renders.map((render) => ({
+                  value: String(render.render_number),
+                  label: [
+                    `Render ${render.render_number}`,
+                    render.is_short ? "a Short" : null,
+                    render.status === "out_of_date" ? "out of date" : null,
+                  ]
+                    .filter((part) => part !== null)
+                    .join(", "),
+                })),
+              ]}
               value={
-                data.render_number === null ? null : String(data.render_number)
+                showingRendering
+                  ? RENDERING_VALUE
+                  : data.render_number === null
+                    ? null
+                    : String(data.render_number)
               }
-              onChange={(value) => value && setRenderNumber(Number(value))}
+              onChange={(value) => {
+                if (value === RENDERING_VALUE) {
+                  // Back to the default, which is the render being made.
+                  setRenderNumber(null);
+                } else if (value) {
+                  setRenderNumber(Number(value));
+                }
+              }}
             />
+          )}
+          {showingRendering && rendering !== null && (
+            <Text size="xs" c="dimmed">
+              The video is still rendering
+              {rendering.phase ? ` (${rendering.phase})` : ""}. Its draft and
+              thumbnails are being made now, and Upload waits for the video.
+            </Text>
           )}
           {selected?.is_short && (
             <Text size="xs" c="dimmed">
@@ -280,7 +318,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
         </Stack>
       </Paper>
 
-      {data && data.renders.length > 0 && (
+      {data && hasSomethingToPublish && (
         <Paper withBorder p="md" radius="md">
           <Stack gap="sm">
             <Group gap="xs">
@@ -297,6 +335,11 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
                 </Badge>
               )}
             </Group>
+            {draft && draftOrigin(draft) !== null && (
+              <Text size="sm" c="dimmed">
+                {draftOrigin(draft)}
+              </Text>
+            )}
             {draft?.feedback && (
               <Text size="sm" c="dimmed">
                 Your note: {draft.feedback}
@@ -360,11 +403,9 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
                 busy={writing}
                 saving={save.isPending}
                 saveError={save.error}
-                onSave={(edit) => {
-                  if (data.render_number !== null) {
-                    save.mutate({ renderNumber: data.render_number, ...edit });
-                  }
-                }}
+                onSave={(edit) =>
+                  save.mutate({ renderNumber: data.render_number, ...edit })
+                }
                 onDirtyChange={onDirtyChange}
               />
             )}
@@ -372,7 +413,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
         </Paper>
       )}
 
-      {data && data.renders.length > 0 && (
+      {data && hasSomethingToPublish && (
         <YouTubeThumbnailsSection
           projectId={projectId}
           thumbnail={data.thumbnail}
@@ -510,8 +551,9 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
               : "No captions will be uploaded."}
           </Text>
           <Text size="sm">
-            Made for kids: <strong>{current.kids === "yes" ? "Yes" : "No"}</strong>
-            . Contains realistic AI content:{" "}
+            Made for kids:{" "}
+            <strong>{current.kids === "yes" ? "Yes" : "No"}</strong>. Contains
+            realistic AI content:{" "}
             <strong>{current.synthetic === "yes" ? "Yes" : "No"}</strong>.
           </Text>
           <Text size="sm" c="dimmed">
@@ -576,9 +618,21 @@ function whyNotUpload(input: {
   writing: boolean;
   picturesMaking: boolean;
   channelValue: string | null;
+  rendering: boolean;
 }): string[] {
-  const { data, draft, dirty, writing, picturesMaking, channelValue } = input;
+  const {
+    data,
+    draft,
+    dirty,
+    writing,
+    picturesMaking,
+    channelValue,
+    rendering,
+  } = input;
   const reasons: string[] = [];
+  if (rendering) {
+    reasons.push("The video is still rendering.");
+  }
   if (writing) {
     reasons.push("The draft is still being written.");
   } else if (draft === null) {
@@ -605,6 +659,26 @@ function whyNotUpload(input: {
     reasons.push("This render is already being uploaded to that channel.");
   }
   return reasons;
+}
+
+/**
+ * Where a draft that was written with its render started (YTF-004) says it came from, or null
+ * when there is nothing to say.
+ */
+function draftOrigin(draft: YouTubeDraft): string | null {
+  if (draft.render_state === "not_made") {
+    return "Drafted for a render that was not made.";
+  }
+  if (!draft.started_at_render) {
+    return null;
+  }
+  if (draft.render_state === "rendering") {
+    return "Drafted when this render was started.";
+  }
+  if (draft.render_state === "made" && draft.render_number !== null) {
+    return `Drafted when render ${draft.render_number} was started.`;
+  }
+  return null;
 }
 
 function isUploadActive(upload: YouTubeUpload): boolean {

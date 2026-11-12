@@ -3,7 +3,8 @@ hashtags and the tags, and code checks them (YT-003, `YouTube_publish_phases.md`
 declarations are not drafted since YTF-002).
 
 `services/youtube_draft.start_run` creates the job with a copy of everything it needs, taken when
-the button was pressed: `render_id` (the render the draft is for), `context` (what the model is
+the button was pressed: `render_id` (the finished render the draft is for) or `render_job_id` (the
+render still being made, when the draft was started with it, YTF-004), `context` (what the model is
 told about the video), `saved_inputs` (the provenance the version will carry) and the owner's note
 with the earlier draft when there is one.
 
@@ -50,23 +51,31 @@ _TOO_LONG = "The model's answer was cut off because it reached the token limit."
 class _Task:
     """The job's input, checked."""
 
-    render_id: int
+    # The finished render the draft is for, or None when it is for a render still being made
+    # (`saved_inputs.render_job_id` names that render's job).
+    render_id: int | None
     context: dict[str, Any]
     saved_inputs: dict[str, Any]
     feedback: user_feedback.Feedback | None
 
 
+def _is_id(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
     """The job's input as a task, or None when it is not complete."""
     render_id = job_input.get("render_id")
+    render_job_id = job_input.get("render_job_id")
     context = job_input.get("context")
     saved_inputs = job_input.get("saved_inputs")
-    if (
-        not isinstance(render_id, int)
-        or isinstance(render_id, bool)
-        or not isinstance(context, dict)
-        or not isinstance(saved_inputs, dict)
-    ):
+    if not isinstance(context, dict) or not isinstance(saved_inputs, dict):
+        return None
+    # Exactly one of the two says which render the draft is for, and it is a whole number.
+    if render_id is not None and render_job_id is None:
+        if not _is_id(render_id):
+            return None
+    elif render_id is not None or not _is_id(render_job_id):
         return None
     ok, feedback = user_feedback.read(job_input.get("feedback"))
     if not ok:

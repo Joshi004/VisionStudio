@@ -10,12 +10,19 @@ carry `made_for_kids` and `synthetic_media`; they are ignored, and a missing `ta
 it is read and never stored:
 
     {"story_bible": {"id", "version"}, "script_sha256", "scenes": {"id", "version"} | None,
-     "render_id", "feedback"?, "edited_from"?}
+     "render_id" | "render_job_id", "started_at_render"?, "feedback"?, "edited_from"?}
 
-Two ways make a version:
+A draft is written for a finished render (`render_id`) or, when it is started while the video is
+still being made (YTF-004), for the render job (`render_job_id`; the `render_id` column is then
+NULL). It counts as for render R when it recorded R's id or R's `job_id`. `started_at_render` is
+true when the draft was started by pressing Render rather than by the Publish panel.
+
+Three ways make a version:
 
 - `start_run` queues the `write_youtube_draft` job: one call to the language model writes the
   text, and code checks it. It also makes sure the render has a thumbnail (`_start_thumbnail`).
+- `start_for_render_job` is the same, started by `story_renders.start_render` for the render job
+  it has just queued (F-1). It is best effort and sends nothing to YouTube.
 - `save_manual` stores the owner's edit of the newest version, checked by the same rules.
 
 Nothing here sends anything to YouTube.
@@ -23,6 +30,7 @@ Nothing here sends anything to YouTube.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -53,18 +61,25 @@ from app.services import (
 )
 from app.services import youtube_draft_writer as writer
 
+_logger = logging.getLogger(__name__)
+
 JOB_TYPE: Final = "write_youtube_draft"
 SOURCE_AI: Final = "ai"
 SOURCE_MANUAL: Final = "manual"
 
 NO_BIBLE_MESSAGE: Final = "Write the Story Bible first: the YouTube text follows its tone."
-NO_RENDER_MESSAGE: Final = "Render the video first: the draft is written for a finished render."
+NO_RENDER_MESSAGE: Final = "Render the video first: the draft is written for a render."
 NO_SUCH_RENDER_MESSAGE: Final = "There is no such render."
+NO_RENDERING_MESSAGE: Final = "There is no render being made now."
+BAD_TIMELINE_MESSAGE: Final = "The render being made has no usable length, so it cannot be drafted."
 NO_DRAFT_MESSAGE: Final = "There is no draft yet, so there is nothing to change."
 BEING_WRITTEN_MESSAGE: Final = "The YouTube draft is already being written."
 _ALL_PICTURES_MADE_MESSAGE: Final = "Every idea already has a picture. Choose one below."
 
 ThumbnailStatus = Literal["ready", "out_of_date", "making", "none"]
+# Where the render a draft was written for stands: `made` (a finished render), `rendering` (the
+# render job is still running) or `not_made` (the job failed or was cancelled).
+DraftRenderState = Literal["made", "rendering", "not_made"]
 
 
 class YouTubeDraftError(ValueError):
@@ -95,7 +110,7 @@ async def _add_version(
     project_id: int,
     source: str,
     job_id: int | None,
-    render_id: int,
+    render_id: int | None,
     inputs: dict[str, Any],
     content: dict[str, Any],
 ) -> YouTubeDraft:
@@ -120,13 +135,14 @@ async def save_version(
     *,
     project_id: int,
     job_id: int,
-    render_id: int,
+    render_id: int | None,
     inputs: dict[str, Any],
     content: dict[str, Any],
 ) -> YouTubeDraft:
-    """Adds the next version, made by the model (`source` is `ai`). Flushes but does not
-    commit: the job commits it together with finishing itself, so a job is never "succeeded"
-    without its result.
+    """Adds the next version, made by the model (`source` is `ai`). `render_id` is None for a
+    draft written while its render was still being made (`inputs.render_job_id` names it).
+    Flushes but does not commit: the job commits it together with finishing itself, so a job is
+    never "succeeded" without its result.
     """
     return await _add_version(
         session,
@@ -150,6 +166,73 @@ def _job_active(job: Job | None) -> bool:
     return job is not None and job.status in store.ACTIVE_STATUSES
 
 
+async def active_render_job(session: AsyncSession, project_id: int) -> Job | None:
+    """The project's story render job that is waiting or running, or None."""
+    job = await store.latest_job(session, project_id, story_renders.JOB_TYPE)
+    return job if _job_active(job) else None
+
+
+@dataclass(frozen=True)
+class _Target:
+    """The render a draft is written for: a finished render, or the render job still being made
+    (then only its frozen timeline is known: the length and the shape).
+    """
+
+    render: StoryRender | None
+    job: Job | None
+    duration_s: float | None
+    width: int | None
+    height: int | None
+
+
+def _render_target(render: StoryRender) -> _Target:
+    return _Target(
+        render=render,
+        job=None,
+        duration_s=render.duration_s,
+        width=render.width,
+        height=render.height,
+    )
+
+
+def _whole(value: object) -> int | None:
+    """`value` when it is a positive whole number (not a bool), else None."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _job_target(job: Job) -> _Target:
+    """The target made from a render job's frozen timeline: `total_frames / fps`, `width` and
+    `height`, exactly what the finished video will have. Raises YouTubeDraftError.
+    """
+    timeline = job.input.get("timeline") if isinstance(job.input, dict) else None
+    if not isinstance(timeline, dict):
+        raise YouTubeDraftError(BAD_TIMELINE_MESSAGE)
+    frames, fps = _whole(timeline.get("total_frames")), _whole(timeline.get("fps"))
+    width, height = _whole(timeline.get("width")), _whole(timeline.get("height"))
+    if frames is None or fps is None or width is None or height is None:
+        raise YouTubeDraftError(BAD_TIMELINE_MESSAGE)
+    return _Target(render=None, job=job, duration_s=frames / fps, width=width, height=height)
+
+
+async def _target_of(session: AsyncSession, project_id: int, render_number: int | None) -> _Target:
+    """What a draft is written for: the finished render with this number, or (`None`) the render
+    being made now. Raises NoSuchRenderError or YouTubeDraftError.
+    """
+    # The same order as the panel's `blocked_reason`: the render first, then the Story Bible.
+    if render_number is None:
+        job = await active_render_job(session, project_id)
+        if job is not None:
+            return _job_target(job)
+        if await thumbnail_concepts.newest_render(session, project_id) is None:
+            raise YouTubeDraftError(NO_RENDER_MESSAGE)
+        raise YouTubeDraftError(NO_RENDERING_MESSAGE)
+    if await thumbnail_concepts.newest_render(session, project_id) is None:
+        raise YouTubeDraftError(NO_RENDER_MESSAGE)
+    return _render_target(await _find_render(session, project_id, render_number))
+
+
 # --- What a draft is made from ---------------------------------------------------------------
 
 
@@ -162,19 +245,33 @@ def _record(row: Any) -> dict[str, int] | None:
     return {"id": row.id, "version": row.version} if row is not None else None
 
 
+def _render_keys(target: _Target) -> dict[str, int]:
+    """Exactly one of `render_id` (a finished render) and `render_job_id` (a render being made),
+    for the draft job's input and for the version's `inputs`.
+    """
+    if target.render is not None:
+        return {"render_id": target.render.id}
+    assert target.job is not None
+    return {"render_job_id": target.job.id}
+
+
 def _saved_inputs(
     bible: Any,
     script: str,
     scenes: Any,
-    render: StoryRender,
+    target: _Target,
     feedback: user_feedback.Feedback | None,
+    *,
+    started_at_render: bool = False,
 ) -> dict[str, Any]:
     inputs: dict[str, Any] = {
         "story_bible": _record(bible),
         "script_sha256": story_bible.story_sha256(script),
         "scenes": _record(scenes),
-        "render_id": render.id,
     }
+    inputs.update(_render_keys(target))
+    if started_at_render:
+        inputs["started_at_render"] = True
     if feedback is not None:
         inputs["feedback"] = feedback.for_version()
     return inputs
@@ -301,26 +398,18 @@ async def _start_thumbnail(session: AsyncSession, project: Project) -> str | Non
 # --- Starting a run --------------------------------------------------------------------------
 
 
-async def start_run(
+async def _queue_draft(
     session: AsyncSession,
     project: Project,
-    render_number: int,
+    target: _Target,
     *,
-    feedback: str | None = None,
+    feedback: str | None,
+    started_at_render: bool,
 ) -> tuple[int, str | None]:
-    """Queues the job that writes the draft for a render, from a copy of what it is made from,
-    makes sure the render has a thumbnail, and commits. Returns the job's id and a sentence
-    about the thumbnail when it could not be started. If a job is already waiting or running
-    for the project, that job is used and no new one is made; a note is never dropped silently,
-    so a note is refused in that case.
-
-    `feedback` is the owner's note on the newest draft. Raises YouTubeDraftError.
+    """The part of every start that is the same: copies what the draft is made from into a job,
+    queues it, and makes sure the project has a thumbnail. Commits. Raises YouTubeDraftError.
     """
     project_id = project.id
-    # The same order as the panel's `blocked_reason`: the render first, then the Story Bible.
-    if await thumbnail_concepts.newest_render(session, project_id) is None:
-        raise YouTubeDraftError(NO_RENDER_MESSAGE)
-    render = await _find_render(session, project_id, render_number)
     bible = await story_bible.latest(session, project_id)
     if bible is None:
         raise YouTubeDraftError(NO_BIBLE_MESSAGE)
@@ -335,13 +424,15 @@ async def start_run(
         [option.name for option in cast],
         kind=project.kind,
         orientation=project.orientation,
-        duration_s=render.duration_s,
-        short=writer.is_short(render.width, render.height, render.duration_s),
+        duration_s=target.duration_s,
+        short=writer.is_short(target.width, target.height, target.duration_s),
     )
     job_input: dict[str, Any] = {
-        "render_id": render.id,
+        **_render_keys(target),
         "context": context,
-        "saved_inputs": _saved_inputs(bible, script, scenes, render, note),
+        "saved_inputs": _saved_inputs(
+            bible, script, scenes, target, note, started_at_render=started_at_render
+        ),
     }
     if note is not None:
         job_input["feedback"] = note.for_job()
@@ -355,13 +446,63 @@ async def start_run(
     return job_id, thumbnail_note
 
 
+async def start_run(
+    session: AsyncSession,
+    project: Project,
+    render_number: int | None,
+    *,
+    feedback: str | None = None,
+) -> tuple[int, str | None]:
+    """Queues the job that writes the draft for a render, from a copy of what it is made from,
+    makes sure the render has a thumbnail, and commits. Returns the job's id and a sentence
+    about the thumbnail when it could not be started. If a job is already waiting or running
+    for the project, that job is used and no new one is made; a note is never dropped silently,
+    so a note is refused in that case.
+
+    `render_number` is a finished render, or None for the render being made now (YTF-004: then
+    the length and shape come from the render job's frozen timeline).
+    `feedback` is the owner's note on the newest draft. Raises NoSuchRenderError or
+    YouTubeDraftError.
+    """
+    target = await _target_of(session, project.id, render_number)
+    return await _queue_draft(session, project, target, feedback=feedback, started_at_render=False)
+
+
+async def start_for_render_job(
+    session: AsyncSession, project: Project, render_job: Job
+) -> int | None:
+    """The automatic start (F-1): called by `story_renders.start_render` for the render job it
+    has just queued. Does nothing (returns None) when the setting `youtube_auto_draft` is off or
+    the project has no Story Bible. Otherwise queues the draft for that job and the thumbnail
+    work (`_start_thumbnail`: nothing when the chosen thumbnail is current, which settles YFQ-1)
+    and returns the draft job's id; a draft job already waiting or running is returned as it is.
+    Commits. Nothing is sent to YouTube. The caller catches every error.
+    """
+    mode = await settings_service.get_str(session, settings_service.YOUTUBE_AUTO_DRAFT_KEY)
+    if mode != settings_service.YOUTUBE_AUTO_DRAFT_ON:
+        return None
+    if await story_bible.latest(session, project.id) is None:
+        return None
+    job_id, thumbnail_note = await _queue_draft(
+        session, project, _job_target(render_job), feedback=None, started_at_render=True
+    )
+    if thumbnail_note is not None:
+        _logger.info(
+            "project %d: thumbnail not started with render job %d: %s",
+            project.id,
+            render_job.id,
+            thumbnail_note,
+        )
+    return job_id
+
+
 # --- The owner's edit ------------------------------------------------------------------------
 
 
 async def save_manual(
     session: AsyncSession,
     project: Project,
-    render_number: int,
+    render_number: int | None,
     *,
     title: str,
     description: str,
@@ -373,8 +514,8 @@ async def save_manual(
     may be no hashtags or tags (and tags may fill YouTube's whole limit). What the draft was
     written from is copied from the version that was edited, so an edit never makes an old draft
     look new.
-    `render_number` is the render being published. Refused while a job is writing the draft.
-    Raises YouTubeDraftError.
+    `render_number` is the render being published, or None for the render being made now
+    (YTF-004). Refused while a job is writing the draft. Raises YouTubeDraftError.
     """
     project_id = project.id
     newest = await latest(session, project_id)
@@ -382,7 +523,13 @@ async def save_manual(
         raise YouTubeDraftError(NO_DRAFT_MESSAGE)
     if _job_active(await store.latest_job(session, project_id, JOB_TYPE)):
         raise YouTubeDraftError(BEING_WRITTEN_MESSAGE)
-    render = await _find_render(session, project_id, render_number)
+    if render_number is None:
+        rendering = await active_render_job(session, project_id)
+        if rendering is None:
+            raise YouTubeDraftError(NO_RENDERING_MESSAGE)
+        target = _Target(render=None, job=rendering, duration_s=None, width=None, height=None)
+    else:
+        target = _render_target(await _find_render(session, project_id, render_number))
     try:
         checked_title, checked_description, checked_tags = writer.check_fields(
             title,
@@ -399,9 +546,9 @@ async def save_manual(
     inputs: dict[str, Any] = {
         key: value
         for key, value in (newest.inputs if isinstance(newest.inputs, dict) else {}).items()
-        if key not in ("feedback", "edited_from")
+        if key not in ("feedback", "edited_from", "render_id", "render_job_id", "started_at_render")
     }
-    inputs["render_id"] = render.id
+    inputs.update(_render_keys(target))
     inputs["edited_from"] = {"id": newest.id, "version": newest.version}
     content = {
         "title": checked_title,
@@ -414,7 +561,7 @@ async def save_manual(
         project_id=project_id,
         source=SOURCE_MANUAL,
         job_id=None,
-        render_id=render.id,
+        render_id=target.render.id if target.render is not None else None,
         inputs=inputs,
         content=content,
     )
@@ -432,11 +579,65 @@ def _same_record(recorded: Any, newest: Any) -> bool:
     return provenance.same_row(recorded, newest)
 
 
-async def out_of_date_reasons(
-    session: AsyncSession, row: YouTubeDraft, project: Project, render: StoryRender | None
+def drafted_for(
+    row: YouTubeDraft, renders: list[RenderChoice], rendering: Job | None
+) -> tuple[DraftRenderState | None, int | None]:
+    """Where the render a draft was written for stands, and its number when it is made.
+    A draft is for render R when it recorded R's id or R's `job_id` (YTF-004). `(None, None)`
+    means the draft names a render that is no longer listed.
+    """
+    if row.render_id is not None:
+        found = next((r for r in renders if r.row.id == row.render_id), None)
+        return ("made", found.row.render_number) if found is not None else (None, None)
+    inputs = row.inputs if isinstance(row.inputs, dict) else {}
+    job_id = _whole(inputs.get("render_job_id"))
+    if job_id is None:
+        return None, None
+    made = next((r for r in renders if r.row.job_id == job_id), None)
+    if made is not None:
+        return "made", made.row.render_number
+    if rendering is not None and rendering.id == job_id:
+        return "rendering", None
+    return "not_made", None
+
+
+def _render_reasons(
+    state: DraftRenderState | None,
+    number: int | None,
+    selected: RenderChoice | None,
 ) -> list[str]:
-    """Why a draft is no longer current for the render being published, one sentence each.
-    Out of date only shows a reason; the owner can still upload the draft.
+    """Why a draft is not for the render being published (`selected`, or None for the render
+    being made now).
+    """
+    if state == "not_made":
+        return ["This draft was written for a render that was not made."]
+    if selected is None:
+        if state == "rendering":
+            return []
+        which = f"render {number}" if number is not None else "a render that is no longer listed"
+        return [f"This draft was written for {which}, not the render being made now."]
+    if state == "rendering":
+        return [
+            "This draft was written for the render being made now, "
+            f"not render {selected.row.render_number}."
+        ]
+    if number == selected.row.render_number:
+        return []
+    which = f"render {number}" if number is not None else "a render that is no longer listed"
+    return [f"This draft was written for {which}, not render {selected.row.render_number}."]
+
+
+async def out_of_date_reasons(
+    session: AsyncSession,
+    row: YouTubeDraft,
+    project: Project,
+    selected: RenderChoice | None,
+    renders: list[RenderChoice],
+    rendering: Job | None,
+) -> list[str]:
+    """Why a draft is no longer current for the render being published (`selected`, or None
+    for the render being made now), one sentence each. Out of date only shows a reason; the
+    owner can still upload the draft.
     """
     inputs = row.inputs if isinstance(row.inputs, dict) else {}
     reasons: list[str] = []
@@ -449,12 +650,8 @@ async def out_of_date_reasons(
     scenes = await _scenes_row(session, project.id)
     if not _same_record(inputs.get("scenes"), scenes):
         reasons.append("The scenes were changed since this draft was made.")
-    if render is not None and row.render_id != render.id:
-        drafted_for = await session.get(StoryRender, row.render_id)
-        number = drafted_for.render_number if drafted_for is not None else "another"
-        reasons.append(
-            f"This draft was written for render {number}, not render {render.render_number}."
-        )
+    state, number = drafted_for(row, renders, rendering)
+    reasons.extend(_render_reasons(state, number, selected))
     return reasons
 
 
@@ -490,9 +687,13 @@ class DraftEntry:
     """The newest draft and where it stands."""
 
     row: YouTubeDraft
-    # The render number the draft was written for.
+    # The render number the draft was written for, once that render is made.
     render_number: int | None
     reasons: list[str]
+    # Where that render stands (None when it is no longer listed), and whether the draft was
+    # started by pressing Render (YTF-004).
+    render_state: DraftRenderState | None = None
+    started_at_render: bool = False
 
 
 @dataclass(frozen=True)
@@ -515,7 +716,10 @@ class PanelState:
     """What the Publish panel shows."""
 
     renders: list[RenderChoice]
+    # The finished render being published, or None when the render being made now is.
     selected: RenderChoice | None
+    # The story render job that is waiting or running, or None.
+    rendering: Job | None
     # Why a draft cannot be written yet, or None.
     blocked_reason: str | None
     draft: DraftEntry | None
@@ -586,7 +790,8 @@ async def panel_state(
     session: AsyncSession, project: Project, render_number: int | None
 ) -> PanelState:
     """The renders, the newest draft with where it stands, the thumbnail, the channels and the
-    earlier uploads. `render_number` is the render being published (the newest when None).
+    earlier uploads. `render_number` is the render being published: the render being made now
+    when None and one is waiting or running (YTF-004), else the newest finished one.
     Worked out on every read; nothing here is stored. Raises NoSuchRenderError.
     """
     state = await story_renders.state(session, project)
@@ -603,9 +808,10 @@ async def panel_state(
                 captions_burned=captions_burned,
             )
         )
+    rendering = await active_render_job(session, project.id)
     selected: RenderChoice | None
     if render_number is None:
-        selected = renders[0] if renders else None
+        selected = renders[0] if renders and rendering is None else None
     else:
         selected = next((r for r in renders if r.row.render_number == render_number), None)
         if selected is None:
@@ -613,7 +819,7 @@ async def panel_state(
 
     bible = await story_bible.latest(session, project.id)
     blocked: str | None = None
-    if selected is None:
+    if selected is None and rendering is None:
         blocked = NO_RENDER_MESSAGE
     elif bible is None:
         blocked = NO_BIBLE_MESSAGE
@@ -621,17 +827,22 @@ async def panel_state(
     newest = await latest(session, project.id)
     draft: DraftEntry | None = None
     if newest is not None:
-        selected_row = selected.row if selected is not None else None
-        drafted_for = next((r for r in renders if r.row.id == newest.render_id), None)
+        render_state, drafted_number = drafted_for(newest, renders, rendering)
+        newest_inputs = newest.inputs if isinstance(newest.inputs, dict) else {}
         draft = DraftEntry(
             row=newest,
-            render_number=drafted_for.row.render_number if drafted_for is not None else None,
-            reasons=await out_of_date_reasons(session, newest, project, selected_row),
+            render_number=drafted_number,
+            reasons=await out_of_date_reasons(
+                session, newest, project, selected, renders, rendering
+            ),
+            render_state=render_state,
+            started_at_render=newest_inputs.get("started_at_render") is True,
         )
     channels = await youtube_auth.list_channels(session)
     return PanelState(
         renders=renders,
         selected=selected,
+        rendering=rendering,
         blocked_reason=blocked,
         draft=draft,
         job=await store.latest_job(session, project.id, JOB_TYPE),

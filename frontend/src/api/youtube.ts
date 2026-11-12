@@ -161,7 +161,8 @@ async function fetchPanel(projectId: number, renderNumber: number | null) {
 const GRACE_POLLS = 2;
 
 /**
- * What the Publish panel shows for one render (the newest when `renderNumber` is null). It is
+ * What the Publish panel shows for one render (the render being made now, else the newest, when
+ * `renderNumber` is null). It is
  * loaded again every few seconds while the draft is being written or a thumbnail is being made,
  * and twice more after that, because the picture of a new thumbnail is started just after its
  * ideas are stored and nothing is "making" in between.
@@ -180,6 +181,8 @@ export function useYouTubePanel(
       const state = query.state.data;
       const busy =
         isJobActive(state?.job) ||
+        // The video is still being made: the panel must notice when it is stored.
+        (state?.rendering ?? null) !== null ||
         state?.thumbnail.status === "making" ||
         (state?.uploads ?? []).some(
           (upload) =>
@@ -205,7 +208,8 @@ export function useDraftForYouTube(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
-      renderNumber: number;
+      /** A finished render, or null for the render being made now. */
+      renderNumber: number | null;
       feedback: string | null;
     }) => {
       const { data, error, response } = await api.POST(
@@ -376,7 +380,8 @@ export function useSaveYouTubeDraft(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
-      renderNumber: number;
+      /** A finished render, or null for the render being made now. */
+      renderNumber: number | null;
       title: string;
       description: string;
       hashtags: string[];
