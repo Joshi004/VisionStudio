@@ -183,6 +183,14 @@ SAVING_THUMBNAIL_CONCEPTS: Final = "saving the thumbnail ideas"
 # `write_youtube_draft` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_YOUTUBE_DRAFT: Final = "saving the YouTube draft"
 
+# --- Running: the YouTube upload (YT-004) -------------------------------------------------
+# `publish_youtube` is a local job. It sends the video to YouTube (the bytes sent are in
+# `live_status`), then asks now and then whether YouTube has processed it: between two asks the
+# job is queued again with `WAITING_FOR_YOUTUBE`.
+UPLOADING_TO_YOUTUBE: Final = "uploading the video to YouTube"
+CHECKING_YOUTUBE: Final = "asking YouTube if the video is processed"
+WAITING_FOR_YOUTUBE: Final = "waiting for YouTube to process the video"
+
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 # `write_shot_graphic_brief` (EXG-004) uses the same three phases, one call per graphic shot.
@@ -480,6 +488,7 @@ _UPLOAD_PHASES: Final = (
     UPLOADING_MUSIC_SOURCE,
     UPLOADING_CLIP_FOR_TRANSCRIPT,
     UPLOADING_SPEECH_FOR_TRANSCRIPT,
+    UPLOADING_TO_YOUTUBE,
     SUBMITTING,
 )
 

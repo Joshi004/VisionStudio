@@ -4,12 +4,14 @@ import {
   Anchor,
   Badge,
   Button,
+  Checkbox,
   Group,
   Image,
   List,
   Loader,
   Modal,
   Paper,
+  Progress,
   Radio,
   SegmentedControl,
   Select,
@@ -24,14 +26,17 @@ import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import {
   useDraftForYouTube,
+  useRetryYouTubeUpload,
   useSaveYouTubeDraft,
+  useUploadToYouTube,
   useYouTubePanel,
   type YouTubeDraft,
   type YouTubePanel,
   type YouTubePrivacy,
   type YouTubeThumbnail,
+  type YouTubeUpload,
 } from "../../api/youtube";
-import { formatDateTime } from "../../format";
+import { formatBytes, formatDateTime } from "../../format";
 import { stepPath } from "../board/boardSteps";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { YouTubeDraftEditor } from "./YouTubeDraftEditor";
@@ -66,8 +71,9 @@ const NO_ANSWERS: Answers = { version: null, kids: "", synthetic: "" };
 /**
  * Publishing a finished render to YouTube. The app writes a draft (title, description, hashtags,
  * a suggestion for the two declarations) and a thumbnail; the owner edits everything, picks the
- * channel and visibility, and answers both declarations. Upload comes with the next update:
- * the button shows what is still missing, and nothing is sent to YouTube from here.
+ * channel and visibility, and answers both declarations. Upload is disabled with its reason
+ * until all of that is done, asks for a confirmation, and sends the render; the Uploads card
+ * follows each upload. The thumbnail and the captions are sent in the next update.
  */
 export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const [renderNumber, setRenderNumber] = useState<number | null>(null);
@@ -78,7 +84,11 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const draftRun = useDraftForYouTube(projectId);
   const save = useSaveYouTubeDraft(projectId);
   const [note, setNote] = useState("");
+  const upload = useUploadToYouTube(projectId);
+  const retry = useRetryYouTubeUpload(projectId);
   const [confirmOwn, setConfirmOwn] = useState(false);
+  const [confirmUpload, setConfirmUpload] = useState(false);
+  const [notify, setNotify] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [answers, setAnswers] = useState<Answers>(NO_ANSWERS);
   const [channelChoice, setChannelChoice] = useState<string | null>(null);
@@ -137,6 +147,9 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
       : defaultChannel;
   const privacy = privacyChoice ?? data?.default_privacy ?? "private";
 
+  const channelTitle =
+    connected.find((channel) => String(channel.id) === channelValue)?.title ??
+    null;
   const uploadBlocker = data
     ? whyNotUpload({
         data,
@@ -147,6 +160,29 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
         channelValue,
       })
     : "Loading.";
+
+  const pressUpload = () => {
+    if (
+      data?.render_number == null ||
+      draft === null ||
+      channelValue === null ||
+      current.kids === "" ||
+      current.synthetic === ""
+    ) {
+      return;
+    }
+    upload.mutate({
+      renderNumber: data.render_number,
+      channelRowId: Number(channelValue),
+      draftVersion: draft.version,
+      privacy,
+      madeForKids: current.kids === "yes",
+      syntheticMedia: current.synthetic === "yes",
+      notifySubscribers: notify,
+      // The captions come in the next update.
+      captions: false,
+    });
+  };
 
   return (
     <Stack gap="sm">
@@ -365,17 +401,80 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
                 onChange={(value) => setPrivacyChoice(value as YouTubePrivacy)}
               />
             </Stack>
+            <Checkbox
+              label="Notify subscribers"
+              description="YouTube tells the channel's subscribers about the new video. It has no effect on a private video."
+              checked={notify}
+              onChange={(event) => setNotify(event.currentTarget.checked)}
+            />
             <Stack gap={4}>
               <Group>
-                <Button disabled>Upload</Button>
+                <Button
+                  disabled={uploadBlocker !== null}
+                  loading={upload.isPending}
+                  onClick={() => setConfirmUpload(true)}
+                >
+                  Upload
+                </Button>
               </Group>
-              <Text size="xs" c="dimmed">
-                {uploadBlocker ?? "Uploading comes in the next update."}
-              </Text>
+              {uploadBlocker !== null && (
+                <Text size="xs" c="dimmed">
+                  {uploadBlocker}
+                </Text>
+              )}
             </Stack>
+            {upload.isError && (
+              <Alert color="red" title="The upload was not started">
+                {describeError(upload.error)}
+              </Alert>
+            )}
           </Stack>
         </Paper>
       )}
+
+      {data && data.uploads.length > 0 && (
+        <UploadsCard
+          uploads={data.uploads}
+          retrying={retry.isPending ? retry.variables : null}
+          retryError={retry.isError ? describeError(retry.error) : null}
+          onRetry={(uploadId) => retry.mutate(uploadId)}
+        />
+      )}
+
+      <Modal
+        opened={confirmUpload}
+        onClose={() => setConfirmUpload(false)}
+        title="Upload to YouTube?"
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            Render {data?.render_number} will be sent to{" "}
+            <strong>{channelTitle ?? "the chosen channel"}</strong> now, as{" "}
+            <strong>{privacy}</strong>.{" "}
+            {notify
+              ? "YouTube will notify the channel's subscribers."
+              : "Subscribers will not be notified."}
+          </Text>
+          <Text size="sm" c="dimmed">
+            Your answers to the two questions are sent with it, and YouTube may
+            act on them. You can follow the upload below.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmUpload(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmUpload(false);
+                pressUpload();
+              }}
+            >
+              Upload
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={confirmOwn}
@@ -436,6 +535,16 @@ function whyNotUpload(input: {
   if (channelValue === null) {
     return "Choose a connected channel.";
   }
+  if (
+    data.uploads.some(
+      (upload) =>
+        upload.render_number === data.render_number &&
+        upload.channel_row_id === Number(channelValue) &&
+        isUploadActive(upload),
+    )
+  ) {
+    return "This render is already being uploaded to that channel.";
+  }
   if (answers.kids === "") {
     return 'Answer "Made for kids".';
   }
@@ -443,6 +552,164 @@ function whyNotUpload(input: {
     return 'Answer "Contains realistic AI content".';
   }
   return null;
+}
+
+function isUploadActive(upload: YouTubeUpload): boolean {
+  return upload.state === "uploading" || upload.state === "processing";
+}
+
+const UPLOAD_STATE: Record<
+  YouTubeUpload["state"],
+  { label: string; color: string }
+> = {
+  uploading: { label: "Sending", color: "blue" },
+  processing: { label: "YouTube is processing it", color: "blue" },
+  processed: { label: "Uploaded", color: "green" },
+  gave_up: { label: "Uploaded, still processing", color: "yellow" },
+  failed: { label: "Failed", color: "red" },
+};
+
+/** Every upload of the project, newest first, with its progress, links and result. */
+function UploadsCard({
+  uploads,
+  retrying,
+  retryError,
+  onRetry,
+}: {
+  uploads: YouTubeUpload[];
+  retrying: number | null | undefined;
+  retryError: string | null;
+  onRetry: (uploadId: number) => void;
+}) {
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Stack gap="md">
+        <Title order={5}>Uploads</Title>
+        {retryError !== null && (
+          <Alert color="red" title="Could not try again">
+            {retryError}
+          </Alert>
+        )}
+        {uploads.map((upload) => (
+          <UploadRow
+            key={upload.id}
+            upload={upload}
+            retrying={retrying === upload.id}
+            onRetry={() => onRetry(upload.id)}
+          />
+        ))}
+      </Stack>
+    </Paper>
+  );
+}
+
+function UploadRow({
+  upload,
+  retrying,
+  onRetry,
+}: {
+  upload: YouTubeUpload;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const state = UPLOAD_STATE[upload.state];
+  const progress = upload.progress;
+  const percent =
+    progress !== null && progress.total_bytes > 0
+      ? Math.min(100, (progress.sent_bytes / progress.total_bytes) * 100)
+      : 0;
+  const privacyDiffers =
+    upload.privacy_applied !== null &&
+    upload.privacy_sent !== null &&
+    upload.privacy_applied !== upload.privacy_sent;
+  return (
+    <Stack gap={4}>
+      <Group gap="xs">
+        <Text size="sm" fw={500}>
+          Render {upload.render_number},{" "}
+          {upload.channel_title ?? "a channel that was disconnected"}
+        </Text>
+        <Badge variant="light" color={state.color}>
+          {state.label}
+        </Badge>
+      </Group>
+      <Text size="xs" c="dimmed">
+        {upload.title ? `"${upload.title}", ` : ""}
+        {formatDateTime(upload.created_at)}
+        {upload.privacy_sent ? `, asked for ${upload.privacy_sent}` : ""}
+      </Text>
+      {upload.state === "uploading" && (
+        <Stack gap={2}>
+          <Progress value={percent} size="sm" />
+          <Text size="xs" c="dimmed">
+            {progress !== null
+              ? `${formatBytes(progress.sent_bytes)} of ${formatBytes(progress.total_bytes)} (${Math.round(percent)}%)`
+              : (upload.job?.phase ?? "Waiting to start.")}
+          </Text>
+        </Stack>
+      )}
+      {upload.state === "processing" && (
+        <Text size="xs" c="dimmed">
+          The video is on YouTube. YouTube is processing it; this page updates
+          by itself.
+        </Text>
+      )}
+      {upload.state === "gave_up" && (
+        <Text size="xs" c="dimmed">
+          YouTube was still processing the video after 30 minutes, so the app
+          stopped waiting. The video is on YouTube and will finish by itself.
+        </Text>
+      )}
+      {upload.video_id && (
+        <Group gap="md">
+          <Anchor
+            href={`https://youtu.be/${upload.video_id}`}
+            target="_blank"
+            rel="noreferrer"
+            size="xs"
+          >
+            Open on YouTube
+          </Anchor>
+          <Anchor
+            href={`https://studio.youtube.com/video/${upload.video_id}/edit`}
+            target="_blank"
+            rel="noreferrer"
+            size="xs"
+          >
+            Open in YouTube Studio
+          </Anchor>
+        </Group>
+      )}
+      {privacyDiffers && (
+        <Alert color="yellow" title="YouTube used another visibility">
+          <Text size="sm">
+            You asked for {upload.privacy_sent}, but YouTube made the video{" "}
+            {upload.privacy_applied}. Check it in YouTube Studio.
+          </Text>
+        </Alert>
+      )}
+      {upload.state === "failed" && (
+        <Alert color="red" title="The upload failed">
+          <Stack gap="xs">
+            <Text size="sm">{upload.error ?? "The job failed."}</Text>
+            {upload.video_id && (
+              <Text size="xs" c="dimmed">
+                The video is already on YouTube; trying again will not send it
+                twice.
+              </Text>
+            )}
+            {upload.can_retry && (
+              <Group>
+                <Button size="xs" onClick={onRetry} loading={retrying}>
+                  Try again
+                </Button>
+              </Group>
+            )}
+          </Stack>
+        </Alert>
+      )}
+    </Stack>
+  );
 }
 
 function PublishedBefore({

@@ -170,7 +170,12 @@ export function useYouTubePanel(projectId: number, renderNumber: number | null) 
     refetchInterval: (query) => {
       const state = query.state.data;
       const busy =
-        isJobActive(state?.job) || state?.thumbnail.status === "making";
+        isJobActive(state?.job) ||
+        state?.thumbnail.status === "making" ||
+        (state?.uploads ?? []).some(
+          (upload) =>
+            upload.state === "uploading" || upload.state === "processing",
+        );
       if (busy) {
         gracePolls.current = GRACE_POLLS;
         return ACTIVE_POLL_MS;
@@ -217,6 +222,87 @@ export function useDraftForYouTube(projectId: number) {
       Promise.all([
         queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
         queryClient.invalidateQueries({ queryKey: thumbnailsKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** What the owner confirmed when pressing Upload. */
+export type YouTubeUploadRequest = {
+  renderNumber: number;
+  channelRowId: number;
+  draftVersion: number;
+  privacy: YouTubePrivacy;
+  madeForKids: boolean;
+  syntheticMedia: boolean;
+  notifySubscribers: boolean;
+  captions: boolean;
+};
+
+/** Checks everything again on the server, then starts the upload. */
+export function useUploadToYouTube(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: YouTubeUploadRequest) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/youtube/uploads",
+        {
+          params: { path: { project_id: projectId } },
+          body: {
+            render_number: input.renderNumber,
+            channel_row_id: input.channelRowId,
+            draft_version: input.draftVersion,
+            privacy: input.privacy,
+            made_for_kids: input.madeForKids,
+            synthetic_media: input.syntheticMedia,
+            notify_subscribers: input.notifySubscribers,
+            captions: input.captions,
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not start the upload (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: CHANNELS_KEY }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** Tries a failed upload again. What was done is not done again. */
+export function useRetryYouTubeUpload(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (uploadId: number) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/youtube/uploads/{upload_id}/retry",
+        { params: { path: { project_id: projectId, upload_id: uploadId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not try the upload again (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
   });

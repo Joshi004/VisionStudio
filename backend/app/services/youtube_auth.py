@@ -96,7 +96,7 @@ _MAX_PENDING_SIGN_INS: Final = 50
 _GOOGLE_TIMEOUT_S: Final = 10
 
 # Errors that mean "Google could not be reached", not "Google refused".
-_NETWORK_ERRORS: Final = (TransportError, OSError, httplib2.HttpLib2Error)
+NETWORK_ERRORS: Final = (TransportError, OSError, httplib2.HttpLib2Error)
 
 
 class YouTubeNotConfiguredError(Exception):
@@ -447,7 +447,7 @@ async def check_channel(session: AsyncSession, row_id: int) -> YouTubeChannel:
             return row
         _logger.warning("YouTube channel %s check: HTTP %s", row_id, exc.resp.status)
         raise GoogleUnreachableError("YouTube answered with an error.") from exc
-    except _NETWORK_ERRORS as exc:
+    except NETWORK_ERRORS as exc:
         _logger.warning("YouTube channel %s check: %s", row_id, type(exc).__name__)
         raise GoogleUnreachableError("Google could not be reached.") from exc
 

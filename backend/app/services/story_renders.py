@@ -133,6 +133,13 @@ def file_exists(relative_path: str | None) -> bool:
         return False
 
 
+def recorded_captions(row: StoryRender) -> dict[str, Any] | None:
+    """The caption track the render recorded, as stored (not read), or None."""
+    timeline = row.inputs if isinstance(row.inputs, dict) else {}
+    captions = timeline.get("captions")
+    return captions if isinstance(captions, dict) else None
+
+
 def _recorded_audio(plan_inputs: Any) -> dict[str, dict[str, Any]]:
     """The speech each unit of a shot plan was measured from, by unit id: the plan records the
     audio it used (`shot_plans.SPEECH_AUDIO_KIND`).

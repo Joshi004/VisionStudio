@@ -79,6 +79,7 @@ def register_handlers() -> None:
     from app.jobs.plan_environment_views import PlanEnvironmentViewsHandler
     from app.jobs.plan_shots import PlanShotsHandler
     from app.jobs.preview_music_mix import PreviewMusicMixHandler
+    from app.jobs.publish_youtube import PublishYouTubeHandler
     from app.jobs.render_av_test import RenderAvTestHandler
     from app.jobs.render_callout_preview import RenderCalloutPreviewHandler
     from app.jobs.render_lab_graphic import RenderLabGraphicHandler
@@ -192,6 +193,7 @@ def register_handlers() -> None:
     handlers.register(RenderShotGraphicHandler())
     handlers.register(WriteThumbnailConceptsHandler())
     handlers.register(WriteYouTubeDraftHandler())
+    handlers.register(PublishYouTubeHandler())
     handlers.register(TimeVoiceRecordingHandler())
     handlers.register(SplitVoiceRecordingHandler())
     handlers.register(SpliceVoiceRecordingHandler())

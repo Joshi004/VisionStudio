@@ -447,10 +447,11 @@ class DraftEntry:
 
 @dataclass(frozen=True)
 class UploadEntry:
-    """An earlier press of Upload (YT-004 fills them in)."""
+    """An earlier press of Upload, with the job that does it (None once the job is deleted)."""
 
     row: YouTubeUpload
     render_number: int
+    job: Job | None
 
 
 @dataclass(frozen=True)
@@ -486,14 +487,17 @@ def default_channel(channels: list[YouTubeChannel]) -> int | None:
 
 async def _uploads(session: AsyncSession, project_id: int) -> list[UploadEntry]:
     statement = (
-        select(YouTubeUpload, StoryRender.render_number)
+        select(YouTubeUpload, StoryRender.render_number, Job)
         .join(StoryRender, StoryRender.id == YouTubeUpload.render_id)
+        .outerjoin(Job, Job.id == YouTubeUpload.job_id)
         .where(YouTubeUpload.project_id == project_id)
         .order_by(YouTubeUpload.id.desc())
+        # The job moves while an upload runs, so a copy kept from an earlier read is not used.
+        .execution_options(populate_existing=True)
     )
     return [
-        UploadEntry(row=row, render_number=number)
-        for row, number in await session.execute(statement)
+        UploadEntry(row=row, render_number=number, job=job)
+        for row, number, job in await session.execute(statement)
     ]
 
 

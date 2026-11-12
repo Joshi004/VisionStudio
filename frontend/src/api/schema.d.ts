@@ -6146,6 +6146,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/youtube/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Youtube Upload
+         * @description Checks everything again, stores what will be sent and starts the upload. If this render
+         *     is already being sent to this channel, that upload is returned and no second one is made.
+         */
+        post: operations["start_youtube_upload_api_projects__project_id__youtube_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/youtube/uploads/{upload_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Youtube Upload
+         * @description Tries a failed upload again. What was done is not done again: a video that was sent is
+         *     not sent a second time.
+         */
+        post: operations["retry_youtube_upload_api_projects__project_id__youtube_uploads__upload_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -18799,25 +18841,88 @@ export interface components {
             error: string | null;
         };
         /**
+         * YouTubeUploadIn
+         * @description Pressing Upload. The server checks all of it again, and the draft is the newest version
+         *     (`draft_version` is the one the page showed).
+         */
+        YouTubeUploadIn: {
+            /** Render Number */
+            render_number: number;
+            /** Channel Row Id */
+            channel_row_id: number;
+            /** Draft Version */
+            draft_version: number;
+            /**
+             * Privacy
+             * @enum {string}
+             */
+            privacy: "private" | "unlisted" | "public";
+            /** Made For Kids */
+            made_for_kids?: boolean | null;
+            /** Synthetic Media */
+            synthetic_media?: boolean | null;
+            /**
+             * Notify Subscribers
+             * @default true
+             */
+            notify_subscribers: boolean;
+            /**
+             * Captions
+             * @default false
+             */
+            captions: boolean;
+        };
+        /**
          * YouTubeUploadOut
-         * @description An earlier press of Upload.
+         * @description A press of Upload and how it is going.
          */
         YouTubeUploadOut: {
             /** Id */
             id: number;
             /** Render Number */
             render_number: number;
+            /** Channel Row Id */
+            channel_row_id: number | null;
             /** Channel Title */
             channel_title: string | null;
+            /** Title */
+            title: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Finished At */
+            finished_at: string | null;
             /** Video Id */
             video_id: string | null;
+            /** Privacy Sent */
+            privacy_sent: ("private" | "unlisted" | "public") | null;
             /** Privacy Applied */
             privacy_applied: ("private" | "unlisted" | "public") | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "uploading" | "processing" | "processed" | "gave_up" | "failed";
+            /** Processing */
+            processing: string | null;
+            /** Error */
+            error: string | null;
+            /** Can Retry */
+            can_retry: boolean;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            progress: components["schemas"]["YouTubeUploadProgressOut"] | null;
+        };
+        /**
+         * YouTubeUploadProgressOut
+         * @description The bytes of the video sent so far. Kept in memory, so it is None after a restart.
+         */
+        YouTubeUploadProgressOut: {
+            /** Sent Bytes */
+            sent_bytes: number;
+            /** Total Bytes */
+            total_bytes: number;
         };
         /** SkippedOut */
         app__api__character_definitions__SkippedOut: {
@@ -32764,6 +32869,109 @@ export interface operations {
                 };
             };
             /** @description The Story Bible or the render is missing, the note or the edit cannot be used, or a draft is being written. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_youtube_upload_api_projects__project_id__youtube_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["YouTubeUploadIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YouTubeUploadOut"];
+                };
+            };
+            /** @description No such project, render or upload. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A YOUTUBE_* value is missing or invalid. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A check before uploading failed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_youtube_upload_api_projects__project_id__youtube_uploads__upload_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                upload_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YouTubeUploadOut"];
+                };
+            };
+            /** @description No such project, render or upload. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A YOUTUBE_* value is missing or invalid. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A check before uploading failed. */
             422: {
                 headers: {
                     [name: string]: unknown;

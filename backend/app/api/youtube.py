@@ -10,8 +10,11 @@ The project's draft, all under `/projects/{project_id}/youtube`:
 2. `POST .../draft` starts the `write_youtube_draft` job for a render (and makes sure the render
    has a thumbnail). The body may hold `feedback`, the owner's note on the newest draft.
 3. `PUT .../draft` saves the owner's edit of the title, description and hashtags as a new version.
+4. `POST .../uploads` (YT-004) checks everything again, stores a snapshot of what will be sent and
+   queues the `publish_youtube` job; `POST .../uploads/{upload_id}/retry` tries a failed upload
+   again. The upload itself is done by the job, never by a route.
 
-Nothing here sends anything to YouTube. The answers never return ORM objects.
+The answers never return ORM objects.
 """
 
 from __future__ import annotations
@@ -30,8 +33,8 @@ from app.api.jobs import JobStatus
 from app.api.projects import load_project
 from app.db.models import Job, Project, YouTubeChannel
 from app.db.session import SessionDep
-from app.jobs import dispatcher
-from app.services import user_feedback, youtube_auth, youtube_draft
+from app.jobs import dispatcher, live_status
+from app.services import user_feedback, youtube_auth, youtube_draft, youtube_publish
 from app.services import youtube_draft_writer as draft_writer
 from app.services.storage import media_url
 
@@ -247,15 +250,40 @@ class YouTubeThumbnailOut(BaseModel):
     error: str | None
 
 
+UploadState = Literal["uploading", "processing", "processed", "gave_up", "failed"]
+
+
+class YouTubeUploadProgressOut(BaseModel):
+    """The bytes of the video sent so far. Kept in memory, so it is None after a restart."""
+
+    sent_bytes: int
+    total_bytes: int
+
+
 class YouTubeUploadOut(BaseModel):
-    """An earlier press of Upload."""
+    """A press of Upload and how it is going."""
 
     id: int
     render_number: int
+    # None once the channel is disconnected; `channel_title` (from the snapshot) stays.
+    channel_row_id: int | None
     channel_title: str | None
+    # The title that was sent, from the snapshot.
+    title: str | None
     created_at: datetime
+    finished_at: datetime | None
     video_id: str | None
+    # The visibility that was asked for, and the one YouTube applied when it was read back.
+    privacy_sent: Privacy | None
     privacy_applied: Privacy | None
+    state: UploadState
+    # YouTube's processing: `waiting`, `processed`, `failed` or `gave_up`; None before the video
+    # is sent.
+    processing: str | None
+    error: str | None
+    can_retry: bool
+    job: DiscoveryJobOut | None
+    progress: YouTubeUploadProgressOut | None
 
 
 class YouTubePanelOut(BaseModel):
@@ -286,6 +314,25 @@ class YouTubeDraftRunOut(BaseModel):
     job_id: int
     # Why the thumbnail could not be started, or None. The draft is written either way.
     thumbnail_note: str | None
+
+
+class YouTubeUploadIn(BaseModel):
+    """Pressing Upload. The server checks all of it again, and the draft is the newest version
+    (`draft_version` is the one the page showed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    render_number: int = Field(ge=1, le=_MAX_INT)
+    channel_row_id: int = Field(ge=1, le=_MAX_INT)
+    draft_version: int = Field(ge=1, le=_MAX_INT)
+    privacy: Privacy
+    # None means not answered, which is refused: the owner must choose yes or no.
+    made_for_kids: bool | None = None
+    synthetic_media: bool | None = None
+    notify_subscribers: bool = True
+    # Captions are sent in YT-005; the server checks the render has a caption track when true.
+    captions: bool = False
 
 
 class YouTubeDraftEditIn(BaseModel):
@@ -343,17 +390,44 @@ def _thumbnail_out(situation: youtube_draft.ThumbnailSituation) -> YouTubeThumbn
     )
 
 
+def _sent_text(sent: object, *keys: str) -> str | None:
+    """A string of the upload's snapshot, found by following `keys`, or None."""
+    value: object = sent
+    for key in keys:
+        value = value.get(key) if isinstance(value, dict) else None
+    return value if isinstance(value, str) else None
+
+
 def _upload_out(entry: youtube_draft.UploadEntry) -> YouTubeUploadOut:
     row = entry.row
-    sent_channel = row.sent.get("channel") if isinstance(row.sent, dict) else None
-    title = sent_channel.get("title") if isinstance(sent_channel, dict) else None
+    view = youtube_publish.upload_state(row, entry.job)
+    live = live_status.upload_of(entry.job.id) if entry.job is not None else None
+    privacy_sent = _sent_text(row.sent, "privacy")
     return YouTubeUploadOut(
         id=row.id,
         render_number=entry.render_number,
-        channel_title=title if isinstance(title, str) else None,
+        channel_row_id=row.channel_row_id,
+        channel_title=_sent_text(row.sent, "channel", "title"),
+        title=_sent_text(row.sent, "title"),
         created_at=row.created_at,
+        finished_at=row.finished_at,
         video_id=row.video_id,
+        privacy_sent=(
+            cast(Privacy, privacy_sent) if privacy_sent in youtube_publish.PRIVACY_VALUES else None
+        ),
         privacy_applied=cast(Privacy | None, row.privacy_applied),
+        state=view.state,
+        processing=row.processing,
+        error=(row.error or (entry.job.error if entry.job is not None else None))
+        if view.state == "failed"
+        else None,
+        can_retry=view.can_retry,
+        job=_job_out(entry.job),
+        progress=(
+            YouTubeUploadProgressOut(sent_bytes=live.sent_bytes, total_bytes=live.total_bytes)
+            if live is not None and view.state == "uploading"
+            else None
+        ),
     )
 
 
@@ -456,3 +530,69 @@ async def save_youtube_draft(
     except youtube_draft.YouTubeDraftError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return await _panel(session, project, body.render_number)
+
+
+_UPLOAD_REFUSED = {
+    404: {"model": ErrorResponse, "description": "No such project, render or upload."},
+    409: _NOT_CONFIGURED[409],
+    422: {"model": ErrorResponse, "description": "A check before uploading failed."},
+}
+
+
+@router.post(
+    "/projects/{project_id}/youtube/uploads",
+    response_model=YouTubeUploadOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_UPLOAD_REFUSED,
+)
+async def start_youtube_upload(
+    project_id: int, body: YouTubeUploadIn, session: SessionDep
+) -> YouTubeUploadOut:
+    """Checks everything again, stores what will be sent and starts the upload. If this render
+    is already being sent to this channel, that upload is returned and no second one is made.
+    """
+    project = await load_project(session, project_id)
+    try:
+        entry = await youtube_publish.start_upload(
+            session,
+            project,
+            render_number=body.render_number,
+            channel_row_id=body.channel_row_id,
+            draft_version=body.draft_version,
+            privacy=body.privacy,
+            made_for_kids=body.made_for_kids,
+            synthetic_media=body.synthetic_media,
+            notify_subscribers=body.notify_subscribers,
+            captions=body.captions,
+        )
+    except youtube_draft.NoSuchRenderError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except youtube_publish.YouTubePublishError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return _upload_out(entry)
+
+
+@router.post(
+    "/projects/{project_id}/youtube/uploads/{upload_id}/retry",
+    response_model=YouTubeUploadOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_UPLOAD_REFUSED,
+)
+async def retry_youtube_upload(
+    project_id: int, upload_id: int, session: SessionDep
+) -> YouTubeUploadOut:
+    """Tries a failed upload again. What was done is not done again: a video that was sent is
+    not sent a second time.
+    """
+    if not 1 <= upload_id <= _MAX_INT:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "There is no such upload.")
+    project = await load_project(session, project_id)
+    try:
+        entry = await youtube_publish.retry(session, project, upload_id)
+    except youtube_publish.NoSuchUploadError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except youtube_publish.YouTubePublishError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return _upload_out(entry)

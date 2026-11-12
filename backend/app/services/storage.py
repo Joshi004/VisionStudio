@@ -127,6 +127,13 @@ class Storage:
         size_bytes, sha256 = await anyio.to_thread.run_sync(self._hash_file, path)
         return TempFile(path=path, size_bytes=size_bytes, sha256=sha256)
 
+    async def hash_stored(self, relative_path: str) -> tuple[int, str]:
+        """The size in bytes and the SHA-256 of a stored file, read in a thread. Raises
+        StorageError for a path that is not a stored file's, and FileNotFoundError when the
+        file is gone.
+        """
+        return await anyio.to_thread.run_sync(self._hash_file, self.get_path(relative_path))
+
     @staticmethod
     def _hash_file(path: Path) -> tuple[int, str]:
         digest = hashlib.sha256()

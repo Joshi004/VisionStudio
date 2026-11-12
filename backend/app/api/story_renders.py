@@ -320,16 +320,9 @@ def master_out(row: StoryRender | SceneRender) -> RenderMasterOut | None:
     )
 
 
-def _recorded_captions(row: StoryRender) -> dict[str, Any] | None:
-    """The caption track the render recorded, as stored (not read), or None."""
-    timeline = row.inputs if isinstance(row.inputs, dict) else {}
-    captions = timeline.get("captions")
-    return captions if isinstance(captions, dict) else None
-
-
 def _render_out(entry: RenderEntry) -> StoryRenderOut:
     row = entry.row
-    captions = _recorded_captions(row)
+    captions = story_renders.recorded_captions(row)
     return StoryRenderOut(
         id=row.id,
         render_number=row.render_number,
@@ -434,7 +427,7 @@ async def _render_track(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such render.")
     try:
-        track = caption_plan.parse_track(_recorded_captions(row))
+        track = caption_plan.parse_track(story_renders.recorded_captions(row))
     except caption_plan.CaptionError as exc:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
