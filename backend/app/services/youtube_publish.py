@@ -279,7 +279,7 @@ async def start_upload(
             "The render's video file is not the one that was recorded, so it will not be sent."
         )
 
-    situation = await youtube_draft.thumbnail_situation(session, project, render)
+    situation = await youtube_draft.thumbnail_situation(session, project)
     if situation.status == "making":
         raise YouTubePublishError("The thumbnail is still being made.")
     if situation.pictures_making:

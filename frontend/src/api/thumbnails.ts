@@ -19,6 +19,7 @@ export type ThumbnailConcept = components["schemas"]["ConceptOut"];
 export type ThumbnailConceptInput = components["schemas"]["ConceptIn"];
 export type ThumbnailPerson = components["schemas"]["PersonOut"];
 export type ThumbnailCastOption = components["schemas"]["CastOptionOut"];
+export type ThumbnailPlaceOption = components["schemas"]["PlaceOptionOut"];
 export type Thumbnail = components["schemas"]["ThumbnailOut"];
 export type ThumbnailTextArea = ThumbnailConcept["text_area"];
 

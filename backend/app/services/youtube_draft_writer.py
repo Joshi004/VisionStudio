@@ -3,8 +3,9 @@
 
 Pure functions, no I/O.
 
-One call reads the Story Bible, the script, the scene titles and what the render is (story or
-explainer, orientation, length, whether YouTube will show it as a Short), and answers the title,
+One call reads the whole script (the main source), the Story Bible, the scene titles, the names
+of the people in the video and what the render is (story or explainer, orientation, length,
+whether YouTube will show it as a Short), and answers the title,
 the description (without hashtags), the hashtags (lowercase) and the tags. The two declarations
 ("made for kids", "contains realistic AI content") are not drafted: the panel has fixed defaults
 (YTF-002).
@@ -24,7 +25,7 @@ from typing import Any, Final
 from app.services import graphic_theme_writer, user_feedback
 from app.services.music_bible_writer import parse_answer as parse_answer
 from app.services.project_kinds import KIND_EXPLAINER
-from app.services.text_limits import cut_at_word, length_rule
+from app.services.text_limits import length_rule
 
 # YouTube's limits (Data API, `videos.insert`). The title counts characters, the description
 # counts UTF-8 bytes. Neither may hold `<` or `>`.
@@ -44,10 +45,6 @@ TAG_MAX_CHARS: Final = 100
 # A short is a vertical or square video of up to three minutes.
 SHORT_MAX_SECONDS: Final = 180
 
-# The script is sent whole up to this many characters; a 10-minute story is about 9,000. Over it
-# the script is cut at a whole word, the model is told, and the scene titles give the rest.
-SCRIPT_MAX_CHARS: Final = 20_000
-
 # One answer of moderate size. The model's reasoning counts against the cap.
 MAX_TOKENS: Final = 12_000
 REASONING_EFFORT: Final = "high"
@@ -66,9 +63,16 @@ _HASHTAG = re.compile(r"[A-Za-z0-9_]+")
 # --- The instructions ------------------------------------------------------------------------
 
 _RULES: Final = """\
-You write the YouTube upload text for one finished video. You are given the Story Bible of the \
-video, its script, the titles of its scenes, and facts about the finished video. The owner reads \
-and edits everything you write before it goes anywhere. Write in English.
+You write the YouTube upload text for one finished video. You are given the script of the \
+video, the Story Bible, the titles of its scenes, the names of the people in it, and facts about \
+the video. The owner reads and edits everything you write before it goes anywhere. Write in \
+English.
+
+THE SOURCE
+- The script is the main source of what the video is about: the title and the description must \
+say what the script says. The Story Bible gives the genre, tone and style, the scene titles give \
+the order, and "people" gives the names of who is in the video. Do not invent anything that none \
+of them says.
 
 THE TITLE
 - "title" is the title viewers see. It is at most {title_max} characters, with no "<" or ">". \
@@ -100,8 +104,6 @@ THE FACTS OF THE VIDEO
 - "kind" says whether it is a story or an explainer, and "orientation" and "duration_s" give its \
 shape and length. When "is_short" is true YouTube will show it as a Short: keep the title short \
 and punchy, and keep the description brief.
-- When "script_cut" is true the script given is only the first part; rely on the scene titles \
-for the rest, and do not say the video ends where the script given ends.
 
 {feedback}
 
@@ -146,24 +148,25 @@ def context_for_model(
     bible: dict[str, Any],
     script_text: str,
     scene_titles: list[str],
+    people: list[str],
     *,
     kind: str,
     orientation: str,
     duration_s: float | None,
     short: bool,
 ) -> dict[str, Any]:
-    """Everything the model is told about the video. It is stored on the job."""
-    script = script_text.strip()
-    cut = len(script) > SCRIPT_MAX_CHARS
+    """Everything the model is told about the video. It is stored on the job. The script is
+    given whole.
+    """
     return {
         "video": graphic_theme_writer.bible_for_model(bible),
         "kind": "explainer" if kind == KIND_EXPLAINER else "story",
         "orientation": orientation,
         "duration_s": round(duration_s) if duration_s is not None else None,
         "is_short": short,
+        "people": people,
         "scenes": scene_titles,
-        "script": cut_at_word(script, SCRIPT_MAX_CHARS) if cut else script,
-        "script_cut": cut,
+        "script": script_text.strip(),
     }
 
 

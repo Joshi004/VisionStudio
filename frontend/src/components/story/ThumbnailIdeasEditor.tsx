@@ -17,11 +17,12 @@ import type {
   ThumbnailCastOption,
   ThumbnailConcept,
   ThumbnailConceptInput,
+  ThumbnailPlaceOption,
   ThumbnailTextArea,
 } from "../../api/thumbnails";
 
 /** The most people the model may put on one thumbnail. */
-const MAX_PEOPLE = 2;
+const MAX_PEOPLE = 1;
 /** The longest headline the backend accepts. */
 const MAX_HEADLINE_CHARS = 40;
 
@@ -46,6 +47,8 @@ const TEXT_AREA_OPTIONS = (
 type ThumbnailIdeasEditorProps = {
   concepts: ThumbnailConcept[];
   cast: ThumbnailCastOption[];
+  /** The places that may be the setting; empty for an explainer. */
+  places: ThumbnailPlaceOption[];
   /** True while the ideas or a picture are being made: nothing can be changed or started. */
   busy: boolean;
   saving: boolean;
@@ -64,6 +67,7 @@ type ThumbnailIdeasEditorProps = {
 export function ThumbnailIdeasEditor({
   concepts,
   cast,
+  places,
   busy,
   saving,
   saveError,
@@ -131,6 +135,20 @@ export function ThumbnailIdeasEditor({
                 }
               />
             </Group>
+            {places.length > 0 && (
+              <Select
+                label="Place"
+                description="The setting of the picture. Its picture is shown to the image model."
+                placeholder="No place"
+                clearable
+                data={places.map((place) => ({
+                  value: place.id,
+                  label: place.name,
+                }))}
+                value={concept.environment ?? null}
+                onChange={(value) => change(index, { environment: value })}
+              />
+            )}
             <PeopleEditor
               people={concept.people}
               cast={cast}
@@ -197,7 +215,7 @@ type PeopleEditorProps = {
   onChange: (people: ThumbnailConceptInput["people"]) => void;
 };
 
-/** Who is on the picture: none, or up to two people from the cast, each with a look. */
+/** Who is on the picture: nobody, or one person from the cast with a look. */
 function PeopleEditor({ people, cast, reason, onChange }: PeopleEditorProps) {
   const looksOf = (id: string) =>
     cast.find((option) => option.id === id)?.looks ?? [];

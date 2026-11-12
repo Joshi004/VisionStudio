@@ -160,6 +160,7 @@ export function ThumbnailsPanel({ projectId }: ThumbnailsPanelProps) {
             key={latest.version}
             concepts={latest.content.concepts}
             cast={ideas.cast}
+            places={ideas.places}
             busy={writing || makingPictures}
             saving={save.isPending}
             saveError={save.error}

@@ -176,7 +176,6 @@ SAVING_CALLOUT_LOOK: Final = "saving the callout look"
 
 # --- Running: the thumbnail concepts ------------------------------------------------------
 # `write_thumbnail_concepts` also uses PREPARING_PROMPT and `asking_model` from above (one call).
-TAKING_FRAMES: Final = "taking frames from the video"
 SAVING_THUMBNAIL_CONCEPTS: Final = "saving the thumbnail ideas"
 
 # --- Running: the YouTube draft (YT-003) --------------------------------------------------

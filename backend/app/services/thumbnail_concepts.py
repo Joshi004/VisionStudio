@@ -4,22 +4,25 @@ concepts, saving the owner's edits, and reading the versions back.
 Every version is a new `thumbnail_concepts` row and a stored row is never changed (the artifact
 provenance convention, DATABASE_STRUCTURE.md Section 2.1). `content` is `{concepts: [4 items]}`
 (`services/thumbnail_concept_writer`). `inputs` records the Story Bible the version was written
-from, and the newest render when its frames were sent to the model, so whether the version is
-out of date is worked out when it is read and never stored.
+from and the hash of the script, so whether the version is out of date is worked out when it is
+read and never stored. A render has no part in it: the model reads text only (YTF-006).
 
 Two ways make a version:
 
-- `start_run` queues the `write_thumbnail_concepts` job: one call to the vision model writes the
-  four concepts, and code checks them.
+- `start_run` queues the `write_thumbnail_concepts` job: one call to the story model writes the
+  four concepts from the script, and code checks them.
 - `save_manual` stores the owner's edit of the newest version, checked by the same rules.
 
 **Who may appear.** An explainer: its presenter. A story: every character linked to the project.
 Each person is offered with the looks that have a picture (the character's usual look, and each
 named look the pinned version froze); a character with no picture is left out, because the
-picture step needs one to draw them.
+picture step needs one to draw them. A picture shows at most one person.
 
-**When concepts can be made.** The Story Bible must exist. A render is not needed: with one, the
-model also sees frames of it.
+**Which place may appear.** A story only: every environment linked to the project whose pinned
+version has a reference picture. An explainer has none. A picture uses at most one place.
+
+**When concepts can be made.** The Story Bible must exist. A render is not needed, and none is
+used.
 """
 
 from __future__ import annotations
@@ -46,6 +49,8 @@ from app.services import (
     character_links,
     character_versions,
     discovery,
+    environment_links,
+    environment_versions,
     explainer,
     provenance,
     story_bible,
@@ -58,7 +63,6 @@ SOURCE_AI: Final = "ai"
 SOURCE_MANUAL: Final = "manual"
 
 STORY_BIBLE_KIND: Final = "story_bible"
-STORY_RENDER_KIND: Final = "story_render"
 
 DEFAULT_LOOK: Final = "default"
 
@@ -98,11 +102,13 @@ class CastOption:
     looks: list[Look]
 
     def for_model(self) -> dict[str, Any]:
-        """What the model is told. The lab image ids stay in the app."""
+        """What the model is told: no description of the person (the picture step shows the
+        look's photo to the image model), only the id, the name and the looks. The lab image ids
+        stay in the app.
+        """
         return {
             "id": self.id,
             "name": self.name,
-            "about": self.about,
             "looks": [{"slug": look.slug, "description": look.description} for look in self.looks],
         }
 
@@ -250,6 +256,49 @@ async def cast_options(session: AsyncSession, project: Project) -> list[CastOpti
     return await _story_options(session, project)
 
 
+@dataclass(frozen=True)
+class PlaceOption:
+    """One place that may be the setting of a thumbnail. `id` is what the concepts call it, and
+    `image_id` the lab image of the place's reference picture.
+    """
+
+    id: str
+    name: str
+    image_id: int
+
+    def for_model(self) -> dict[str, Any]:
+        """What the model is told. The lab image id stays in the app."""
+        return {"id": self.id, "name": self.name}
+
+
+async def place_options(session: AsyncSession, project: Project) -> list[PlaceOption]:
+    """The places that may be the setting of this project's thumbnails: for a story, each linked
+    environment whose pinned version has a reference picture. An explainer has none. Worked out
+    on every call.
+    """
+    if explainer.is_explainer(project):
+        return []
+    links = await environment_links.state(session, project.id)
+    options: list[PlaceOption] = []
+    for entry in links.entries:
+        info = entry.info
+        if info is None:
+            continue
+        version = await environment_versions.get_version(
+            session, info.environment.id, info.link.pinned_version
+        )
+        if version is None or version.reference_image_id is None:
+            continue
+        options.append(
+            PlaceOption(
+                id=str(entry.item["id"]),
+                name=str(entry.item.get("name") or info.environment.name),
+                image_id=version.reference_image_id,
+            )
+        )
+    return options
+
+
 def looks_of(options: list[CastOption]) -> dict[str, set[str]]:
     """The checker's view of `options`: each person's id with the look slugs they may wear."""
     return {option.id: {look.slug for look in option.looks} for option in options}
@@ -352,15 +401,15 @@ async def newest_render(session: AsyncSession, project_id: int) -> StoryRender |
 
 
 def _saved_inputs(
-    bible: Any, render: StoryRender | None, feedback: user_feedback.Feedback | None
+    bible: Any, script: str, feedback: user_feedback.Feedback | None
 ) -> dict[str, Any]:
-    """What a version is built from, in the artifact shape of D-3."""
-    artifacts: list[dict[str, Any]] = [
-        {"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version}
-    ]
-    if render is not None:
-        artifacts.append({"kind": STORY_RENDER_KIND, "id": render.id})
-    inputs: dict[str, Any] = {"artifacts": artifacts}
+    """What a version is built from, in the artifact shape of D-3: the Story Bible and the hash
+    of the script that was read.
+    """
+    inputs: dict[str, Any] = {
+        "artifacts": [{"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version}],
+        "script_sha256": story_bible.story_sha256(script),
+    }
     if feedback is not None:
         inputs["feedback"] = feedback.for_version()
     return inputs
@@ -399,7 +448,6 @@ async def start_run(
     project: Project,
     *,
     feedback: str | None = None,
-    render: StoryRender | None = None,
     then_picture: dict[str, Any] | None = None,
 ) -> Job:
     """Queues the job that writes the concepts, from a copy of what it is made from, and
@@ -407,11 +455,10 @@ async def start_run(
     new one is made; a note is never dropped silently, so a note is refused in that case.
 
     `feedback` is the owner's note on the newest version: the model writes the four concepts
-    again with the note and that version in its request. `render` is the render whose frames
-    are used (the newest when None). `then_picture` (`{"chosen_before": id or None}`) asks the
-    job, once the concepts are stored, to make the pictures of all the concepts and choose the
-    first one that is ready, unless the chosen thumbnail changed meanwhile (the YouTube draft,
-    YT-003, YTF-003).
+    again with the note and that version in its request. `then_picture`
+    (`{"chosen_before": id or None}`) asks the job, once the concepts are stored, to make the
+    pictures of all the concepts and choose the first one that is ready, unless the chosen
+    thumbnail changed meanwhile (the YouTube draft, YT-003, YTF-003).
     Raises ThumbnailConceptsError.
     """
     bible = await story_bible.latest(session, project.id)
@@ -419,19 +466,21 @@ async def start_run(
         raise ThumbnailConceptsError(NO_BIBLE_MESSAGE)
     note = _feedback_on(feedback, await latest(session, project.id)) if feedback else None
     options = await cast_options(session, project)
-    if render is None:
-        render = await newest_render(session, project.id)
+    places = await place_options(session, project)
+    script = project.script_text or ""
     context = writer.context_for_model(
         bible.content,
         project.orientation,
+        script,
         await scene_titles(session, project.id),
         [option.for_model() for option in options],
+        [place.for_model() for place in places],
     )
     job_input: dict[str, Any] = {
         "context": context,
         "looks_of": {person: sorted(slugs) for person, slugs in looks_of(options).items()},
-        "render_id": render.id if render is not None else None,
-        "saved_inputs": _saved_inputs(bible, render, note),
+        "place_ids": [place.id for place in places],
+        "saved_inputs": _saved_inputs(bible, script, note),
     }
     if note is not None:
         job_input["feedback"] = note.for_job()
@@ -464,16 +513,21 @@ async def save_manual(
     if active is not None and active.status in store.ACTIVE_STATUSES:
         raise ThumbnailConceptsError(BEING_WRITTEN_MESSAGE)
     options = await cast_options(session, project)
+    place_ids = {place.id for place in await place_options(session, project)}
     try:
         content = writer.check_content(
-            {"concepts": concepts}, looks_of(options), require_headline=False
+            {"concepts": concepts}, looks_of(options), place_ids, require_headline=False
         )
     except ValueError as exc:
         raise ThumbnailConceptsError(str(exc)) from exc
-    inputs = {
-        "artifacts": newest.inputs.get("artifacts", []) if isinstance(newest.inputs, dict) else [],
+    older = newest.inputs if isinstance(newest.inputs, dict) else {}
+    inputs: dict[str, Any] = {
+        "artifacts": older.get("artifacts", []),
         "edited_from": {"id": newest.id, "version": newest.version},
     }
+    # A version made before the script was recorded has no hash, and an edit of it has none.
+    if "script_sha256" in older:
+        inputs["script_sha256"] = older["script_sha256"]
     row = await _add_version(
         session,
         project_id=project.id,
@@ -499,22 +553,17 @@ def _recorded(inputs: Any, kind: str) -> dict[str, Any] | None:
     return None
 
 
-def out_of_date_reasons(
-    row: ThumbnailConcepts, bible: Any, render: StoryRender | None
-) -> list[str]:
-    """Why a version is no longer current, one sentence each."""
+def out_of_date_reasons(row: ThumbnailConcepts, bible: Any, script_text: str) -> list[str]:
+    """Why a version is no longer current, one sentence each. A render never makes a version out
+    of date: the model reads text only. A version made before the script was recorded is not
+    judged on the script.
+    """
     reasons: list[str] = []
     if not provenance.same_row(_recorded(row.inputs, STORY_BIBLE_KIND), bible):
         reasons.append("The Story Bible was written again since these ideas were made.")
-    recorded_render = _recorded(row.inputs, STORY_RENDER_KIND)
-    if render is not None:
-        if recorded_render is None:
-            reasons.append(
-                "The video has been rendered since these ideas were made, "
-                "so its frames can now be used."
-            )
-        elif recorded_render.get("id") != render.id:
-            reasons.append("The video was rendered again since these ideas were made.")
+    recorded_script = row.inputs.get("script_sha256") if isinstance(row.inputs, dict) else None
+    if recorded_script is not None and recorded_script != story_bible.story_sha256(script_text):
+        reasons.append("The script changed since these ideas were made.")
     return reasons
 
 
@@ -532,6 +581,8 @@ class ConceptsState:
     blocked_reason: str | None
     # The people who may appear now, each with their looks.
     cast: list[CastOption]
+    # The places that may be the setting now.
+    places: list[PlaceOption]
 
 
 @memoized_state
@@ -541,8 +592,9 @@ async def state(session: AsyncSession, project: Project) -> ConceptsState:
     """
     newest = await latest(session, project.id)
     bible = await story_bible.latest(session, project.id)
-    render = await newest_render(session, project.id)
-    reasons = out_of_date_reasons(newest, bible, render) if newest is not None else []
+    reasons = (
+        out_of_date_reasons(newest, bible, project.script_text or "") if newest is not None else []
+    )
     return ConceptsState(
         latest=newest,
         versions=await list_versions(session, project.id),
@@ -551,4 +603,5 @@ async def state(session: AsyncSession, project: Project) -> ConceptsState:
         reasons=reasons,
         blocked_reason=None if bible is not None else NO_BIBLE_MESSAGE,
         cast=await cast_options(session, project),
+        places=await place_options(session, project),
     )

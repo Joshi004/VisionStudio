@@ -236,6 +236,7 @@ export function YouTubeThumbnailsSection({
                 key={latest.version}
                 concepts={latest.content.concepts}
                 cast={ideas?.cast ?? []}
+                places={ideas?.places ?? []}
                 busy={busy}
                 saving={save.isPending}
                 saveError={save.error}

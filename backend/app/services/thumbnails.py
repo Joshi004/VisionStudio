@@ -6,9 +6,9 @@ and:
 
 1. builds the picture's prompt in code from the concept's fields (`image_prompt`), so what the
    model decided (who appears, where the headline goes) is what the picture is asked for;
-2. starts one Image lab run per concept: text to image when nobody appears, Qwen-Image-2.1's
-   edit endpoint when people do, with each person's look picture as a reference ("image 1" in
-   the prompt is the first person);
+2. starts one Image lab run per concept: text to image when nobody and no place is used,
+   Qwen-Image-2.1's edit endpoint otherwise, with the person's look picture as the first
+   reference ("image 1" in the prompt) and the place's picture after it (YTF-006);
 3. when the picture is stored (`on_thumbnail_image_stored`, called by `jobs/generate_lab_image`),
    draws the headline on it (`services/thumbnail_compose.py`) and stores the finished PNG under
    the project's media folder.
@@ -83,12 +83,16 @@ def _sentence(text: str) -> str:
 
 
 def image_prompt(
-    concept: dict[str, Any], people: list[tuple[str, dict[str, str]]], shape: str
+    concept: dict[str, Any],
+    people: list[tuple[str, dict[str, str]]],
+    shape: str,
+    place_name: str | None = None,
 ) -> str:
     """The prompt of one concept's picture. `people` is each person who appears, as
     `(name, {expression, pose, ...})`, in the order of the references (the first person is
-    image 1). With no people the prompt is for text to image. `shape` is the picture's shape,
-    for example `16:9`.
+    image 1). `place_name` is the place that is the setting, when there is one: its picture is
+    the reference after the people's. With no people and no place the prompt is for text to
+    image. `shape` is the picture's shape, for example `16:9`.
     """
     area = _AREA_WORDS.get(str(concept["text_area"]), "one side")
     parts = [f"A bold, eye-catching video thumbnail picture, {shape} shape."]
@@ -99,6 +103,13 @@ def image_prompt(
             f"Image {number} shows {name}. Draw {name} in the new picture with exactly the face, "
             f"hair, skin and clothes of image {number}, and do not copy the plain backdrop of "
             f"image {number}. {expression} {pose}"
+        )
+    if place_name is not None:
+        number = len(people) + 1
+        parts.append(
+            f"Image {number} shows the place {place_name}. Use it as the setting of the new "
+            f"picture, with its look, materials and colours, and do not copy any person that is "
+            f"in image {number}."
         )
     parts.append(_sentence(f"The idea: {concept['idea']}"))
     parts.append(_sentence(f"Composition: {concept['composition']}"))
@@ -128,6 +139,7 @@ async def _start_one(
     index: int,
     concept: dict[str, Any],
     options: dict[str, thumbnail_concepts.CastOption],
+    places: dict[str, thumbnail_concepts.PlaceOption],
     mode: image_models.ImageMode,
     choose_when_ready: dict[str, Any] | None = None,
 ) -> Thumbnail:
@@ -147,7 +159,17 @@ async def _start_one(
             )
         people.append((option.name, person))
         references.append(Ref(source="lab", id=look.image_id))
-    prompt = image_prompt(concept, people, shape)
+    place: thumbnail_concepts.PlaceOption | None = None
+    place_id = concept.get("environment")
+    if place_id:
+        place = places.get(place_id)
+        if place is None:
+            raise ThumbnailError(
+                f"Idea {index + 1}: the place '{place_id}' has no picture any more. "
+                "Change the idea first."
+            )
+        references.append(Ref(source="lab", id=place.image_id))
+    prompt = image_prompt(concept, people, shape, place.name if place is not None else None)
     try:
         if references:
             run, job = await image_lab.create_qwen_edit_run(
@@ -213,6 +235,7 @@ async def start_images(
     options = {
         option.id: option for option in await thumbnail_concepts.cast_options(session, project)
     }
+    places = {place.id: place for place in await thumbnail_concepts.place_options(session, project)}
     mode = image_models.resolve_mode(await settings_service.get_str(session, IMAGE_MODE_KEY))
     started: list[Thumbnail] = []
     try:
@@ -225,6 +248,7 @@ async def start_images(
                     index,
                     _concept_at(row, index),
                     options,
+                    places,
                     mode,
                     choose_when_ready,
                 )
@@ -537,10 +561,12 @@ async def state(session: AsyncSession, project: Project) -> ThumbnailsState:
     run_by_id = {run.id: run for run in runs}
 
     bible = await story_bible.latest(session, project.id)
-    render = await thumbnail_concepts.newest_render(session, project.id)
+    script_text = project.script_text or ""
     reasons_of: dict[int, list[str]] = {}
     for version in concepts.versions:
-        reasons_of[version.version] = thumbnail_concepts.out_of_date_reasons(version, bible, render)
+        reasons_of[version.version] = thumbnail_concepts.out_of_date_reasons(
+            version, bible, script_text
+        )
 
     entries: list[ThumbnailEntry] = []
     for row in rows:

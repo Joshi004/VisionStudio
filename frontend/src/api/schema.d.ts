@@ -7658,6 +7658,8 @@ export interface components {
             text_area: "left" | "right" | "top" | "bottom" | "top_left" | "top_right" | "bottom_left" | "bottom_right";
             /** People */
             people: components["schemas"]["PersonIn"][];
+            /** Environment */
+            environment?: string | null;
             /** People Reason */
             people_reason: string;
         };
@@ -7682,6 +7684,8 @@ export interface components {
             text_area: "left" | "right" | "top" | "bottom" | "top_left" | "top_right" | "bottom_left" | "bottom_right";
             /** People */
             people: components["schemas"]["PersonOut"][];
+            /** Environment */
+            environment?: string | null;
             /** People Reason */
             people_reason: string;
         };
@@ -10101,6 +10105,8 @@ export interface components {
             blocked_reason: string | null;
             /** Cast */
             cast: components["schemas"]["CastOptionOut"][];
+            /** Places */
+            places: components["schemas"]["PlaceOptionOut"][];
         };
         /**
          * ImageEntryOut
@@ -12918,6 +12924,16 @@ export interface components {
             total: number;
             /** Left Alone */
             left_alone: number;
+        };
+        /**
+         * PlaceOptionOut
+         * @description A place that may be the setting of a thumbnail.
+         */
+        PlaceOptionOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** PlacedSoundOut */
         PlacedSoundOut: {

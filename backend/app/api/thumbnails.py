@@ -1,9 +1,9 @@
 """`/api/projects/{project_id}/thumbnails` and `.../thumbnail-concepts`: the optional thumbnail
 flow of a project, for a story and for an explainer.
 
-1. `POST .../thumbnail-concepts/run` starts the `write_thumbnail_concepts` job: a vision model
-   writes four different thumbnail concepts. The body may hold `feedback`, the owner's note on
-   the newest version.
+1. `POST .../thumbnail-concepts/run` starts the `write_thumbnail_concepts` job: the story model
+   writes four different thumbnail concepts from the script. The body may hold `feedback`, the
+   owner's note on the newest version.
 2. `PUT .../thumbnail-concepts` saves the owner's edit of the four concepts as a new version.
 3. `POST .../thumbnails` makes one picture for each chosen concept of a version (GPU work).
 4. `PUT .../thumbnails/{id}/headline` changes a headline and draws the picture again (no GPU).
@@ -82,6 +82,8 @@ class ConceptIn(BaseModel):
     headline: str = Field(max_length=500)
     text_area: TextArea
     people: list[PersonIn] = Field(max_length=writer.MAX_PEOPLE)
+    # The id of the place that is the setting, or None. The service checks it again.
+    environment: str | None = Field(default=None, max_length=100)
     people_reason: str = Field(max_length=1000)
 
 
@@ -109,6 +111,8 @@ class ConceptOut(BaseModel):
     headline: str
     text_area: TextArea
     people: list[PersonOut]
+    # The id of the place that is the setting. None for none, and for ideas made before places.
+    environment: str | None = None
     people_reason: str
 
 
@@ -128,6 +132,13 @@ class CastOptionOut(BaseModel):
     name: str
     about: str
     looks: list[ThumbnailLookOut]
+
+
+class PlaceOptionOut(BaseModel):
+    """A place that may be the setting of a thumbnail."""
+
+    id: str
+    name: str
 
 
 class ConceptsVersionOut(BaseModel):
@@ -163,6 +174,8 @@ class IdeasState(BaseModel):
     # Why no ideas can be written yet, or None.
     blocked_reason: str | None
     cast: list[CastOptionOut]
+    # The places that may be the setting now. Empty for an explainer.
+    places: list[PlaceOptionOut]
 
 
 # --- What a thumbnail holds ------------------------------------------------------------------
@@ -278,6 +291,7 @@ def _ideas_out(state: concepts_service.ConceptsState) -> IdeasState:
             )
             for option in state.cast
         ],
+        places=[PlaceOptionOut(id=place.id, name=place.name) for place in state.places],
     )
 
 

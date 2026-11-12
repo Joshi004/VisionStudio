@@ -217,23 +217,24 @@ class ThumbnailSituation:
     pictures_making: bool = False
 
 
-async def thumbnail_situation(
-    session: AsyncSession, project: Project, render: StoryRender | None
-) -> ThumbnailSituation:
-    """The chosen thumbnail and whether it is current for `render`, and whether a thumbnail is
-    being made now. Worked out on every read; nothing is stored.
+async def thumbnail_situation(session: AsyncSession, project: Project) -> ThumbnailSituation:
+    """The chosen thumbnail and whether it is current (its ideas were written from the present
+    Story Bible and script; a render does not matter), and whether a thumbnail is being made
+    now. Worked out on every read; nothing is stored.
     """
     state = await thumbnails.state(session, project)
     bible = await story_bible.latest(session, project.id)
     chosen_entry = next((e for e in state.thumbnails if e.row.chosen and e.row.path), None)
     reasons: list[str] = []
-    if chosen_entry is not None and render is not None:
+    if chosen_entry is not None:
         version = next(
             (v for v in state.concepts.versions if v.version == chosen_entry.row.concept_version),
             None,
         )
         if version is not None:
-            reasons = thumbnail_concepts.out_of_date_reasons(version, bible, render)
+            reasons = thumbnail_concepts.out_of_date_reasons(
+                version, bible, project.script_text or ""
+            )
     making = _job_active(state.concepts.job) or any(_job_active(e.job) for e in state.thumbnails)
     newest_ideas = state.concepts.latest
     pictures_making = newest_ideas is not None and any(
@@ -265,25 +266,25 @@ async def thumbnail_situation(
     )
 
 
-async def _start_thumbnail(
-    session: AsyncSession, project: Project, render: StoryRender
-) -> str | None:
-    """Makes sure the render being published gets a chosen thumbnail (§4.5). Nothing is done
-    when the chosen thumbnail is current for this render, or when thumbnail work is already
-    running. Otherwise, when the newest ideas are current, a picture is started for every idea
-    that has none; or the thumbnail concepts are written from this render's frames and, when
-    they are stored, the pictures of all of them are made (YTF-003). The first picture to
-    finish is chosen, unless the owner chooses one meanwhile. Commits. Returns a sentence when
-    the thumbnail could not be started (the draft is not affected), else None.
+async def _start_thumbnail(session: AsyncSession, project: Project) -> str | None:
+    """Makes sure the project has a chosen thumbnail (§4.5). Nothing is done when the chosen
+    thumbnail is current, or when thumbnail work is already running. Otherwise, when the newest
+    ideas are current, a picture is started for every idea that has none; or the thumbnail
+    concepts are written from the script and, when they are stored, the pictures of all of them
+    are made (YTF-003). The first picture to finish is chosen, unless the owner chooses one
+    meanwhile. A render takes no part (YTF-006). Commits. Returns a sentence when the thumbnail
+    could not be started (the draft is not affected), else None.
     """
-    situation = await thumbnail_situation(session, project, render)
+    situation = await thumbnail_situation(session, project)
     if situation.status in ("ready", "making"):
         return None
     marker = {"chosen_before": situation.chosen.id if situation.chosen is not None else None}
     bible = await story_bible.latest(session, project.id)
     newest = await thumbnail_concepts.latest(session, project.id)
     try:
-        if newest is not None and not thumbnail_concepts.out_of_date_reasons(newest, bible, render):
+        if newest is not None and not thumbnail_concepts.out_of_date_reasons(
+            newest, bible, project.script_text or ""
+        ):
             missing = await thumbnails.indexes_without_picture(session, project.id, newest)
             if not missing:
                 return _ALL_PICTURES_MADE_MESSAGE
@@ -291,7 +292,7 @@ async def _start_thumbnail(
                 session, project, newest.version, missing, choose_when_ready=marker
             )
         else:
-            await thumbnail_concepts.start_run(session, project, render=render, then_picture=marker)
+            await thumbnail_concepts.start_run(session, project, then_picture=marker)
     except (thumbnails.ThumbnailError, thumbnail_concepts.ThumbnailConceptsError) as exc:
         return str(exc)
     return None
@@ -326,10 +327,12 @@ async def start_run(
     note = _feedback_on(feedback, await latest(session, project_id)) if feedback else None
     script = project.script_text or ""
     scenes = await _scenes_row(session, project_id)
+    cast = await thumbnail_concepts.cast_options(session, project)
     context = writer.context_for_model(
         bible.content,
         script,
         await thumbnail_concepts.scene_titles(session, project_id),
+        [option.name for option in cast],
         kind=project.kind,
         orientation=project.orientation,
         duration_s=render.duration_s,
@@ -348,7 +351,7 @@ async def start_run(
     job_id = job.id
     if note is not None and not created:
         raise YouTubeDraftError(BEING_WRITTEN_MESSAGE)
-    thumbnail_note = await _start_thumbnail(session, project, render)
+    thumbnail_note = await _start_thumbnail(session, project)
     return job_id, thumbnail_note
 
 
@@ -632,9 +635,7 @@ async def panel_state(
         blocked_reason=blocked,
         draft=draft,
         job=await store.latest_job(session, project.id, JOB_TYPE),
-        thumbnail=await thumbnail_situation(
-            session, project, selected.row if selected is not None else None
-        ),
+        thumbnail=await thumbnail_situation(session, project),
         channels=channels,
         default_channel_row_id=default_channel(channels),
         default_privacy=await settings_service.get_str(

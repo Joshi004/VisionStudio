@@ -1,13 +1,16 @@
-"""The thumbnail concepts: the instructions to the vision model, and the checks of what it wrote.
+"""The thumbnail concepts: the instructions to the model, and the checks of what it wrote.
 
 Pure functions, no I/O.
 
-One call per run reads the Story Bible's description of the video, the scene titles, the people
-who may appear (with the looks each can wear) and, when a render exists, a few frames of it. It
-answers exactly four **different** thumbnail concepts. Each says what the picture shows, where
-the empty area for the headline is, the headline itself, and which people (none, or one or two)
-appear and how. Code then draws the picture from the concept (`services/thumbnails.py`) and
-draws the headline (`services/thumbnail_compose.py`); the model never draws anything.
+One call per run reads the whole script of the video (the main source), the Story Bible's short
+description of it, the scene titles, the people who may appear (with the looks each can wear) and,
+for a story, the places that may appear. It never sees a picture: the model is the story role's
+text model (YTF-006). It answers exactly four **different** thumbnail concepts. Each says what the
+picture shows, where the empty area for the headline is, the headline itself, which person (none
+or one) appears and how, and which place (none or one) is the setting. Code then draws the
+picture from the concept (`services/thumbnails.py`, which gives the image model the person's look
+picture and the place's picture as references) and draws the headline
+(`services/thumbnail_compose.py`); the model never draws anything.
 
 The stored content is `{"concepts": [...]}`; see `check_content`. The same checks run on a
 version the owner edits by hand, so a manual version can never hold a concept the picture step
@@ -16,7 +19,6 @@ cannot draw.
 
 from __future__ import annotations
 
-import base64
 import json
 from typing import Any, Final
 
@@ -26,7 +28,7 @@ from app.services.music_bible_writer import parse_answer as parse_answer
 from app.services.text_limits import fit_text, length_rule
 
 CONCEPT_COUNT: Final = 4
-MAX_PEOPLE: Final = 2
+MAX_PEOPLE: Final = 1
 
 # Where the headline goes. The picture is asked to leave this area empty and plain.
 TEXT_AREAS: Final[tuple[str, ...]] = (
@@ -64,18 +66,24 @@ LIMIT_NAMES: Final = {
     "people_reason": REASON_MAX_CHARS,
 }
 
-# Four concepts of about 100 words each, and a vision model's own thinking.
-MAX_TOKENS: Final = 6000
+# Four concepts of about 100 words each. The model's reasoning counts against the cap.
+MAX_TOKENS: Final = 12_000
+REASONING_EFFORT: Final = "high"
 
 
 # --- The instructions ------------------------------------------------------------------------
 
 _RULES: Final = """\
 You are the art director of a video channel. You design the thumbnail of one video: the still \
-picture a viewer sees before they press play. You are given a description of the video, its \
-scenes, the people who may appear, and sometimes a few frames from the finished video. Other \
+picture a viewer sees before they press play. You are given the script of the video, a short \
+description of it, its scenes, the people who may appear and the places that may appear. Other \
 programs draw the picture from your answer and write the headline on it. You never draw \
 anything.
+
+WHAT THE VIDEO IS ABOUT
+The script is the main source: the thumbnail must show and promise what the script is really \
+about. The description of the video (title, subject, tone, visual style) is background that \
+tells you the style to keep. When the script is empty, work from the description and the scenes.
 
 WHAT YOU WRITE
 Exactly {count} concepts that are clearly DIFFERENT from each other: a different main idea, a \
@@ -88,30 +96,32 @@ Every concept has these fields:
 - "idea": what the thumbnail shows and why a viewer would click, in plain sentences.
 - "composition": the shot and where things are: for example "tight close-up of the face on the \
 right, subject object large on the left".
-- "background": what is behind and around the main subject, with its colours.
+- "background": what is behind and around the main subject, with its colours. When a place is \
+chosen, it must fit that place.
 - "mood": a few words for the feeling and the colours.
 - "headline": the words written on the thumbnail by a program. At most {headline_words} words \
 and {headline_chars} characters, in the language of the video. Short, punchy and readable on a \
 phone. It must not say anything the video does not deliver.
 - "text_area": where the headline goes, one of "{areas}". The picture leaves that area empty \
 and plain, so the composition must keep the main subject out of it.
-- "people": the people who appear in the picture, as a list of at most {max_people} items, or \
-an empty list when nobody appears. Each item is {{"id", "look", "expression", "pose"}}. "id" is \
+- "people": the person who appears in the picture, as a list of at most {max_people} item, or \
+an empty list when nobody appears. The item is {{"id", "look", "expression", "pose"}}. "id" is \
 the id of a person from PEOPLE and "look" is one of the looks listed for that person. Only the \
-people listed in PEOPLE may appear, and each person at most once. "expression" is the face, \
-"pose" is the body and the framing, in a few words.
-- "people_reason": one short sentence on why these people appear, or why nobody does.
+people listed in PEOPLE may appear. "expression" is the face, "pose" is the body and the \
+framing, in a few words.
+- "environment": the id of the one place from PLACES that is the setting of the picture, or \
+null when no place is used. Only the places listed in PLACES may be used.
+- "people_reason": one short sentence on why this person and this place appear, or why nobody \
+does.
 
-DECIDING WHO APPEARS
-Decide for each concept on its own whether a person helps. A face with a clear emotion is often \
-the strongest thumbnail, but a concept about an object, a place or a result can be stronger with \
+DECIDING WHO AND WHAT APPEARS
+Decide for each concept on its own what helps. A face with a clear emotion is often the \
+strongest thumbnail, but a concept about an object, a place or a result can be stronger with \
 nobody in it. Use at least one concept with nobody and one with a person when PEOPLE is not \
-empty. Never use more than {max_people} people in a picture: faces get too small. When PEOPLE is \
-empty, every "people" list is empty. Use the look that fits the concept, from the looks listed \
-for that person.
-
-The frames, when given, show what the video really looks like. Match its style and what it \
-really shows, and do not copy a frame as it is.
+empty. Never use more than one person in a picture: faces get too small. Use a place when the \
+setting is part of why a viewer would click, not in every concept. When PEOPLE is empty, every \
+"people" list is empty, and when PLACES is empty, every "environment" is null. Use the look \
+that fits the concept, from the looks listed for that person.
 
 {feedback}
 
@@ -120,8 +130,8 @@ really shows, and do not copy a frame as it is.
 _SHAPE: Final = """{"concepts": [{"label": "Reaction close-up", "idea": "...", \
 "composition": "...", "background": "...", "mood": "...", "headline": "...", \
 "text_area": "left", "people": [{"id": "...", "look": "default", "expression": "...", \
-"pose": "..."}], "people_reason": "..."}, ... exactly four items ...]} (the values here only \
-show the form, never copy them)"""
+"pose": "..."}], "environment": null, "people_reason": "..."}, ... exactly four items ...]} \
+(the values here only show the form, never copy them)"""
 
 
 def _instructions() -> str:
@@ -143,75 +153,53 @@ def _instructions() -> str:
 def context_for_model(
     bible: dict[str, Any],
     orientation: str,
+    script_text: str,
     scene_titles: list[str],
     cast: list[dict[str, Any]],
+    places: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """What the model is told about the video, as one dict. `cast` is what
-    `services/thumbnail_concepts.CastOption.for_model` gives for each person."""
+    `services/thumbnail_concepts.CastOption.for_model` gives for each person and `places` what
+    `PlaceOption.for_model` gives for each place. The script is given whole.
+    """
     return {
         "video": bible_for_model(bible),
         "orientation": orientation,
         "scenes": scene_titles,
         "people": cast,
+        "places": places,
+        "script": script_text.strip(),
     }
 
 
 def build_request(
     context: dict[str, Any],
-    frame_jpegs: list[bytes],
     *,
     model: str,
     feedback: user_feedback.Feedback | None = None,
 ) -> dict[str, Any]:
-    """The exact request body of the one call. The frames are sent as `image_url` parts of the
-    user message (the OpenAI chat format Bitdeer follows); use `without_frames` for the copy
-    that is stored on the job.
-    """
+    """The exact request body of the one call. It holds text only and is stored on the job."""
+    facts = {key: value for key, value in context.items() if key not in ("script", "scenes")}
     parts = [
-        "VIDEO AND PEOPLE (JSON):\n" + json.dumps(context, ensure_ascii=False, indent=1),
+        "VIDEO, PEOPLE AND PLACES (JSON):\n" + json.dumps(facts, ensure_ascii=False, indent=1),
+        "SCENE TITLES (JSON):\n" + json.dumps(context.get("scenes", []), ensure_ascii=False),
+        "SCRIPT:\n" + str(context.get("script", "")),
     ]
-    if frame_jpegs:
-        parts.append(
-            f"The next {len(frame_jpegs)} pictures are frames of the finished video, "
-            "in order of time."
-        )
-    else:
-        parts.append("There are no frames of the video yet. Work from the description.")
     if feedback is not None:
         parts += user_feedback.blocks(feedback, "PREVIOUS CONCEPTS")
-    content: list[dict[str, Any]] = [{"type": "text", "text": "\n\n".join(parts)}]
-    for jpeg in frame_jpegs:
-        encoded = base64.b64encode(jpeg).decode("ascii")
-        content.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
-        )
     return {
         "model": model,
         "messages": [
             {"role": "system", "content": _instructions()},
-            {"role": "user", "content": content},
+            {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
         "stream": True,
         # Without this the stream carries no token counts, which the job records.
         "stream_options": {"include_usage": True},
+        "response_format": {"type": "json_object"},
+        "reasoning_effort": REASONING_EFFORT,
     }
-
-
-def without_frames(body: dict[str, Any]) -> dict[str, Any]:
-    """`body` with the frames' bytes replaced by a note, to keep on the job record."""
-    messages: list[dict[str, Any]] = []
-    for message in body["messages"]:
-        content = message.get("content")
-        if isinstance(content, list):
-            content = [
-                {"type": "image_url", "image_url": {"url": "(a frame, left out)"}}
-                if part.get("type") == "image_url"
-                else part
-                for part in content
-            ]
-        messages.append({**message, "content": content})
-    return {**body, "messages": messages}
 
 
 # --- Checking what was written ---------------------------------------------------------------
@@ -287,16 +275,29 @@ def _people(value: object, path: str, looks_of: dict[str, set[str]]) -> list[dic
     return people
 
 
+def _environment(value: object, path: str, place_ids: set[str]) -> str | None:
+    """The place of a concept: None (a missing key, null or an empty text) or the id of one of
+    the places that may appear.
+    """
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or value not in place_ids:
+        raise ValueError(f'The "{path}" "{value}" is not one of the places listed in PLACES.')
+    return value
+
+
 def check_content(
     answer: dict[str, Any],
     looks_of: dict[str, set[str]],
+    place_ids: set[str],
     *,
     require_headline: bool = True,
 ) -> dict[str, Any]:
     """The concepts of `answer` as the stored content `{"concepts": [...]}`, or ValueError with
     a message fit for the user and for the model's corrected retry.
 
-    `looks_of` maps each person who may appear to the look slugs they may wear. A manual edit
+    `looks_of` maps each person who may appear to the look slugs they may wear, and `place_ids`
+    holds the ids of the places that may appear. A manual edit
     passes `require_headline=False`: the owner may leave a headline empty (a thumbnail with no
     text), the model may not.
     """
@@ -334,6 +335,9 @@ def check_content(
                 ),
                 "text_area": area,
                 "people": people,
+                "environment": _environment(
+                    item.get("environment"), f"{where}.environment", place_ids
+                ),
                 "people_reason": _text(
                     item.get("people_reason"), f"{where}.people_reason", REASON_MAX_CHARS
                 ),
