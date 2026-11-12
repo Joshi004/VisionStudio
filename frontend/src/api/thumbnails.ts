@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   useMutation,
   useQuery,
@@ -26,6 +27,16 @@ export function thumbnailsKey(projectId: number) {
   return [...PROJECTS_KEY, projectId, "thumbnails"] as const;
 }
 
+/**
+ * Every Publish panel query of a project starts with this key, whatever render it shows. It is
+ * defined here, and not in `youtube.ts`, because a change to a thumbnail also refreshes the
+ * Publish panel (its chosen thumbnail and whether Upload is possible), and `youtube.ts` already
+ * imports this file.
+ */
+export function youtubePanelKey(projectId: number) {
+  return [...PROJECTS_KEY, projectId, "youtube"] as const;
+}
+
 async function fetchThumbnails(projectId: number) {
   const { data, error, response } = await api.GET(
     "/api/projects/{project_id}/thumbnails",
@@ -45,11 +56,17 @@ async function fetchThumbnails(projectId: number) {
   return data;
 }
 
+/** Extra loads after the last busy one: the pictures start a moment after their ideas are stored. */
+const GRACE_POLLS = 2;
+
 /**
  * The thumbnail ideas, the pictures made from them and why either is out of date. It is loaded
- * again every few seconds while the ideas are being written or a picture is being made.
+ * again every few seconds while the ideas are being written or a picture is being made, and
+ * twice more after that, because the pictures of new ideas are started just after the ideas are
+ * stored and nothing is "busy" in between.
  */
 export function useThumbnails(projectId: number) {
+  const gracePolls = useRef(0);
   return useQuery({
     queryKey: thumbnailsKey(projectId),
     queryFn: () => fetchThumbnails(projectId),
@@ -60,19 +77,33 @@ export function useThumbnails(projectId: number) {
         isJobActive(state?.ideas.job) ||
         (state?.thumbnails.some((thumbnail) => isJobActive(thumbnail.job)) ??
           false);
-      return busy ? ACTIVE_POLL_MS : false;
+      if (busy) {
+        gracePolls.current = GRACE_POLLS;
+        return ACTIVE_POLL_MS;
+      }
+      if (gracePolls.current > 0) {
+        gracePolls.current -= 1;
+        return ACTIVE_POLL_MS;
+      }
+      return false;
     },
   });
 }
 
-/** What the mutations that return the whole state do: show it at once, and refresh the job list. */
+/**
+ * What the mutations that return the whole state do: show it at once, and refresh the job list
+ * and the Publish panel (its chosen thumbnail and whether Upload is possible).
+ */
 function showState(
   queryClient: QueryClient,
   projectId: number,
   state: ThumbnailsState,
 ) {
   queryClient.setQueryData(thumbnailsKey(projectId), state);
-  return invalidateAfterJobAction(queryClient);
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
+    invalidateAfterJobAction(queryClient),
+  ]);
 }
 
 /** Starts the job that writes four ideas. `feedback` is a note for the model, or null. */
@@ -101,6 +132,7 @@ export function useRunThumbnailIdeas(projectId: number) {
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: thumbnailsKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: youtubePanelKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
   });

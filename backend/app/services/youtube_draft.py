@@ -62,6 +62,7 @@ NO_RENDER_MESSAGE: Final = "Render the video first: the draft is written for a f
 NO_SUCH_RENDER_MESSAGE: Final = "There is no such render."
 NO_DRAFT_MESSAGE: Final = "There is no draft yet, so there is nothing to change."
 BEING_WRITTEN_MESSAGE: Final = "The YouTube draft is already being written."
+_ALL_PICTURES_MADE_MESSAGE: Final = "Every idea already has a picture. Choose one below."
 
 ThumbnailStatus = Literal["ready", "out_of_date", "making", "none"]
 
@@ -211,6 +212,9 @@ class ThumbnailSituation:
     reasons: list[str]
     # The last failure when no usable thumbnail is being made, or None.
     error: str | None
+    # Whether a picture of the newest thumbnail ideas is still being made (YTF-003). Upload waits
+    # for it even when a thumbnail is already chosen.
+    pictures_making: bool = False
 
 
 async def thumbnail_situation(
@@ -231,6 +235,11 @@ async def thumbnail_situation(
         if version is not None:
             reasons = thumbnail_concepts.out_of_date_reasons(version, bible, render)
     making = _job_active(state.concepts.job) or any(_job_active(e.job) for e in state.thumbnails)
+    newest_ideas = state.concepts.latest
+    pictures_making = newest_ideas is not None and any(
+        e.row.concept_version == newest_ideas.version and _job_active(e.job)
+        for e in state.thumbnails
+    )
     error: str | None = None
     if state.concepts.job is not None and state.concepts.job.status == "failed":
         error = state.concepts.job.error
@@ -247,7 +256,13 @@ async def thumbnail_situation(
         status = "out_of_date"
     else:
         status = "none"
-    return ThumbnailSituation(status=status, chosen=chosen, reasons=reasons, error=error)
+    return ThumbnailSituation(
+        status=status,
+        chosen=chosen,
+        reasons=reasons,
+        error=error,
+        pictures_making=pictures_making,
+    )
 
 
 async def _start_thumbnail(
@@ -255,10 +270,11 @@ async def _start_thumbnail(
 ) -> str | None:
     """Makes sure the render being published gets a chosen thumbnail (§4.5). Nothing is done
     when the chosen thumbnail is current for this render, or when thumbnail work is already
-    running. Otherwise the thumbnail concepts are written from this render's frames and, when
-    they are stored, the picture of the first concept is made and chosen, unless the owner
-    chooses one meanwhile. Commits. Returns a sentence when the thumbnail could not be started
-    (the draft is not affected), else None.
+    running. Otherwise, when the newest ideas are current, a picture is started for every idea
+    that has none; or the thumbnail concepts are written from this render's frames and, when
+    they are stored, the pictures of all of them are made (YTF-003). The first picture to
+    finish is chosen, unless the owner chooses one meanwhile. Commits. Returns a sentence when
+    the thumbnail could not be started (the draft is not affected), else None.
     """
     situation = await thumbnail_situation(session, project, render)
     if situation.status in ("ready", "making"):
@@ -268,8 +284,11 @@ async def _start_thumbnail(
     newest = await thumbnail_concepts.latest(session, project.id)
     try:
         if newest is not None and not thumbnail_concepts.out_of_date_reasons(newest, bible, render):
+            missing = await thumbnails.indexes_without_picture(session, project.id, newest)
+            if not missing:
+                return _ALL_PICTURES_MADE_MESSAGE
             await thumbnails.start_images(
-                session, project, newest.version, [0], choose_when_ready=marker
+                session, project, newest.version, missing, choose_when_ready=marker
             )
         else:
             await thumbnail_concepts.start_run(session, project, render=render, then_picture=marker)

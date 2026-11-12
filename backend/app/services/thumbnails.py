@@ -31,6 +31,7 @@ from app.core import settings as settings_service
 from app.db.models import Job, LabImage, LabRun, Project, Thumbnail
 from app.db.session import SessionLocal
 from app.db.state_memo import memoized_state
+from app.jobs.store import ACTIVE_STATUSES
 from app.services import (
     graphic_theme,
     image_lab,
@@ -251,14 +252,48 @@ async def chosen_id(session: AsyncSession, project_id: int) -> int | None:
     return (await session.execute(statement)).scalars().first()
 
 
+async def indexes_without_picture(
+    session: AsyncSession, project_id: int, concepts_row: Any
+) -> list[int]:
+    """The numbers (from 0) of the ideas of a version that have no picture: none stored and none
+    being made. An idea whose picture failed has none, so it is made again.
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(Thumbnail).where(
+                    Thumbnail.project_id == project_id,
+                    Thumbnail.concept_version == concepts_row.version,
+                )
+            )
+        ).scalars()
+    )
+    runs: list[LabRun] = []
+    run_ids = [row.lab_run_id for row in rows if row.lab_run_id is not None]
+    if run_ids:
+        runs = list((await session.execute(select(LabRun).where(LabRun.id.in_(run_ids)))).scalars())
+    jobs = await image_lab.jobs_for_runs(session, runs)
+    run_by_id = {run.id: run for run in runs}
+    covered: set[int] = set()
+    for row in rows:
+        run = run_by_id.get(row.lab_run_id) if row.lab_run_id is not None else None
+        job = jobs.get(run.id) if run is not None else None
+        if row.background_image_id is not None or (
+            job is not None and job.status in ACTIVE_STATUSES
+        ):
+            covered.add(row.concept_index)
+    return [index for index in range(len(concepts_row.content["concepts"])) if index not in covered]
+
+
 async def start_follow_up_picture(
     project_id: int, concept_version: int, then_picture: dict[str, Any]
 ) -> bool:
     """Called (best effort) by the job that wrote thumbnail concepts for a YouTube draft, once
-    the concepts are stored: starts the picture of the first concept, to be chosen when it is
-    ready. Does nothing (False) when the chosen thumbnail is no longer the one that was chosen
-    when the draft was asked for, because the owner has chosen one since. The caller nudges the
-    dispatcher when this returns True.
+    the concepts are stored: starts the pictures of every idea that has none (YTF-003), the
+    first one finished to be chosen. Does nothing (False) when the chosen thumbnail is no longer
+    the one that was chosen when the draft was asked for, because the owner has chosen one
+    since, or when there is nothing to start. The caller nudges the dispatcher when this
+    returns True.
     """
     before = then_picture.get("chosen_before")
     async with SessionLocal() as session:
@@ -266,12 +301,17 @@ async def start_follow_up_picture(
         if project is None or await chosen_id(session, project_id) != before:
             await session.commit()
             return False
+        row = await thumbnail_concepts.get_version(session, project_id, concept_version)
+        missing = await indexes_without_picture(session, project_id, row) if row else []
+        if not missing:
+            await session.commit()
+            return False
         try:
             await start_images(
                 session,
                 project,
                 concept_version,
-                [0],
+                missing,
                 choose_when_ready={"chosen_before": before},
             )
         except ThumbnailError as exc:

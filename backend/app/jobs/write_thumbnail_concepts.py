@@ -256,9 +256,9 @@ class WriteThumbnailConceptsHandler(JobHandler):
     async def _start_follow_up_picture(
         job_id: int, project_id: int, version: int, job_input: dict[str, Any]
     ) -> None:
-        """When the job was started for a YouTube draft (`then_picture`), starts the picture of
-        the first concept. Best effort: a failure never fails the concepts (they are stored), and
-        the owner can make a picture in the Thumbnails panel.
+        """When the job was started for a YouTube draft (`then_picture`), starts the pictures of
+        every concept (the first one finished is chosen). Best effort: a failure never fails the
+        concepts (they are stored), and the owner can make a picture in the Thumbnails panel.
         """
         then_picture = job_input.get("then_picture")
         if not isinstance(then_picture, dict):

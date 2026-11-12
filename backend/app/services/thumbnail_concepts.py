@@ -409,8 +409,9 @@ async def start_run(
     `feedback` is the owner's note on the newest version: the model writes the four concepts
     again with the note and that version in its request. `render` is the render whose frames
     are used (the newest when None). `then_picture` (`{"chosen_before": id or None}`) asks the
-    job, once the concepts are stored, to make the picture of the first concept and choose it
-    when it is ready, unless the chosen thumbnail changed meanwhile (the YouTube draft, YT-003).
+    job, once the concepts are stored, to make the pictures of all the concepts and choose the
+    first one that is ready, unless the chosen thumbnail changed meanwhile (the YouTube draft,
+    YT-003, YTF-003).
     Raises ThumbnailConceptsError.
     """
     bible = await story_bible.latest(session, project.id)

@@ -6,7 +6,6 @@ import {
   Button,
   Checkbox,
   Group,
-  Image,
   List,
   Loader,
   Modal,
@@ -24,6 +23,7 @@ import { Link } from "react-router";
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import { useThumbnails } from "../../api/thumbnails";
 import {
   useDraftForYouTube,
   useRetryYouTubeUpload,
@@ -36,13 +36,12 @@ import {
   type YouTubePrivacy,
   type YouTubeRetryRequest,
   type YouTubeSendRequest,
-  type YouTubeThumbnail,
   type YouTubeUpload,
 } from "../../api/youtube";
 import { formatBytes, formatDateTime } from "../../format";
-import { stepPath } from "../board/boardSteps";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { YouTubeDraftEditor } from "./YouTubeDraftEditor";
+import { YouTubeThumbnailsSection } from "./YouTubeThumbnailsSection";
 
 type YouTubePublishPanelProps = {
   projectId: number;
@@ -53,16 +52,6 @@ const PRIVACY_OPTIONS: { value: YouTubePrivacy; label: string }[] = [
   { value: "unlisted", label: "Unlisted" },
   { value: "public", label: "Public" },
 ];
-
-const THUMBNAIL_STATUS: Record<
-  YouTubeThumbnail["status"],
-  { label: string; color: string }
-> = {
-  ready: { label: "Ready", color: "green" },
-  out_of_date: { label: "Out of date", color: "yellow" },
-  making: { label: "Being made", color: "blue" },
-  none: { label: "None yet", color: "gray" },
-};
 
 type Answer = "yes" | "no";
 
@@ -87,6 +76,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
     projectId,
     renderNumber,
   );
+  const thumbnails = useThumbnails(projectId);
   const draftRun = useDraftForYouTube(projectId);
   const save = useSaveYouTubeDraft(projectId);
   const [note, setNote] = useState("");
@@ -179,15 +169,25 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const channelTitle =
     connected.find((channel) => String(channel.id) === channelValue)?.title ??
     null;
-  const uploadBlocker = data
+  // The pictures of the newest thumbnail ideas that are still being made. The server checks the
+  // same thing when Upload is pressed.
+  const newestIdeas = thumbnails.data?.ideas.latest?.version ?? null;
+  const picturesMaking =
+    newestIdeas !== null &&
+    (thumbnails.data?.thumbnails ?? []).some(
+      (picture) =>
+        picture.concept_version === newestIdeas && isJobActive(picture.job),
+    );
+  const uploadBlockers = data
     ? whyNotUpload({
         data,
         draft,
         dirty,
         writing,
+        picturesMaking,
         channelValue,
       })
-    : "Loading.";
+    : ["Loading."];
 
   const pressUpload = () => {
     if (
@@ -217,7 +217,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
             <Title order={4}>Publish to YouTube</Title>
             <Text size="sm" c="dimmed">
               Pick a finished render and the app drafts its title, description,
-              hashtags, tags and thumbnail. You check and edit everything,
+              hashtags, tags and four thumbnails. You check and edit everything,
               check the two questions YouTube asks, and choose the channel.
               Nothing is uploaded unless you press Upload.
             </Text>
@@ -372,8 +372,11 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
         </Paper>
       )}
 
-      {data && draft && (
-        <ThumbnailCard projectId={projectId} thumbnail={data.thumbnail} />
+      {data && data.renders.length > 0 && (
+        <YouTubeThumbnailsSection
+          projectId={projectId}
+          thumbnail={data.thumbnail}
+        />
       )}
 
       {data && draft && (
@@ -454,18 +457,18 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
             <Stack gap={4}>
               <Group>
                 <Button
-                  disabled={uploadBlocker !== null}
+                  disabled={uploadBlockers.length > 0}
                   loading={upload.isPending}
                   onClick={() => setConfirmUpload(true)}
                 >
                   Upload
                 </Button>
               </Group>
-              {uploadBlocker !== null && (
-                <Text size="xs" c="dimmed">
-                  {uploadBlocker}
+              {uploadBlockers.map((reason) => (
+                <Text key={reason} size="xs" c="dimmed">
+                  {reason}
                 </Text>
-              )}
+              ))}
             </Stack>
             {upload.isError && (
               <Alert color="red" title="The upload was not started">
@@ -562,34 +565,36 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   );
 }
 
-/** The first thing that stops Upload, or null when nothing in this panel does. */
+/**
+ * Everything that stops Upload, one sentence each, or an empty list when nothing in this panel
+ * does. The server checks the same things again when Upload is pressed.
+ */
 function whyNotUpload(input: {
   data: YouTubePanel;
   draft: YouTubeDraft | null;
   dirty: boolean;
   writing: boolean;
+  picturesMaking: boolean;
   channelValue: string | null;
-}): string | null {
-  const { data, draft, dirty, writing, channelValue } = input;
-  if (draft === null) {
-    return "Write the draft first.";
-  }
+}): string[] {
+  const { data, draft, dirty, writing, picturesMaking, channelValue } = input;
+  const reasons: string[] = [];
   if (writing) {
-    return "The draft is being written.";
+    reasons.push("The draft is still being written.");
+  } else if (draft === null) {
+    reasons.push("Write the draft first.");
   }
   if (dirty) {
-    return "Save your edits first.";
+    reasons.push("Save your edits first.");
   }
-  if (data.thumbnail.status === "making") {
-    return "The thumbnail is still being made.";
-  }
-  if (data.thumbnail.thumbnail_id === null) {
-    return "There is no chosen thumbnail yet.";
+  if (data.thumbnail.status === "making" || picturesMaking) {
+    reasons.push("The thumbnails are still being made.");
+  } else if (data.thumbnail.thumbnail_id === null) {
+    reasons.push("There is no chosen thumbnail yet.");
   }
   if (channelValue === null) {
-    return "Choose a connected channel.";
-  }
-  if (
+    reasons.push("Choose a connected channel.");
+  } else if (
     data.uploads.some(
       (upload) =>
         upload.render_number === data.render_number &&
@@ -597,9 +602,9 @@ function whyNotUpload(input: {
         isUploadActive(upload),
     )
   ) {
-    return "This render is already being uploaded to that channel.";
+    reasons.push("This render is already being uploaded to that channel.");
   }
-  return null;
+  return reasons;
 }
 
 function isUploadActive(upload: YouTubeUpload): boolean {
@@ -1007,77 +1012,6 @@ function PublishedBefore({
         </Text>
       ))}
     </Stack>
-  );
-}
-
-function ThumbnailCard({
-  projectId,
-  thumbnail,
-}: {
-  projectId: number;
-  thumbnail: YouTubeThumbnail;
-}) {
-  const display = THUMBNAIL_STATUS[thumbnail.status];
-  const portrait =
-    thumbnail.width !== null &&
-    thumbnail.height !== null &&
-    thumbnail.height > thumbnail.width;
-  return (
-    <Paper withBorder p="md" radius="md">
-      <Stack gap="sm">
-        <Group gap="xs">
-          <Title order={5}>Thumbnail</Title>
-          <Badge variant="light" color={display.color}>
-            {display.label}
-          </Badge>
-          {thumbnail.status === "making" && <Loader size="xs" />}
-        </Group>
-        {thumbnail.url !== null && (
-          <Image
-            src={thumbnail.url}
-            alt={thumbnail.headline ?? "The chosen thumbnail"}
-            maw={portrait ? 200 : 360}
-            radius="sm"
-          />
-        )}
-        {thumbnail.status === "none" && (
-          <Text size="sm" c="dimmed">
-            There is no chosen thumbnail. One is made when you draft, from the
-            frames of the render. You can also make one in the Thumbnails step.
-          </Text>
-        )}
-        {thumbnail.status === "making" && (
-          <Text size="sm" c="dimmed">
-            The thumbnail is being made. It is chosen when it is ready, unless
-            you choose another one meanwhile.
-          </Text>
-        )}
-        {thumbnail.status === "out_of_date" && (
-          <Alert color="yellow" title="The chosen thumbnail is out of date">
-            <List size="sm">
-              {thumbnail.reasons.map((reason) => (
-                <List.Item key={reason}>{reason}</List.Item>
-              ))}
-            </List>
-          </Alert>
-        )}
-        {thumbnail.error !== null && (
-          <Alert color="red" title="The last thumbnail attempt failed">
-            {thumbnail.error}
-          </Alert>
-        )}
-        <Group>
-          <Button
-            component={Link}
-            to={stepPath(projectId, "thumbnail")}
-            variant="default"
-            size="compact-sm"
-          >
-            Change in Thumbnails
-          </Button>
-        </Group>
-      </Stack>
-    </Paper>
   );
 }
 

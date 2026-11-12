@@ -243,6 +243,9 @@ async def start_upload(
     if privacy not in PRIVACY_VALUES:
         raise YouTubePublishError("Choose private, unlisted or public.")
 
+    draft_job = await store.latest_job(session, project.id, youtube_draft.JOB_TYPE)
+    if draft_job is not None and draft_job.status in store.ACTIVE_STATUSES:
+        raise YouTubePublishError("The draft is still being written.")
     draft = await youtube_draft.latest(session, project.id)
     if draft is None:
         raise YouTubePublishError(_NO_DRAFT_MESSAGE)
@@ -279,6 +282,8 @@ async def start_upload(
     situation = await youtube_draft.thumbnail_situation(session, project, render)
     if situation.status == "making":
         raise YouTubePublishError("The thumbnail is still being made.")
+    if situation.pictures_making:
+        raise YouTubePublishError("The thumbnails are still being made.")
     thumbnail = situation.chosen
     if thumbnail is None or thumbnail.path is None:
         raise YouTubePublishError("There is no chosen thumbnail yet.")

@@ -10,9 +10,9 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { isValidProjectId } from "./projects";
 import type { components } from "./schema";
-import { thumbnailsKey } from "./thumbnails";
+import { thumbnailsKey, youtubePanelKey } from "./thumbnails";
 
 export type YouTubeConfig = components["schemas"]["YouTubeConfig"];
 export type YouTubeChannel = components["schemas"]["YouTubeChannelOut"];
@@ -130,11 +130,6 @@ export function useDisconnectYouTubeChannel() {
 }
 
 // --- The publish draft of a project --------------------------------------------------------
-
-/** Every Publish panel query of a project starts with this key, whatever render it shows. */
-export function youtubePanelKey(projectId: number) {
-  return [...PROJECTS_KEY, projectId, "youtube"] as const;
-}
 
 function youtubePanelRenderKey(projectId: number, renderNumber: number | null) {
   return [...youtubePanelKey(projectId), renderNumber] as const;
