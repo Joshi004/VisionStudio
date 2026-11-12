@@ -113,7 +113,10 @@ def build_service(credentials: Credentials) -> Resource:
     """The YouTube client. Every request has a timeout, and the access token is renewed by the
     library when a call needs one.
     """
-    http = AuthorizedHttp(credentials, http=httplib2.Http(timeout=HTTP_TIMEOUT_S))
+    raw = httplib2.Http(timeout=HTTP_TIMEOUT_S)
+    # A resumable upload answers each chunk with 308 "Resume Incomplete", which is not a redirect.
+    raw.redirect_codes = raw.redirect_codes - {308}
+    http = AuthorizedHttp(credentials, http=raw)
     return build("youtube", "v3", http=http, static_discovery=True)
 
 
