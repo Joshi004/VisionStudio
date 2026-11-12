@@ -22,7 +22,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaInMemoryUpload
 
 from app.services.youtube_auth import NETWORK_ERRORS
 
@@ -34,6 +34,11 @@ SEND_RETRIES: Final = 3
 HTTP_TIMEOUT_S: Final = 120
 
 VIDEO_MIME: Final = "video/mp4"
+THUMBNAIL_MIME: Final = "image/png"
+# YouTube accepts an SRT file as a generic binary upload.
+CAPTIONS_MIME: Final = "application/octet-stream"
+CAPTIONS_LANGUAGE: Final = "en"
+CAPTIONS_NAME: Final = "English"
 
 # What `videos.list` says about `status.uploadStatus`.
 UPLOAD_UPLOADED: Final = "uploaded"
@@ -181,6 +186,50 @@ def read_status(service: Resource, video_id: str) -> VideoStatus | None:
         problem=status.get("failureReason") or status.get("rejectionReason"),
         privacy_status=status.get("privacyStatus"),
     )
+
+
+def set_thumbnail(service: Resource, video_id: str, path: Path) -> None:
+    """`thumbnails.set`, 50 quota units. A 5xx or a dropped connection is repeated by the library
+    with backoff; a 4xx is not.
+    """
+    service.thumbnails().set(
+        videoId=video_id,
+        media_body=MediaFileUpload(str(path), mimetype=THUMBNAIL_MIME, resumable=False),
+    ).execute(num_retries=SEND_RETRIES)
+
+
+def insert_captions(service: Resource, video_id: str, srt: bytes) -> None:
+    """`captions.insert` with an SRT track named "English", language `en`, not a draft, 400 quota
+    units. The bytes are sent from memory, so no file is made.
+    """
+    service.captions().insert(
+        part="snippet",
+        body={
+            "snippet": {
+                "videoId": video_id,
+                "language": CAPTIONS_LANGUAGE,
+                "name": CAPTIONS_NAME,
+                "isDraft": False,
+            }
+        },
+        media_body=MediaInMemoryUpload(srt, mimetype=CAPTIONS_MIME, resumable=False),
+    ).execute(num_retries=SEND_RETRIES)
+
+
+def step_failure_message(failure: ApiFailure, channel_title: str, what: str) -> str:
+    """The sentence the owner reads for a failed thumbnail or captions step. `what` is
+    "thumbnail" or "captions".
+    """
+    if failure.kind == "needs_reconnect":
+        return f"Reconnect {channel_title} in Settings, then press Try again on the {what}."
+    if failure.kind == "quota":
+        return "YouTube's daily limit for this app is used up. It resets at midnight Pacific time."
+    if failure.kind in ("refused", "upload_limit"):
+        detail = f"HTTP {failure.status}" if failure.status is not None else "no status"
+        if failure.reason:
+            detail = f"{detail}: {failure.reason}"
+        return f"YouTube refused the {what} ({detail})."
+    return f"YouTube could not be reached for the {what}. Press Try again on it."
 
 
 def failure_message(failure: ApiFailure, channel_title: str, *, sending: bool) -> str:

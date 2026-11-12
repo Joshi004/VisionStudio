@@ -13,13 +13,21 @@ everything it sends is read from the `youtube_upload` row's `sent` snapshot, nev
    hold its place while it waits: between two checks it is queued again (`store.requeue`), with
    `next_check_at` and `waiting_since` kept in its input (clock times, so they survive a
    restart). A start before `next_check_at` queues it again at once without asking Google. When
-   the video is processed the job succeeds; when YouTube fails or rejects it, the job fails; after
-   `MAX_WAIT_S` it records `gave_up` and succeeds, keeping the video.
+   the video is processed it goes on to steps 3 and 4; when YouTube fails or rejects it, the job
+   fails; after `MAX_WAIT_S` it records `gave_up` and succeeds, keeping the video.
+3. **The thumbnail** (`thumbnails.set`) and 4. **the captions** (`captions.insert`, the render's
+   SRT sent from memory, or `skipped` when not ticked), only after processing. Each result is
+   stored in `thumbnail_result` or `captions_result` the moment it ends. An error in either is
+   recorded on its step and never fails the upload. The thumbnail sent is the one recorded at
+   Upload when its file is unchanged, otherwise the project's chosen one. A job whose upload is
+   already `processed` goes straight to these steps; `steps` in its input (Try again on one step)
+   limits it to those steps.
 
-A step already done is never done again: a stored `video_id` skips step 1. A failed job is tried
-again with a new job for the same upload row (`youtube_publish.retry`).
+A step already done is never done again: a stored `video_id` skips step 1, `processed` skips
+step 2, and a step whose result is `done` or `skipped` is skipped. A failed job is tried again
+with a new job for the same upload row (`youtube_publish.retry`).
 
-The thumbnail and the captions are YT-005's. Logs hold the job id, the step, the video id, the
+Logs hold the job id, the step, the video id, the
 HTTP status and the class of an error; never a token, the title, the description or the file.
 """
 
@@ -30,14 +38,17 @@ import time
 from typing import Any, Final
 
 import anyio.to_thread
+from sqlalchemy import select
 
-from app.db.models import YouTubeChannel, YouTubeUpload
+from app.db.models import StoryRender, Thumbnail, YouTubeChannel, YouTubeUpload
 from app.db.session import SessionLocal
 from app.db.types import utcnow
 from app.jobs import live_status, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
-from app.services import youtube_api, youtube_auth, youtube_publish
+from app.services import caption_plan, story_renders, youtube_api, youtube_auth, youtube_publish
+from app.services.caption_srt import srt_document
 from app.services.storage import StorageError, get_storage
+from app.services.youtube_publish import RESULT_DONE, RESULT_FAILED, RESULT_SKIPPED
 
 _logger = logging.getLogger(__name__)
 
@@ -79,6 +90,17 @@ class PublishYouTubeHandler(JobHandler):
             await session.commit()
         if upload is None:
             await self._fail(job_id, None, "The upload this job was queued for is gone.")
+            return
+        if upload.processing == youtube_publish.PROCESSING_PROCESSED and upload.video_id:
+            # The video is on YouTube and processed: only the thumbnail and the captions are left
+            # (a retry of one step, a finish of both, or a restart during them). A channel that
+            # cannot be used is recorded on the steps, not as a failure of the job.
+            await self._run_steps(
+                job_id, upload.id, channel, upload.video_id, upload.sent, job_input
+            )
+            await self._end_succeeded(
+                job_id, upload.id, upload.video_id, youtube_publish.PROCESSING_PROCESSED
+            )
             return
         if channel is None:
             await self._fail(
@@ -223,7 +245,11 @@ class PublishYouTubeHandler(JobHandler):
             if status.privacy_status in youtube_publish.PRIVACY_VALUES:
                 await self._store_privacy(upload_id, status.privacy_status)
             if status.upload_status == youtube_api.UPLOAD_PROCESSED:
-                await self._end_processed(job_id, upload_id, video_id)
+                await self._store_processing(upload_id, youtube_publish.PROCESSING_PROCESSED)
+                await self._run_steps(job_id, upload_id, channel, video_id, sent, job_input)
+                await self._end_succeeded(
+                    job_id, upload_id, video_id, youtube_publish.PROCESSING_PROCESSED
+                )
                 return
             if status.upload_status in (youtube_api.UPLOAD_FAILED, youtube_api.UPLOAD_REJECTED):
                 detail = f" ({status.problem})" if status.problem else ""
@@ -243,6 +269,199 @@ class PublishYouTubeHandler(JobHandler):
             await store.update_input(session, job_id, job_input)
         async with SessionLocal() as session:
             await store.requeue(session, job_id, phases.WAITING_FOR_YOUTUBE)
+
+    # --- Steps 3 and 4: the thumbnail and the captions -----------------------------------
+
+    async def _run_steps(
+        self,
+        job_id: int,
+        upload_id: int,
+        channel: YouTubeChannel | None,
+        video_id: str,
+        sent: dict[str, Any],
+        job_input: dict[str, Any],
+    ) -> None:
+        """Does the thumbnail and the captions that are still to do, in that order. A step's
+        result is stored the moment it ends. No error here fails the upload: it is recorded on
+        its step, so one failed step never stops the other.
+
+        With `steps` in the job's input (Try again on one step) only those steps are done, when
+        they have no result or a failed one. Without it (the upload itself, or Finish) every
+        step with no result is done. A step that is `done` or `skipped` is never done again.
+        """
+        async with SessionLocal() as session:
+            row = await session.get(YouTubeUpload, upload_id)
+            if row is None:
+                return
+            project_id = row.project_id
+            results = {
+                youtube_publish.STEP_THUMBNAIL: row.thumbnail_result,
+                youtube_publish.STEP_CAPTIONS: row.captions_result,
+            }
+            await session.commit()
+        wanted = job_input.get("steps")
+        todo: list[str] = []
+        for step, result in results.items():
+            if isinstance(wanted, list):
+                if step in wanted and youtube_publish.result_status(result) not in (
+                    youtube_publish.RESULT_DONE,
+                    youtube_publish.RESULT_SKIPPED,
+                ):
+                    todo.append(step)
+            elif result is None:
+                todo.append(step)
+        if not todo:
+            return
+
+        service: Any = None
+        blocked = await self._channel_problem(channel)
+        if blocked is None and channel is not None:
+            try:
+                credentials = youtube_auth.credentials_for(channel)
+                service = await anyio.to_thread.run_sync(youtube_api.build_service, credentials)
+            except youtube_auth.TokenUnusableError:
+                async with SessionLocal() as session:
+                    await youtube_auth.mark_needs_reconnect(session, channel.id)
+                blocked = _step_reconnect_message(channel.title)
+            except youtube_auth.YouTubeNotConfiguredError:
+                blocked = _NOT_SET_UP_MESSAGE
+
+        for step in todo:
+            if blocked is not None:
+                await self._store_result(upload_id, step, _result(RESULT_FAILED, blocked))
+                continue
+            assert channel is not None
+            try:
+                if step == youtube_publish.STEP_THUMBNAIL:
+                    await phase_writer.note(job_id, phases.SETTING_YOUTUBE_THUMBNAIL)
+                    result = await self._thumbnail_step(service, video_id, project_id, sent)
+                else:
+                    await phase_writer.note(job_id, phases.SENDING_YOUTUBE_CAPTIONS)
+                    result = await self._captions_step(service, video_id, sent)
+            except Exception as exc:
+                failure = youtube_api.classify(exc)
+                _logger.warning(
+                    "job %d: the %s step failed: %s (HTTP %s, %s)",
+                    job_id,
+                    step,
+                    failure.kind if failure is not None else "unexpected",
+                    failure.status if failure is not None else None,
+                    type(exc).__name__,
+                )
+                if failure is None:
+                    message = f"The {step} could not be sent to YouTube. Press Try again on it."
+                elif failure.kind == "needs_reconnect":
+                    async with SessionLocal() as session:
+                        await youtube_auth.mark_needs_reconnect(session, channel.id)
+                    blocked = _step_reconnect_message(channel.title)
+                    message = blocked
+                else:
+                    message = youtube_api.step_failure_message(failure, channel.title, step)
+                result = _result(RESULT_FAILED, message)
+            await self._store_result(upload_id, step, result)
+            _logger.info(
+                "job %d: the %s step ended: %s (video %s)",
+                job_id,
+                step,
+                result["status"],
+                video_id,
+            )
+
+    @staticmethod
+    async def _channel_problem(channel: YouTubeChannel | None) -> str | None:
+        if channel is None:
+            return "The channel was disconnected. Connect it and press Try again on this step."
+        if channel.status != youtube_auth.STATUS_CONNECTED:
+            return _step_reconnect_message(channel.title)
+        return None
+
+    @staticmethod
+    async def _store_result(upload_id: int, step: str, result: dict[str, Any]) -> None:
+        async with SessionLocal() as session:
+            row = await session.get(YouTubeUpload, upload_id)
+            if row is not None:
+                if step == youtube_publish.STEP_THUMBNAIL:
+                    row.thumbnail_result = result
+                else:
+                    row.captions_result = result
+            await session.commit()
+
+    @staticmethod
+    async def _thumbnail_file(
+        project_id: int, sent: dict[str, Any]
+    ) -> tuple[str, int, str, bool] | None:
+        """The thumbnail to send: the one recorded at Upload when its file is still there with
+        the recorded hash, otherwise the project's chosen thumbnail. Returns its stored path, id,
+        SHA-256 and whether it is the recorded one; None when there is no usable thumbnail.
+        """
+        recorded = sent.get("thumbnail")
+        storage = get_storage()
+        if isinstance(recorded, dict):
+            path, sha256 = recorded.get("path"), recorded.get("sha256")
+            if isinstance(path, str) and isinstance(sha256, str):
+                try:
+                    _, actual = await storage.hash_stored(path)
+                except (StorageError, FileNotFoundError, OSError):
+                    actual = None
+                if actual == sha256 and isinstance(recorded.get("id"), int):
+                    return path, recorded["id"], sha256, True
+        async with SessionLocal() as session:
+            chosen = (
+                await session.execute(
+                    select(Thumbnail).where(
+                        Thumbnail.project_id == project_id,
+                        Thumbnail.chosen.is_(True),
+                        Thumbnail.path.is_not(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if chosen is None or chosen.path is None:
+                return None
+            chosen_id, chosen_path = chosen.id, chosen.path
+        try:
+            _, actual = await storage.hash_stored(chosen_path)
+        except (StorageError, FileNotFoundError, OSError):
+            return None
+        return chosen_path, chosen_id, actual, False
+
+    async def _thumbnail_step(
+        self, service: Any, video_id: str, project_id: int, sent: dict[str, Any]
+    ) -> dict[str, Any]:
+        found = await self._thumbnail_file(project_id, sent)
+        if found is None:
+            return _result(
+                RESULT_FAILED,
+                "There is no chosen thumbnail with a picture, so none was set. Choose one in "
+                "the Thumbnails panel, then press Try again on the thumbnail.",
+            )
+        path, thumbnail_id, sha256, from_snapshot = found
+        extra = {"thumbnail_id": thumbnail_id, "sha256": sha256, "from_snapshot": from_snapshot}
+        await anyio.to_thread.run_sync(
+            youtube_api.set_thumbnail, service, video_id, get_storage().get_path(path)
+        )
+        return _result(RESULT_DONE, None, **extra)
+
+    async def _captions_step(
+        self, service: Any, video_id: str, sent: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not sent.get("captions"):
+            return _result(RESULT_SKIPPED, "Captions were not ticked for this upload.")
+        render_id = sent["render"]["id"]
+        async with SessionLocal() as session:
+            render = await session.get(StoryRender, render_id)
+            recorded = story_renders.recorded_captions(render) if render is not None else None
+            await session.commit()
+        if render is None:
+            return _result(RESULT_FAILED, "The render is gone, so its captions cannot be sent.")
+        try:
+            track = caption_plan.parse_track(recorded)
+        except caption_plan.CaptionError:
+            return _result(RESULT_FAILED, "The render's caption track cannot be read.")
+        if track is None:
+            return _result(RESULT_FAILED, "This render has no caption track.")
+        srt = srt_document(track).encode("utf-8")
+        await anyio.to_thread.run_sync(youtube_api.insert_captions, service, video_id, srt)
+        return _result(RESULT_DONE, None)
 
     # --- Ending --------------------------------------------------------------------------
 
@@ -268,8 +487,14 @@ class PublishYouTubeHandler(JobHandler):
                 return
             await session.commit()
 
-    async def _end_processed(self, job_id: int, upload_id: int, video_id: str) -> None:
-        await self._end_succeeded(job_id, upload_id, video_id, youtube_publish.PROCESSING_PROCESSED)
+    @staticmethod
+    async def _store_processing(upload_id: int, processing: str) -> None:
+        async with SessionLocal() as session:
+            row = await session.get(YouTubeUpload, upload_id)
+            if row is not None:
+                row.processing = processing
+                row.error = None
+            await session.commit()
 
     @staticmethod
     async def _end_failed(job_id: int, upload_id: int, message: str) -> None:
@@ -331,3 +556,12 @@ class PublishYouTubeHandler(JobHandler):
 
 def _reconnect_message(title: str) -> str:
     return f"Reconnect {title} in Settings, then press Try again."
+
+
+def _step_reconnect_message(title: str) -> str:
+    return f"Reconnect {title} in Settings, then press Try again on this step."
+
+
+def _result(status: str, message: str | None, **extra: Any) -> dict[str, Any]:
+    """What a step stores in `thumbnail_result` or `captions_result`."""
+    return {"status": status, "message": message, "at": utcnow().isoformat(), **extra}

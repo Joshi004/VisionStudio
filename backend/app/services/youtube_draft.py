@@ -40,6 +40,7 @@ from app.db.models import (
 )
 from app.jobs import store
 from app.services import (
+    caption_plan,
     discovery,
     provenance,
     story_bible,
@@ -433,6 +434,23 @@ class RenderChoice:
     status: Literal["current", "out_of_date"]
     reasons: list[str]
     is_short: bool
+    # Whether the render has a caption track that can be read, and whether that track is drawn on
+    # the picture (Y-8: burned captions are not uploaded by default).
+    has_captions: bool = False
+    captions_burned: bool = False
+
+
+def captions_of(row: StoryRender) -> tuple[bool, bool]:
+    """`(has_captions, captions_burned)` from the render's frozen caption track. A track that
+    cannot be read counts as no track.
+    """
+    try:
+        track = caption_plan.parse_track(story_renders.recorded_captions(row))
+    except caption_plan.CaptionError:
+        return False, False
+    if track is None:
+        return False, False
+    return True, track.burned
 
 
 @dataclass(frozen=True)
@@ -452,6 +470,8 @@ class UploadEntry:
     row: YouTubeUpload
     render_number: int
     job: Job | None
+    # Whether the upload's channel is still connected (and usable), for Try again and Finish.
+    channel_connected: bool = False
 
 
 @dataclass(frozen=True)
@@ -487,17 +507,23 @@ def default_channel(channels: list[YouTubeChannel]) -> int | None:
 
 async def _uploads(session: AsyncSession, project_id: int) -> list[UploadEntry]:
     statement = (
-        select(YouTubeUpload, StoryRender.render_number, Job)
+        select(YouTubeUpload, StoryRender.render_number, Job, YouTubeChannel.status)
         .join(StoryRender, StoryRender.id == YouTubeUpload.render_id)
         .outerjoin(Job, Job.id == YouTubeUpload.job_id)
+        .outerjoin(YouTubeChannel, YouTubeChannel.id == YouTubeUpload.channel_row_id)
         .where(YouTubeUpload.project_id == project_id)
         .order_by(YouTubeUpload.id.desc())
         # The job moves while an upload runs, so a copy kept from an earlier read is not used.
         .execution_options(populate_existing=True)
     )
     return [
-        UploadEntry(row=row, render_number=number, job=job)
-        for row, number, job in await session.execute(statement)
+        UploadEntry(
+            row=row,
+            render_number=number,
+            job=job,
+            channel_connected=channel_status == youtube_auth.STATUS_CONNECTED,
+        )
+        for row, number, job, channel_status in await session.execute(statement)
     ]
 
 
@@ -509,15 +535,19 @@ async def panel_state(
     Worked out on every read; nothing here is stored. Raises NoSuchRenderError.
     """
     state = await story_renders.state(session, project)
-    renders = [
-        RenderChoice(
-            row=entry.row,
-            status=entry.status,
-            reasons=entry.reasons,
-            is_short=writer.is_short(entry.row.width, entry.row.height, entry.row.duration_s),
+    renders: list[RenderChoice] = []
+    for entry in state.renders:
+        has_captions, captions_burned = captions_of(entry.row)
+        renders.append(
+            RenderChoice(
+                row=entry.row,
+                status=entry.status,
+                reasons=entry.reasons,
+                is_short=writer.is_short(entry.row.width, entry.row.height, entry.row.duration_s),
+                has_captions=has_captions,
+                captions_burned=captions_burned,
+            )
         )
-        for entry in state.renders
-    ]
     selected: RenderChoice | None
     if render_number is None:
         selected = renders[0] if renders else None

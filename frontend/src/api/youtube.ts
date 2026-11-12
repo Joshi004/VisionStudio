@@ -62,10 +62,15 @@ export function useYouTubeChannels() {
 export function useStartYouTubeSignIn() {
   return useMutation({
     mutationFn: async () => {
-      const { data, error, response } = await api.GET("/api/youtube/oauth/start");
+      const { data, error, response } = await api.GET(
+        "/api/youtube/oauth/start",
+      );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not start the sign-in (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not start the sign-in (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -88,7 +93,10 @@ export function useCheckYouTubeChannel() {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not check the channel (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not check the channel (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -108,7 +116,10 @@ export function useDisconnectYouTubeChannel() {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not disconnect the channel (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not disconnect the channel (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -160,7 +171,10 @@ const GRACE_POLLS = 2;
  * and twice more after that, because the picture of a new thumbnail is started just after its
  * ideas are stored and nothing is "making" in between.
  */
-export function useYouTubePanel(projectId: number, renderNumber: number | null) {
+export function useYouTubePanel(
+  projectId: number,
+  renderNumber: number | null,
+) {
   const gracePolls = useRef(0);
   return useQuery({
     queryKey: youtubePanelRenderKey(projectId, renderNumber),
@@ -174,7 +188,9 @@ export function useYouTubePanel(projectId: number, renderNumber: number | null) 
         state?.thumbnail.status === "making" ||
         (state?.uploads ?? []).some(
           (upload) =>
-            upload.state === "uploading" || upload.state === "processing",
+            upload.state === "uploading" ||
+            upload.state === "processing" ||
+            upload.state === "finishing",
         );
       if (busy) {
         gracePolls.current = GRACE_POLLS;
@@ -280,14 +296,26 @@ export function useUploadToYouTube(projectId: number) {
   });
 }
 
-/** Tries a failed upload again. What was done is not done again. */
+/** Which upload, and which failed step (none: the whole upload, or Finish). */
+export type YouTubeRetryRequest = {
+  uploadId: number;
+  step?: "thumbnail" | "captions";
+};
+
+/**
+ * Tries a failed upload again, finishes the thumbnail and captions of one that gave up waiting,
+ * or tries one failed step again. What was done is not done again.
+ */
 export function useRetryYouTubeUpload(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (uploadId: number) => {
+    mutationFn: async ({ uploadId, step }: YouTubeRetryRequest) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/youtube/uploads/{upload_id}/retry",
-        { params: { path: { project_id: projectId, upload_id: uploadId } } },
+        {
+          params: { path: { project_id: projectId, upload_id: uploadId } },
+          body: { step: step ?? null },
+        },
       );
       if (!data) {
         throw new ApiError(

@@ -190,6 +190,9 @@ SAVING_YOUTUBE_DRAFT: Final = "saving the YouTube draft"
 UPLOADING_TO_YOUTUBE: Final = "uploading the video to YouTube"
 CHECKING_YOUTUBE: Final = "asking YouTube if the video is processed"
 WAITING_FOR_YOUTUBE: Final = "waiting for YouTube to process the video"
+# YT-005: once the video is processed, the thumbnail and then the captions.
+SETTING_YOUTUBE_THUMBNAIL: Final = "setting the thumbnail on YouTube"
+SENDING_YOUTUBE_CAPTIONS: Final = "sending the captions to YouTube"
 
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).

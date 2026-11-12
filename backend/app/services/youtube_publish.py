@@ -15,7 +15,12 @@ a `youtube_upload` row whose `sent` is a snapshot of exactly what will be sent, 
 
 The input of the job is `{"upload_id", "target"}` (`target` is `<render id>:<channel row id>`, so
 a second press for the same render and channel while one is waiting or running is the same
-upload), and the job adds `next_check_at` and `waiting_since` while it waits for YouTube.
+upload), and the job adds `next_check_at` and `waiting_since` while it waits for YouTube. A Try
+again on one step (YT-005) adds `"steps": ["thumbnail"]` or `["captions"]`.
+
+After processing the job stores `thumbnail_result` and `captions_result`, each
+`{"status": "done" | "skipped" | "failed", "message", "at"}`; the thumbnail's also has
+`thumbnail_id`, `sha256` and `from_snapshot` (whether it is the one recorded in `sent`).
 
 Nothing here calls Google; the job does (`jobs/publish_youtube`).
 """
@@ -43,7 +48,15 @@ PROCESSING_PROCESSED: Final = "processed"
 PROCESSING_FAILED: Final = "failed"
 PROCESSING_GAVE_UP: Final = "gave_up"
 
-UploadStateName = Literal["uploading", "processing", "processed", "gave_up", "failed"]
+# The steps after processing (YT-005) and the `status` of a step's result.
+STEP_THUMBNAIL: Final = "thumbnail"
+STEP_CAPTIONS: Final = "captions"
+STEPS: Final = (STEP_THUMBNAIL, STEP_CAPTIONS)
+RESULT_DONE: Final = "done"
+RESULT_SKIPPED: Final = "skipped"
+RESULT_FAILED: Final = "failed"
+
+UploadStateName = Literal["uploading", "processing", "finishing", "processed", "gave_up", "failed"]
 
 _STALE_DRAFT_MESSAGE: Final = (
     "The draft changed since the page loaded. Check it and press Upload again."
@@ -65,19 +78,49 @@ class UploadView:
 
     state: UploadStateName
     can_retry: bool
+    # Finish the thumbnail and captions: the upload gave up waiting for YouTube, or is processed
+    # and a step has no result yet.
+    can_finish: bool = False
+    # The steps whose last result is `failed`, each of which can be tried again on its own.
+    retry_steps: tuple[str, ...] = ()
 
 
-def upload_state(row: YouTubeUpload, job: Job | None) -> UploadView:
-    """`uploading` and `processing` are while the job is queued or running (before and after the
-    video id is stored). Otherwise the job's result decides. A failed upload can be tried again
-    unless YouTube itself failed or rejected the video, and only while its channel is connected.
+def result_status(result: object) -> str | None:
+    """The `status` of a step's stored result, or None when there is no result."""
+    status = result.get("status") if isinstance(result, dict) else None
+    return status if isinstance(status, str) else None
+
+
+def upload_state(row: YouTubeUpload, job: Job | None, channel_connected: bool) -> UploadView:
+    """`uploading` is while the job is queued or running before the video id is stored,
+    `processing` after it, and `finishing` once YouTube has processed the video (the thumbnail
+    and the captions are being sent). Otherwise the job's result decides. A failed upload can be
+    tried again unless YouTube itself failed or rejected the video. Finish and the Try again of
+    one step are only offered while the upload's channel is connected.
     """
     if job is not None and job.status in store.ACTIVE_STATUSES:
-        return UploadView("uploading" if row.video_id is None else "processing", False)
+        if row.video_id is None:
+            return UploadView("uploading", False)
+        if row.processing == PROCESSING_PROCESSED:
+            return UploadView("finishing", False)
+        return UploadView("processing", False)
+    usable = channel_connected and row.channel_row_id is not None and row.video_id is not None
     if row.processing == PROCESSING_PROCESSED:
-        return UploadView("processed", False)
+        results = (row.thumbnail_result, row.captions_result)
+        failed = tuple(
+            step
+            for step, result in zip(STEPS, results, strict=True)
+            if result_status(result) == RESULT_FAILED
+        )
+        unfinished = any(result is None for result in results)
+        return UploadView(
+            "processed",
+            False,
+            can_finish=usable and unfinished,
+            retry_steps=failed if usable else (),
+        )
     if row.processing == PROCESSING_GAVE_UP:
-        return UploadView("gave_up", False)
+        return UploadView("gave_up", False, can_finish=usable)
     can_retry = row.processing != PROCESSING_FAILED and row.channel_row_id is not None
     return UploadView("failed", can_retry)
 
@@ -93,8 +136,16 @@ def _job_input(upload_id: int, render_id: int, channel_row_id: int) -> dict[str,
 async def _entry(session: AsyncSession, row: YouTubeUpload) -> youtube_draft.UploadEntry:
     render = await session.get(StoryRender, row.render_id)
     job = await session.get(Job, row.job_id) if row.job_id is not None else None
+    channel = (
+        await session.get(YouTubeChannel, row.channel_row_id)
+        if row.channel_row_id is not None
+        else None
+    )
     return youtube_draft.UploadEntry(
-        row=row, render_number=render.render_number if render is not None else 0, job=job
+        row=row,
+        render_number=render.render_number if render is not None else 0,
+        job=job,
+        channel_connected=channel is not None and channel.status == youtube_auth.STATUS_CONNECTED,
     )
 
 
@@ -248,26 +299,35 @@ async def start_upload(
 
 
 async def retry(
-    session: AsyncSession, project: Project, upload_id: int
+    session: AsyncSession, project: Project, upload_id: int, step: str | None = None
 ) -> youtube_draft.UploadEntry:
-    """Queues a new job for an upload that failed or was cancelled, and commits. What is done is
-    never done again: with a video id stored, the job goes on with processing. An upload that is
-    still waiting or running is returned as it is. Raises `NoSuchUploadError` or
-    `YouTubePublishError`.
+    """Queues a new job for an upload and commits. Without `step`: Try again for a failed
+    upload, or Finish the thumbnail and captions for one that gave up waiting or has a step with
+    no result. With `step` (`thumbnail` or `captions`): only that failed step, and the job input
+    gets `steps: [step]`. What is done is never done again: with a video id stored, the job goes
+    on with processing, and a step that worked is not sent again. An upload that is still waiting
+    or running is returned as it is. Raises `NoSuchUploadError` or `YouTubePublishError`.
     """
     row = await session.get(YouTubeUpload, upload_id)
     if row is None or row.project_id != project.id:
         raise NoSuchUploadError("There is no such upload.")
     job = await session.get(Job, row.job_id) if row.job_id is not None else None
-    view = upload_state(row, job)
+    # The channel is checked after the upload's own state, with its own sentence.
+    view = upload_state(row, job, channel_connected=True)
     if job is not None and job.status in store.ACTIVE_STATUSES:
         return await _entry(session, row)
     if row.channel_row_id is None:
         raise YouTubePublishError(
             "The channel was disconnected. Connect it again and press Upload again."
         )
-    if not view.can_retry:
-        raise YouTubePublishError("This upload cannot be tried again.")
+    job_input = _job_input(row.id, row.render_id, row.channel_row_id)
+    if step is None:
+        if not (view.can_retry or view.can_finish):
+            raise YouTubePublishError("This upload cannot be tried again.")
+    else:
+        if step not in view.retry_steps:
+            raise YouTubePublishError("That step cannot be tried again.")
+        job_input["steps"] = [step]
     await _connected_channel(session, row.channel_row_id)
 
     new_job, created = await store.create_job(
@@ -275,7 +335,7 @@ async def retry(
         project_id=project.id,
         type=JOB_TYPE,
         provider="local",
-        input=_job_input(row.id, row.render_id, row.channel_row_id),
+        input=job_input,
         commit=False,
         dedupe_key="target",
     )

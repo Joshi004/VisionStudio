@@ -6178,8 +6178,9 @@ export interface paths {
         put?: never;
         /**
          * Retry Youtube Upload
-         * @description Tries a failed upload again. What was done is not done again: a video that was sent is
-         *     not sent a second time.
+         * @description Tries a failed upload again, finishes the thumbnail and captions of one that gave up
+         *     waiting, or (with `step` in the body) tries one failed step again. What was done is not done
+         *     again: a video that was sent is not sent a second time, nor a step that worked.
          */
         post: operations["retry_youtube_upload_api_projects__project_id__youtube_uploads__upload_id__retry_post"];
         delete?: never;
@@ -18804,6 +18805,38 @@ export interface components {
             height: number | null;
             /** Is Short */
             is_short: boolean;
+            /** Has Captions */
+            has_captions: boolean;
+            /** Captions Burned */
+            captions_burned: boolean;
+        };
+        /**
+         * YouTubeRetryIn
+         * @description Try again on one failed step. No body (or no step) tries the whole upload again, or
+         *     finishes the thumbnail and captions.
+         */
+        YouTubeRetryIn: {
+            /** Step */
+            step?: ("thumbnail" | "captions") | null;
+        };
+        /**
+         * YouTubeStepResultOut
+         * @description How the thumbnail or the captions step ended.
+         */
+        YouTubeStepResultOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "skipped" | "failed";
+            /** Message */
+            message: string | null;
+            /** At */
+            at: string | null;
+            /** Thumbnail Id */
+            thumbnail_id?: number | null;
+            /** From Snapshot */
+            from_snapshot?: boolean | null;
         };
         /**
          * YouTubeSuggestionOut
@@ -18904,13 +18937,21 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "uploading" | "processing" | "processed" | "gave_up" | "failed";
+            state: "uploading" | "processing" | "finishing" | "processed" | "gave_up" | "failed";
             /** Processing */
             processing: string | null;
             /** Error */
             error: string | null;
             /** Can Retry */
             can_retry: boolean;
+            thumbnail_result: components["schemas"]["YouTubeStepResultOut"] | null;
+            captions_result: components["schemas"]["YouTubeStepResultOut"] | null;
+            /** Captions Sent */
+            captions_sent: boolean;
+            /** Can Finish */
+            can_finish: boolean;
+            /** Retry Steps */
+            retry_steps: ("thumbnail" | "captions")[];
             job: components["schemas"]["DiscoveryJobOut"] | null;
             progress: components["schemas"]["YouTubeUploadProgressOut"] | null;
         };
@@ -32942,7 +32983,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["YouTubeRetryIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {

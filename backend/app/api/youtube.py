@@ -12,7 +12,9 @@ The project's draft, all under `/projects/{project_id}/youtube`:
 3. `PUT .../draft` saves the owner's edit of the title, description and hashtags as a new version.
 4. `POST .../uploads` (YT-004) checks everything again, stores a snapshot of what will be sent and
    queues the `publish_youtube` job; `POST .../uploads/{upload_id}/retry` tries a failed upload
-   again. The upload itself is done by the job, never by a route.
+   again, finishes the thumbnail and captions of one that gave up waiting (YT-005), or, with
+   `step` in the body, tries one failed step again. The upload itself is done by the job, never
+   by a route.
 
 The answers never return ORM objects.
 """
@@ -203,6 +205,10 @@ class YouTubeRenderOut(BaseModel):
     height: int | None
     # Whether YouTube will show it as a Short (vertical or square, at most three minutes).
     is_short: bool
+    # Whether the render has a caption track, and whether it is drawn on the picture. Captions
+    # are uploaded by default only for a track that is not burned (Y-8).
+    has_captions: bool
+    captions_burned: bool
 
 
 class YouTubeSuggestionOut(BaseModel):
@@ -250,7 +256,21 @@ class YouTubeThumbnailOut(BaseModel):
     error: str | None
 
 
-UploadState = Literal["uploading", "processing", "processed", "gave_up", "failed"]
+UploadState = Literal["uploading", "processing", "finishing", "processed", "gave_up", "failed"]
+UploadStep = Literal["thumbnail", "captions"]
+
+
+class YouTubeStepResultOut(BaseModel):
+    """How the thumbnail or the captions step ended."""
+
+    status: Literal["done", "skipped", "failed"]
+    # The sentence for a failed step (or why it was skipped), or None.
+    message: str | None
+    at: datetime | None
+    # Thumbnail only: which picture was set, and whether it is the one recorded when Upload was
+    # pressed (false: that file had changed, so the chosen thumbnail of the project was sent).
+    thumbnail_id: int | None = None
+    from_snapshot: bool | None = None
 
 
 class YouTubeUploadProgressOut(BaseModel):
@@ -282,6 +302,15 @@ class YouTubeUploadOut(BaseModel):
     processing: str | None
     error: str | None
     can_retry: bool
+    # The thumbnail and the captions steps; None before the step has run.
+    thumbnail_result: YouTubeStepResultOut | None
+    captions_result: YouTubeStepResultOut | None
+    # Whether captions were ticked when Upload was pressed, from the snapshot.
+    captions_sent: bool
+    # Finish the thumbnail and captions is possible.
+    can_finish: bool
+    # The steps that failed and can each be tried again on their own.
+    retry_steps: list[UploadStep]
     job: DiscoveryJobOut | None
     progress: YouTubeUploadProgressOut | None
 
@@ -331,8 +360,19 @@ class YouTubeUploadIn(BaseModel):
     made_for_kids: bool | None = None
     synthetic_media: bool | None = None
     notify_subscribers: bool = True
-    # Captions are sent in YT-005; the server checks the render has a caption track when true.
+    # Send the render's SRT captions after processing. The server checks the render has a caption
+    # track when true.
     captions: bool = False
+
+
+class YouTubeRetryIn(BaseModel):
+    """Try again on one failed step. No body (or no step) tries the whole upload again, or
+    finishes the thumbnail and captions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    step: UploadStep | None = None
 
 
 class YouTubeDraftEditIn(BaseModel):
@@ -398,9 +438,36 @@ def _sent_text(sent: object, *keys: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _step_out(result: object) -> YouTubeStepResultOut | None:
+    """A stored step result, or None when there is none or it cannot be read."""
+    if not isinstance(result, dict):
+        return None
+    step_status = result.get("status")
+    if step_status not in ("done", "skipped", "failed"):
+        return None
+    at: datetime | None = None
+    if isinstance(result.get("at"), str):
+        try:
+            at = datetime.fromisoformat(result["at"])
+        except ValueError:
+            at = None
+    message = result.get("message")
+    thumbnail_id = result.get("thumbnail_id")
+    from_snapshot = result.get("from_snapshot")
+    return YouTubeStepResultOut(
+        status=step_status,
+        message=message if isinstance(message, str) else None,
+        at=at,
+        thumbnail_id=thumbnail_id
+        if isinstance(thumbnail_id, int) and not isinstance(thumbnail_id, bool)
+        else None,
+        from_snapshot=from_snapshot if isinstance(from_snapshot, bool) else None,
+    )
+
+
 def _upload_out(entry: youtube_draft.UploadEntry) -> YouTubeUploadOut:
     row = entry.row
-    view = youtube_publish.upload_state(row, entry.job)
+    view = youtube_publish.upload_state(row, entry.job, entry.channel_connected)
     live = live_status.upload_of(entry.job.id) if entry.job is not None else None
     privacy_sent = _sent_text(row.sent, "privacy")
     return YouTubeUploadOut(
@@ -422,6 +489,11 @@ def _upload_out(entry: youtube_draft.UploadEntry) -> YouTubeUploadOut:
         if view.state == "failed"
         else None,
         can_retry=view.can_retry,
+        thumbnail_result=_step_out(row.thumbnail_result),
+        captions_result=_step_out(row.captions_result),
+        captions_sent=bool(row.sent.get("captions")) if isinstance(row.sent, dict) else False,
+        can_finish=view.can_finish,
+        retry_steps=[cast(UploadStep, step) for step in view.retry_steps],
         job=_job_out(entry.job),
         progress=(
             YouTubeUploadProgressOut(sent_bytes=live.sent_bytes, total_bytes=live.total_bytes)
@@ -449,6 +521,8 @@ async def _panel(
                 width=choice.row.width,
                 height=choice.row.height,
                 is_short=choice.is_short,
+                has_captions=choice.has_captions,
+                captions_burned=choice.captions_burned,
             )
             for choice in state.renders
         ],
@@ -580,16 +654,22 @@ async def start_youtube_upload(
     responses=_UPLOAD_REFUSED,
 )
 async def retry_youtube_upload(
-    project_id: int, upload_id: int, session: SessionDep
+    project_id: int,
+    upload_id: int,
+    session: SessionDep,
+    body: YouTubeRetryIn | None = None,
 ) -> YouTubeUploadOut:
-    """Tries a failed upload again. What was done is not done again: a video that was sent is
-    not sent a second time.
+    """Tries a failed upload again, finishes the thumbnail and captions of one that gave up
+    waiting, or (with `step` in the body) tries one failed step again. What was done is not done
+    again: a video that was sent is not sent a second time, nor a step that worked.
     """
     if not 1 <= upload_id <= _MAX_INT:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "There is no such upload.")
     project = await load_project(session, project_id)
     try:
-        entry = await youtube_publish.retry(session, project, upload_id)
+        entry = await youtube_publish.retry(
+            session, project, upload_id, step=body.step if body is not None else None
+        )
     except youtube_publish.NoSuchUploadError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except youtube_publish.YouTubePublishError as exc:

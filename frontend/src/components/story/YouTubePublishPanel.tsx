@@ -33,6 +33,7 @@ import {
   type YouTubeDraft,
   type YouTubePanel,
   type YouTubePrivacy,
+  type YouTubeRetryRequest,
   type YouTubeThumbnail,
   type YouTubeUpload,
 } from "../../api/youtube";
@@ -73,7 +74,8 @@ const NO_ANSWERS: Answers = { version: null, kids: "", synthetic: "" };
  * a suggestion for the two declarations) and a thumbnail; the owner edits everything, picks the
  * channel and visibility, and answers both declarations. Upload is disabled with its reason
  * until all of that is done, asks for a confirmation, and sends the render; the Uploads card
- * follows each upload. The thumbnail and the captions are sent in the next update.
+ * follows each upload, including the thumbnail and the captions that are sent once YouTube has
+ * processed the video.
  */
 export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const [renderNumber, setRenderNumber] = useState<number | null>(null);
@@ -89,6 +91,11 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   const [confirmOwn, setConfirmOwn] = useState(false);
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [notify, setNotify] = useState(true);
+  // The owner's choice for the captions box, kept with the render it was made for.
+  const [captionsChoice, setCaptionsChoice] = useState<{
+    renderNumber: number;
+    value: boolean;
+  } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [answers, setAnswers] = useState<Answers>(NO_ANSWERS);
   const [channelChoice, setChannelChoice] = useState<string | null>(null);
@@ -137,15 +144,30 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
   };
 
   const channels = data?.channels ?? [];
-  const connected = channels.filter((channel) => channel.status === "connected");
+  const connected = channels.filter(
+    (channel) => channel.status === "connected",
+  );
   const defaultChannel =
-    data?.default_channel_row_id != null ? String(data.default_channel_row_id) : null;
+    data?.default_channel_row_id != null
+      ? String(data.default_channel_row_id)
+      : null;
   const channelValue =
     channelChoice !== null &&
     connected.some((channel) => String(channel.id) === channelChoice)
       ? channelChoice
       : defaultChannel;
   const privacy = privacyChoice ?? data?.default_privacy ?? "private";
+
+  // Captions: off without a caption track; otherwise on unless the track is drawn on the picture
+  // (viewers with captions on would see them twice), until the owner chooses.
+  const hasCaptions = selected?.has_captions ?? false;
+  const captionsDefault = hasCaptions && !(selected?.captions_burned ?? false);
+  const captions =
+    hasCaptions &&
+    (captionsChoice !== null &&
+    captionsChoice.renderNumber === data?.render_number
+      ? captionsChoice.value
+      : captionsDefault);
 
   const channelTitle =
     connected.find((channel) => String(channel.id) === channelValue)?.title ??
@@ -179,8 +201,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
       madeForKids: current.kids === "yes",
       syntheticMedia: current.synthetic === "yes",
       notifySubscribers: notify,
-      // The captions come in the next update.
-      captions: false,
+      captions,
     });
   };
 
@@ -222,7 +243,9 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
                   .filter((part) => part !== null)
                   .join(", "),
               }))}
-              value={data.render_number === null ? null : String(data.render_number)}
+              value={
+                data.render_number === null ? null : String(data.render_number)
+              }
               onChange={(value) => value && setRenderNumber(Number(value))}
             />
           )}
@@ -315,8 +338,8 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
               <Alert color="yellow" title="The draft is out of date">
                 <Stack gap={4}>
                   <Text size="sm">
-                    Something it was written from has changed. You can still
-                    use it, or draft again.
+                    Something it was written from has changed. You can still use
+                    it, or draft again.
                   </Text>
                   <List size="sm">
                     {draft.reasons.map((reason) => (
@@ -407,6 +430,25 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
               checked={notify}
               onChange={(event) => setNotify(event.currentTarget.checked)}
             />
+            <Checkbox
+              label="Upload captions"
+              description={
+                !hasCaptions
+                  ? "This render has no caption track, so there is nothing to upload."
+                  : selected?.captions_burned
+                    ? "The captions are already drawn on the picture. Uploading them too would show them twice to viewers who turn captions on."
+                    : "Sends the render's words and timing to YouTube as an English caption track (SRT)."
+              }
+              checked={captions}
+              disabled={!hasCaptions}
+              onChange={(event) =>
+                data?.render_number != null &&
+                setCaptionsChoice({
+                  renderNumber: data.render_number,
+                  value: event.currentTarget.checked,
+                })
+              }
+            />
             <Stack gap={4}>
               <Group>
                 <Button
@@ -437,7 +479,7 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
           uploads={data.uploads}
           retrying={retry.isPending ? retry.variables : null}
           retryError={retry.isError ? describeError(retry.error) : null}
-          onRetry={(uploadId) => retry.mutate(uploadId)}
+          onRetry={(request) => retry.mutate(request)}
         />
       )}
 
@@ -454,7 +496,10 @@ export function YouTubePublishPanel({ projectId }: YouTubePublishPanelProps) {
             <strong>{privacy}</strong>.{" "}
             {notify
               ? "YouTube will notify the channel's subscribers."
-              : "Subscribers will not be notified."}
+              : "Subscribers will not be notified."}{" "}
+            {captions
+              ? "The captions will be uploaded too."
+              : "No captions will be uploaded."}
           </Text>
           <Text size="sm" c="dimmed">
             Your answers to the two questions are sent with it, and YouTube may
@@ -555,7 +600,11 @@ function whyNotUpload(input: {
 }
 
 function isUploadActive(upload: YouTubeUpload): boolean {
-  return upload.state === "uploading" || upload.state === "processing";
+  return (
+    upload.state === "uploading" ||
+    upload.state === "processing" ||
+    upload.state === "finishing"
+  );
 }
 
 const UPLOAD_STATE: Record<
@@ -564,6 +613,7 @@ const UPLOAD_STATE: Record<
 > = {
   uploading: { label: "Sending", color: "blue" },
   processing: { label: "YouTube is processing it", color: "blue" },
+  finishing: { label: "Setting thumbnail and captions", color: "blue" },
   processed: { label: "Uploaded", color: "green" },
   gave_up: { label: "Uploaded, still processing", color: "yellow" },
   failed: { label: "Failed", color: "red" },
@@ -577,9 +627,9 @@ function UploadsCard({
   onRetry,
 }: {
   uploads: YouTubeUpload[];
-  retrying: number | null | undefined;
+  retrying: YouTubeRetryRequest | null | undefined;
   retryError: string | null;
-  onRetry: (uploadId: number) => void;
+  onRetry: (request: YouTubeRetryRequest) => void;
 }) {
   return (
     <Paper withBorder p="md" radius="md">
@@ -594,8 +644,8 @@ function UploadsCard({
           <UploadRow
             key={upload.id}
             upload={upload}
-            retrying={retrying === upload.id}
-            onRetry={() => onRetry(upload.id)}
+            retrying={retrying?.uploadId === upload.id ? retrying : null}
+            onRetry={(step) => onRetry({ uploadId: upload.id, step })}
           />
         ))}
       </Stack>
@@ -609,10 +659,12 @@ function UploadRow({
   onRetry,
 }: {
   upload: YouTubeUpload;
-  retrying: boolean;
-  onRetry: () => void;
+  // The retry now being sent for this upload, or null.
+  retrying: YouTubeRetryRequest | null;
+  onRetry: (step?: "thumbnail" | "captions") => void;
 }) {
   const state = UPLOAD_STATE[upload.state];
+  const finishing = upload.state === "finishing";
   const progress = upload.progress;
   const percent =
     progress !== null && progress.total_bytes > 0
@@ -657,8 +709,53 @@ function UploadRow({
       {upload.state === "gave_up" && (
         <Text size="xs" c="dimmed">
           YouTube was still processing the video after 30 minutes, so the app
-          stopped waiting. The video is on YouTube and will finish by itself.
+          stopped waiting. The video is on YouTube, but its thumbnail and
+          captions have not been sent yet.
         </Text>
+      )}
+      {(finishing ||
+        upload.state === "processed" ||
+        upload.thumbnail_result !== null ||
+        upload.captions_result !== null) && (
+        <Stack gap={2}>
+          <StepLine
+            label="Thumbnail"
+            doneText="Set on the video."
+            result={upload.thumbnail_result}
+            working={finishing}
+            canRetry={upload.retry_steps.includes("thumbnail")}
+            retrying={retrying?.step === "thumbnail"}
+            onRetry={() => onRetry("thumbnail")}
+          />
+          {upload.thumbnail_result?.status === "done" &&
+            upload.thumbnail_result.from_snapshot === false && (
+              <Text size="xs" c="dimmed">
+                The picture recorded when you pressed Upload had changed, so the
+                thumbnail chosen now was set instead.
+              </Text>
+            )}
+          <StepLine
+            label="Captions"
+            doneText="Uploaded as an English track."
+            result={upload.captions_result}
+            working={finishing}
+            canRetry={upload.retry_steps.includes("captions")}
+            retrying={retrying?.step === "captions"}
+            onRetry={() => onRetry("captions")}
+          />
+        </Stack>
+      )}
+      {upload.can_finish && (
+        <Group>
+          <Button
+            size="xs"
+            variant="light"
+            onClick={() => onRetry()}
+            loading={retrying !== null && retrying.step === undefined}
+          >
+            Finish the thumbnail and captions
+          </Button>
+        </Group>
       )}
       {upload.video_id && (
         <Group gap="md">
@@ -700,7 +797,11 @@ function UploadRow({
             )}
             {upload.can_retry && (
               <Group>
-                <Button size="xs" onClick={onRetry} loading={retrying}>
+                <Button
+                  size="xs"
+                  onClick={() => onRetry()}
+                  loading={retrying !== null && retrying.step === undefined}
+                >
                   Try again
                 </Button>
               </Group>
@@ -709,6 +810,56 @@ function UploadRow({
         </Alert>
       )}
     </Stack>
+  );
+}
+
+/** One line for the thumbnail or the captions step of an upload. */
+function StepLine({
+  label,
+  doneText,
+  result,
+  working,
+  canRetry,
+  retrying,
+  onRetry,
+}: {
+  label: string;
+  doneText: string;
+  result: YouTubeUpload["thumbnail_result"];
+  // The job is sending the steps now, so an earlier failure is being tried again.
+  working: boolean;
+  canRetry: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  let text: string;
+  let color = "dimmed";
+  if (working && (result === null || result.status === "failed")) {
+    text = result === null ? "Being sent." : "Trying again.";
+  } else if (result === null) {
+    text = "Not sent yet.";
+  } else if (result.status === "done") {
+    text = doneText;
+  } else if (result.status === "skipped") {
+    text = result.message ?? "Not sent.";
+  } else {
+    text = result.message ?? "It failed.";
+    color = "red";
+  }
+  return (
+    <Group gap="xs">
+      <Text size="xs" fw={500}>
+        {label}:
+      </Text>
+      <Text size="xs" c={color}>
+        {text}
+      </Text>
+      {canRetry && (
+        <Button size="compact-xs" onClick={onRetry} loading={retrying}>
+          Try again
+        </Button>
+      )}
+    </Group>
   );
 }
 
@@ -853,8 +1004,8 @@ function Declaration({
         </Group>
       </Radio.Group>
       <Text size="xs" c="dimmed">
-        The model suggests {suggestion.value ? "Yes" : "No"}: {suggestion.reason}{" "}
-        It is your answer that counts.
+        The model suggests {suggestion.value ? "Yes" : "No"}:{" "}
+        {suggestion.reason} It is your answer that counts.
       </Text>
     </Stack>
   );
