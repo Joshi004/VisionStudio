@@ -1,0 +1,25 @@
+# Puts media/ and tmp/ in a folder on the Mac instead of the Docker volume (STOR-001).
+# The database stays in the volume. Switched on from .env, with two lines:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.files.yml
+#   VISIO_FILES_DIR=/Users/<you>/VisioStudioData
+# The folder must exist and hold an empty file named .visio-studio-files (see .env.example).
+# `create_host_path: false` makes Docker refuse to start when the folder is missing, instead of
+# quietly creating an empty one.
+services:
+  backend:
+    environment:
+      FILES_DIR: /files
+    volumes:
+      - type: bind
+        source: ${VISIO_FILES_DIR:?Set VISIO_FILES_DIR in .env}
+        target: /files
+        bind: {create_host_path: false}
+  frontend:
+    # Replaces the base file's list (which would otherwise be merged): nginx sees only the
+    # media folder of the files folder, read-only, at the path it serves.
+    volumes: !override
+      - type: bind
+        source: ${VISIO_FILES_DIR:?Set VISIO_FILES_DIR in .env}/media
+        target: /data/media
+        read_only: true
+        bind: {create_host_path: false}

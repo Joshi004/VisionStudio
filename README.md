@@ -128,10 +128,51 @@ cd frontend && npm run lint && npm run typecheck
 
 ## Where the data lives
 
-Everything is stored on the named volume `visio-studio_data`:
+The database is always on the named volume `visio-studio_data`:
 
 - `/data/app.db` (plus its `-wal` and `-shm` files) — the SQLite database.
+
+By default the volume also holds the files:
+
 - `/data/media/` — uploaded and generated media files.
+- `/data/tmp/` — working files, cleared when the backend starts.
+
+### Keeping the files in a folder on the Mac
+
+Media and working files can live in a folder you can open in Finder, while the
+database stays in the volume. Create the folder once, with its `media/` folder
+and an empty marker file (the app never creates the marker itself, so a mistyped path or an
+unplugged disk is not mistaken for the right folder):
+
+```bash
+mkdir -p ~/VisioStudioData/media && touch ~/VisioStudioData/.visio-studio-files
+```
+
+Then add two lines to `.env` (an absolute path, not `~`) and restart:
+
+```text
+COMPOSE_FILE=docker-compose.yml:docker-compose.files.yml
+VISIO_FILES_DIR=/Users/<you>/VisioStudioData
+```
+
+```bash
+docker compose up -d
+```
+
+New files then go to
+`<folder>/media/` and `<folder>/tmp/`. The `frontend` container sees only
+`media/`, read-only. If the folder is missing, Docker refuses to start the
+backend. If the marker is missing or the folder cannot be written, the backend
+health check reports "files folder" as degraded and nothing is stored.
+
+This does not copy the media already in the volume: until that is done on
+purpose (STOR-002), set it up only on a fresh install or to try it. To switch
+back, remove the two lines and restart.
+
+**Do not rename, move or delete files in that folder from Finder.** The
+database stores each file's exact name, so the app breaks when a file changes.
+Opening, playing and copying files is fine. The warning about
+`docker compose down -v` still applies, because the database is in the volume.
 
 ## Secrets
 

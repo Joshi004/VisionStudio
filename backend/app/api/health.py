@@ -1,4 +1,4 @@
-"""`GET /api/health`: the database, FFmpeg and ffprobe, all read through the
+"""`GET /api/health`: the database, the files folder, FFmpeg and ffprobe, all read through the
 app's own engine (ITERATION_1_PHASES.md Phase 1 [VERIFY]: `foreign_keys`
 is a per-connection SQLite setting, so it must be checked this way, not
 through a separate `sqlite3` session).
@@ -6,6 +6,7 @@ through a separate `sqlite3` session).
 
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Request, Response, status
@@ -14,7 +15,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_config
 from app.db.session import SessionDep
+from app.services.storage import get_storage
 
 router = APIRouter()
 
@@ -26,6 +29,13 @@ class DatabaseStatus(BaseModel):
     revision: str | None = None
 
 
+class FilesStatus(BaseModel):
+    ok: bool
+    # True when the files are in their own folder on the host (FILES_DIR), not in the volume.
+    separate: bool
+    problem: str | None = None
+
+
 class ToolStatus(BaseModel):
     ok: bool
     version: str | None = None
@@ -34,6 +44,7 @@ class ToolStatus(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     database: DatabaseStatus
+    files: FilesStatus
     ffmpeg: ToolStatus
     ffprobe: ToolStatus
 
@@ -55,6 +66,16 @@ async def _check_database(session: AsyncSession) -> DatabaseStatus:
     )
 
 
+async def _check_files() -> FilesStatus:
+    """The files folder is the one the owner meant and can be written (STOR-001)."""
+    problem = await asyncio.to_thread(get_storage().files_folder_problem)
+    return FilesStatus(
+        ok=problem is None,
+        separate=get_config().files_dir_is_separate,
+        problem=problem,
+    )
+
+
 def _tool_status(request: Request, tool: Literal["ffmpeg", "ffprobe"]) -> ToolStatus:
     # Set once at startup by the lifespan handler in app/main.py.
     version: str | None = getattr(request.app.state, f"{tool}_version", None)
@@ -68,14 +89,16 @@ def _tool_status(request: Request, tool: Literal["ffmpeg", "ffprobe"]) -> ToolSt
 )
 async def get_health(request: Request, response: Response, session: SessionDep) -> HealthResponse:
     database = await _check_database(session)
+    files = await _check_files()
     ffmpeg = _tool_status(request, "ffmpeg")
     ffprobe = _tool_status(request, "ffprobe")
 
-    healthy = database.ok and ffmpeg.ok and ffprobe.ok
+    healthy = database.ok and files.ok and ffmpeg.ok and ffprobe.ok
     response.status_code = status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(
         status="ok" if healthy else "degraded",
         database=database,
+        files=files,
         ffmpeg=ffmpeg,
         ffprobe=ffprobe,
     )

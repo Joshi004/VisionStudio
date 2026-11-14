@@ -53,6 +53,9 @@ export function BackendStatus() {
     if (!data.database.ok) {
       failedParts.push("database");
     }
+    if (!data.files.ok) {
+      failedParts.push("files folder");
+    }
     if (!data.ffmpeg.ok) {
       failedParts.push("FFmpeg");
     }

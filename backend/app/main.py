@@ -12,7 +12,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -24,7 +25,7 @@ from app.core.security import OriginCheckMiddleware
 from app.db.session import engine
 from app.jobs import dispatcher
 from app.services.ffmpeg import tool_version
-from app.services.storage import get_storage
+from app.services.storage import FilesFolderUnavailable, get_storage
 
 _logger = logging.getLogger(__name__)
 
@@ -32,9 +33,16 @@ _logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     config = get_config()
-    config.media_dir.mkdir(parents=True, exist_ok=True)
-    # Temp files of an upload that was cut short by a restart (Phase 3). Stored media stays.
-    await asyncio.to_thread(get_storage().clear_tmp)
+    storage = get_storage()
+    # STOR-001: a missing or wrong files folder must not get a new empty media folder, and
+    # nothing in it may be cleared. The app still starts, so the health check can say why.
+    problem = await asyncio.to_thread(storage.files_folder_problem)
+    if problem is not None:
+        _logger.error("startup: %s", problem)
+    else:
+        config.media_dir.mkdir(parents=True, exist_ok=True)
+        # Temp files of an upload that was cut short by a restart (Phase 3). Stored media stays.
+        await asyncio.to_thread(storage.clear_tmp)
 
     # Read once at startup (Phase 1 decision): GET /api/health just reports these,
     # it never shells out on every request.
@@ -53,6 +61,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await dispatcher.stop()
     await outbound.close()
     await engine.dispose()
+
+
+async def _files_folder_unavailable(request: Request, exc: Exception) -> JSONResponse:
+    """A request that needed to store a file while the files folder is not usable (STOR-001)."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 def create_app() -> FastAPI:
@@ -77,6 +90,7 @@ def create_app() -> FastAPI:
         ],
     )
     app.include_router(api_router)
+    app.add_exception_handler(FilesFolderUnavailable, _files_folder_unavailable)
     return app
 
 

@@ -8960,6 +8960,15 @@ export interface components {
             /** Choices */
             choices: string[] | null;
         };
+        /** FilesStatus */
+        FilesStatus: {
+            /** Ok */
+            ok: boolean;
+            /** Separate */
+            separate: boolean;
+            /** Problem */
+            problem?: string | null;
+        };
         /** FirstFrameIn */
         FirstFrameIn: {
             /**
@@ -10080,6 +10089,7 @@ export interface components {
              */
             status: "ok" | "degraded";
             database: components["schemas"]["DatabaseStatus"];
+            files: components["schemas"]["FilesStatus"];
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };

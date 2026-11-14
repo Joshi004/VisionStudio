@@ -36,7 +36,15 @@ class AppConfig:
     """Resolved configuration for this process. Construct via `get_config()`."""
 
     data_dir: Path
+    # Where `media/` and `tmp/` live. The same as `data_dir` unless FILES_DIR is set (STOR-001),
+    # which puts them in a folder on the host. The database always stays under `data_dir`.
+    files_dir: Path
     log_level: str
+
+    @property
+    def files_dir_is_separate(self) -> bool:
+        """True when the files are in their own folder, not in the data volume."""
+        return self.files_dir != self.data_dir
 
     @property
     def db_path(self) -> Path:
@@ -46,14 +54,15 @@ class AppConfig:
     @property
     def media_dir(self) -> Path:
         """Uploaded and generated media, served read-only by nginx at `/media/`."""
-        return self.data_dir / "media"
+        return self.files_dir / "media"
 
     @property
     def tmp_dir(self) -> Path:
-        """Working files for uploads in progress. Same volume as `media_dir`, so a
-        finished file is moved into place with an atomic rename. Not served by nginx.
+        """Working files for uploads in progress. On the same mount as `media_dir` (both are
+        under `files_dir`), so a finished file is moved into place with an atomic rename. Not
+        served by nginx.
         """
-        return self.data_dir / "tmp"
+        return self.files_dir / "tmp"
 
     @property
     def async_database_url(self) -> str:
@@ -73,7 +82,9 @@ def get_config() -> AppConfig:
     Safe to call repeatedly: environment variables do not change while this
     process runs.
     """
+    data_dir = Path(_env("DATA_DIR", "/data"))
     return AppConfig(
-        data_dir=Path(_env("DATA_DIR", "/data")),
+        data_dir=data_dir,
+        files_dir=Path(_env("FILES_DIR", str(data_dir))),
         log_level=_env("LOG_LEVEL", "INFO").upper(),
     )
