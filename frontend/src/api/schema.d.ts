@@ -21,6 +21,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/db-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Db Snapshots */
+        get: operations["get_db_snapshots_api_db_snapshots_get"];
+        put?: never;
+        /**
+         * Make Db Snapshot
+         * @description Starts a snapshot in the background. Poll `GET` to see when it is done.
+         */
+        post: operations["make_db_snapshot_api_db_snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -10090,6 +10111,7 @@ export interface components {
             status: "ok" | "degraded";
             database: components["schemas"]["DatabaseStatus"];
             files: components["schemas"]["FilesStatus"];
+            snapshots: components["schemas"]["SnapshotsHealth"];
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };
@@ -16660,6 +16682,44 @@ export interface components {
             /** End S */
             end_s: number;
         };
+        /** SnapshotOut */
+        SnapshotOut: {
+            /** Name */
+            name: string;
+            /**
+             * Made At
+             * Format: date-time
+             */
+            made_at: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /**
+         * SnapshotsHealth
+         * @description Information only (STOR-004): a missing or old snapshot never makes the status degraded.
+         */
+        SnapshotsHealth: {
+            /** Enabled */
+            enabled: boolean;
+            /** Last Made At */
+            last_made_at?: string | null;
+            /** Stale */
+            stale: boolean;
+        };
+        /** SnapshotsStatusOut */
+        SnapshotsStatusOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Problem */
+            problem: string | null;
+            /** Running */
+            running: boolean;
+            last: components["schemas"]["SnapshotOut"] | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Stale */
+            stale: boolean;
+        };
         /** SoundRequestIn */
         SoundRequestIn: {
             /** Shot */
@@ -19098,6 +19158,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_db_snapshots_api_db_snapshots_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotsStatusOut"];
+                };
+            };
+        };
+    };
+    make_db_snapshot_api_db_snapshots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotsStatusOut"];
+                };
+            };
+            /** @description Off, or one is already running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

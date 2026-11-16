@@ -79,6 +79,14 @@ export function BackendStatus() {
       <Text size="sm" c="green">
         Backend OK · FFmpeg {data.ffmpeg.version ?? "unknown"}
       </Text>
+      {data.snapshots.enabled && data.snapshots.stale && (
+        <Text size="sm" c="orange">
+          ·{" "}
+          {data.snapshots.last_made_at
+            ? "Database snapshot over 3 days old"
+            : "No database snapshot yet"}
+        </Text>
+      )}
     </Group>
   );
 }

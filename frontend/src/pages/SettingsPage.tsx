@@ -16,6 +16,7 @@ import { useSearchParams } from "react-router";
 import { describeError } from "../api/errors";
 import { useSettings, type SettingItem } from "../api/settings";
 import { ContractSection } from "../components/settings/ContractSection";
+import { DatabaseSnapshotsSection } from "../components/settings/DatabaseSnapshotsSection";
 import { GpuConnectionTest } from "../components/settings/GpuConnectionTest";
 import { SettingRow } from "../components/settings/SettingRow";
 import { YouTubeChannelsSection } from "../components/settings/YouTubeChannelsSection";
@@ -25,6 +26,7 @@ const GPU_GROUP = "Remote server";
 /** The group (tab) that also holds the connected YouTube channels. */
 const YOUTUBE_GROUP = "YouTube";
 const SECRETS_TAB = "Secrets";
+const BACKUPS_TAB = "Backups";
 
 /** Groups settings by their `group`, keeping the order the backend sent them in. */
 function groupSettings(settings: SettingItem[]): [string, SettingItem[]][] {
@@ -92,6 +94,7 @@ export function SettingsPage() {
               );
             })}
             <Tabs.Tab value={SECRETS_TAB}>{SECRETS_TAB}</Tabs.Tab>
+            <Tabs.Tab value={BACKUPS_TAB}>{BACKUPS_TAB}</Tabs.Tab>
           </Tabs.List>
 
           {groups.map(([group, settings]) => (
@@ -141,6 +144,10 @@ export function SettingsPage() {
                 ))}
               </Stack>
             </Paper>
+          </Tabs.Panel>
+
+          <Tabs.Panel value={BACKUPS_TAB} pt="md">
+            <DatabaseSnapshotsSection />
           </Tabs.Panel>
         </Tabs>
       )}

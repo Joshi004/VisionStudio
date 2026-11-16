@@ -24,6 +24,7 @@ from app.core.logging import configure_logging
 from app.core.security import OriginCheckMiddleware
 from app.db.session import engine
 from app.jobs import dispatcher
+from app.services import db_snapshots
 from app.services.ffmpeg import tool_version
 from app.services.storage import FilesFolderUnavailable, get_storage
 
@@ -54,10 +55,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     outbound.start()
     await dispatcher.start()
+    db_snapshots.start()
 
     yield
 
     # The loop and its tasks first: they use the outbound client and the database.
+    await db_snapshots.stop()
     await dispatcher.stop()
     await outbound.close()
     await engine.dispose()

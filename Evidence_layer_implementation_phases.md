@@ -304,10 +304,10 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 | Id | Title | Kind | Hard dependencies | Status |
 |----|-------|------|-------------------|--------|
-| STOR-001 | A files folder outside Docker | Code | — | In Progress |
-| STOR-002 | Move the existing media | Owner | STOR-001 | Not Started |
-| STOR-003 | Remove the old media copy from the volume | Owner, later | STOR-002 | Not Started |
-| STOR-004 | Database snapshots in the files folder | Code, optional | STOR-001 | Not Started |
+| STOR-001 | A files folder outside Docker | Code | — | Completed |
+| STOR-002 | Move the existing media | Owner | STOR-001 | In Progress |
+| STOR-003 | Remove the old media copy from the volume | Owner, later | STOR-002 | Completed |
+| STOR-004 | Database snapshots in the files folder | Code, optional | STOR-001 | Completed |
 | EVD-001 | Evidence switch, tables and job types | Code | — | Not Started |
 | EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Not Started |
 | EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Not Started |
@@ -331,7 +331,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 0 completed, 1 in progress (STOR-001: code done and checked in a throwaway setup; waiting for the real app to be rebuilt). Ready to start: EVD-001, EVD-004.
+**Progress snapshot:** 3 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-001, EVD-004.
 
 ---
 
@@ -339,7 +339,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### STOR-001 — A files folder outside Docker
 
-**Status:** In Progress
+**Status:** Completed (2026-11-16)
 
 **Objective.** Let media and the temporary working files live in a folder on the Mac, chosen in `.env`, while the database stays in the Docker volume. Nothing is copied or moved in this phase.
 
@@ -377,7 +377,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - [x] Compose for backend and frontend, `.env.example`, README
 - [x] Folder guard and health message
 - [x] Checks above in a throwaway setup, ruff, ESLint, `tsc`
-- [ ] Real app rebuilt with the setting unset, and the regression spot check (not done: a story-pipeline run and 14 lab image jobs were running on 2026-11-13, and a rebuild restarts the backend)
+- [x] Real app rebuilt with the setting unset (2026-11-16, once no job was running): `/api/health` reports `files.ok: true, separate: false`, the frontend sees only `media`, and the owner confirmed the app works
 
 **Completion notes.**
 - **Settings.** `.env` gets `COMPOSE_FILE=docker-compose.yml:docker-compose.files.yml` and `VISIO_FILES_DIR=<absolute host path>`. The override file `docker-compose.files.yml` mounts that folder at `/files` in `backend` and sets `FILES_DIR=/files` there. `FILES_DIR` defaults to `DATA_DIR`, so with it unset nothing changes. The database, `-wal` and the `rembg` model cache stay under `DATA_DIR`.
@@ -387,12 +387,13 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Health.** `GET /api/health` has a new `files: {ok, separate, problem}`; a problem makes the status `degraded` (HTTP 503). The header (`BackendStatus.tsx`) says "files folder". `schema.d.ts` regenerated.
 - **Compose.** The base file's `frontend` now mounts only the volume's `media` folder (`volume.subpath`), read-only. The override replaces that with `<folder>/media`, read-only, and both bind mounts use `create_host_path: false`, so Docker refuses to start when the folder is missing. Needs Docker Compose 2.35 or later (`!override`, `subpath`).
 - **Checked on 2026-11-13** in a throwaway project (`visio-stor-test`, own volume, port 5481, folder `~/VisioStudioData-stor-test`): setting unset (health `files.separate: false`, frontend `/data` holds only `media`); setting on (an uploaded image in `media/lab/`, served by nginx with 200, `tmp/` empty, no cross-device error); marker removed (health 503 with the message, upload refused, no new file); `tmp/` read-only (health reports "cannot be written"); missing folder (Compose refuses to start the backend). The old files stay in the Docker volume untouched.
-- **Deviation.** The "setting unset" check ran on a fresh volume in the throwaway project, not on the real app. Commands to finish it: `docker compose up --build -d` when no run or job is active, then check `/api/health` and play a few existing files.
-- **Left to clean up** (the owner's go-ahead needed): `docker compose -p visio-stor-test down`, `docker volume rm visio-stor-test_data`, remove `~/VisioStudioData-stor-test`. No `down -v`.
+- **Deviation.** The first "setting unset" check ran on a fresh volume in the throwaway project, because jobs were running on the real app on 2026-11-13. The real app was rebuilt on 2026-11-16 and checked as listed above. The agent did not play media itself; the owner confirmed the app works.
+- **Clean-up done by the owner on 2026-11-16:** `docker compose -p visio-stor-test down`, `docker volume rm visio-stor-test_data`, and the test folder removed. No `down -v`.
+- **Disk space (for STOR-002).** On 2026-11-16 media was 28 GB (10,686 files) and the Mac had 23 GB free. Regenerable caches were cleared with the owner's go-ahead (updater bundles, Docker build cache, npm, pip and uv caches), giving 43 GB free.
 
 ### STOR-002 — Move the existing media (owner)
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Objective.** Copy all existing media from the Docker volume to the Mac folder, prove the copy is exact, and switch the app to it. Nothing is deleted.
 
@@ -423,15 +424,23 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 **Verification criteria.** File counts, bytes and hashes are equal; the smoke test passes; new files land in the Mac folder.
 
 **Completion checklist.**
-- [ ] Idle and space checked
-- [ ] Copy made and verified
-- [ ] Switched and smoke-tested
+- [x] Idle and space checked
+- [x] Copy made and verified
+- [x] Switched
+- [ ] Smoke-tested (owner: play existing media, open the labs, make one lab item and see its file in the Mac folder)
 
-**Completion notes.** _To be filled in: the folder used, the counts, the time the copy took, any hash mismatches found._
+**Completion notes** (2026-11-16, in progress).
+- **Folder.** `/Users/nareshjoshi/VisioStudioData`, created by the owner with `media/` and the `.visio-studio-files` marker. `.env` now has `COMPOSE_FILE=docker-compose.yml:docker-compose.files.yml` and `VISIO_FILES_DIR=/Users/nareshjoshi/VisioStudioData`. The switch is confirmed: `/api/health` reports `files.separate: true, ok: true`, `/files` holds the marker, `media` and `tmp`, and the frontend sees only `media`.
+- **Before.** No job or pipeline run was active (checked read-only). 44 GB free, about 27 GB of media. About 20 GB of regenerable caches had been cleared first (updater bundles, Docker build cache, npm, pip, uv).
+- **Copy.** `cp -a --no-preserve=ownership,xattr` in a throwaway container with the volume mounted read-only and no network. **7 min 7 s** for 10,342 files and 28,715,493,817 bytes.
+- **Verification.** `scripts/verify_media_copy.py`, log `~/stor002-verify.log`. Same files, count and bytes on both sides (0 missing, 0 extra, 0 different size). SHA-256 equal for every file. For the 12 tables that record a hash (asset, shot_take, speech_unit_audio, story_render, scene_render, voice, voice_recording, lab_image, lab_video_run, lab_voice_run, lab_music_run, lab_music_source) every recorded hash equals its file's, and no row points at a missing file. The 7 path-only columns (av_lab_test, lab_graphic_render, shot_graphic, thumbnails, callout_graphic) all point at existing files. **No mismatches existed in the volume.**
+- **Count note.** The volume held 10,686 files earlier on 2026-11-16 and 10,342 at copy time. Both sides were compared at the same moment, and no database row is missing a file, so the difference is most likely a deletion made in the app before the copy.
+- **Rollback** is no longer possible: the old copy was removed in STOR-003 on the same day. The Mac folder is the only copy of the media.
+- **Left:** the smoke test (owner).
 
 ### STOR-003 — Remove the old media copy from the volume (owner, later)
 
-**Status:** Not Started
+**Status:** Completed (2026-11-16)
 
 **Objective.** Free the space the old media copy still takes inside Docker's disk image, once the owner trusts the new folder.
 
@@ -445,11 +454,17 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 **Verification criteria.** The app still works, the volume's `media/` is gone, `app.db` is intact, and the freed space shows on the Mac.
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-16).
+- **Decision.** The owner chose to delete the same day as the switch, not after the suggested week (Q-E5), after being told it removes the rollback and that the Mac might not get the space back. The agent re-verified the copy first: `~/stor003-preverify.log` says `THE COPY IS EXACT` (10,342 files, 28,715,493,817 bytes, every SHA-256 equal), and no job was active.
+- **What was run (by the owner).** A throwaway container with the volume mounted and no network: `find /data/media -mindepth 1 -delete`. It removed only the contents of `/data/media`; the empty `media` folder is kept so a Compose mount of it still works. No `docker volume rm`, no `down -v`.
+- **Checked afterwards.** The volume's `/data/media` is empty (1 entry). `app.db`, `app.db-shm`, `app.db-wal` and the three `backup-before-000N.db` files are intact. `/api/health` is `ok` with `files.separate: true`. The Mac folder still holds 10,342 files.
+- **Space.** Docker's disk image went from 75 GB to 48 GB and the Mac's free space from 18 GB to 44 GB, so Docker returned the space without a restart.
+- **Not done.** The three `backup-before-000N.db` files (about 3 MB each) stay in the volume.
+- **Rollback no longer exists.** The Mac folder is now the only copy of the media (about 28 GB). STOR-004 covers the database, not the media.
 
 ### STOR-004 — Database snapshots in the files folder (optional)
 
-**Status:** Not Started
+**Status:** Completed (2026-11-16)
 
 **Objective.** Keep a consistent copy of the database in the Mac folder, so the owner has a visible backup that survives a lost volume.
 
@@ -466,7 +481,25 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 **Verification criteria.** A snapshot opens with `sqlite3` and passes `PRAGMA integrity_check`; the app is not blocked while it is made; old snapshots are pruned to the limit.
 
-**Completion notes.** _To be filled in._
+**Completion checklist.**
+- [x] Snapshot service (`VACUUM INTO`, integrity check, atomic rename, prune)
+- [x] Daily check, button, API, health field
+- [x] Settings "Backups" tab and header warning
+- [x] README: how it works and the owner's restore steps
+- [x] Real app rebuilt and checked (below); ruff, ESLint, `tsc`
+
+**Completion notes** (2026-11-16).
+- **Decisions (owner).** Made automatically when the newest snapshot is at least 24 h old (checked every hour, first check 5 min after start) and with a button. **One snapshot is kept.** The owner sees it in Settings, Backups, and the header warns when the newest is over 3 days old or none exists. The numbers are constants at the top of `services/db_snapshots.py` (`CHECK_INTERVAL_S`, `FIRST_CHECK_DELAY_S`, `MAX_AGE`, `WARN_AFTER`, `KEEP`, `FREE_SPACE_MARGIN_BYTES`), not settings.
+- **Module.** `services/db_snapshots.py`. `VACUUM INTO` through a separate `sqlite3` connection in a worker thread, written to `db-snapshots/app-YYYY-MM-DD_HHMMZ.db.partial`, then opened `mode=ro&immutable=1` for `PRAGMA integrity_check` and the `alembic_version` read, then `os.replace` into place, then older snapshots are removed. A failed or cut-short snapshot leaves only a `.partial`, never replaces a good one, and is removed at the next start. Only names matching `SNAPSHOT_NAME` or `PARTIAL_NAME` inside `db-snapshots/` are ever deleted. Free space must cover the database, its WAL and 2 GB. One snapshot at a time (`_running` flag).
+- **When it is off.** Unless `files_dir_is_separate` and `Storage.files_folder_problem()` is `None`. The status says why, and the button gets a 409. `evidence/` for the later phases still goes under `config.files_dir`; `db-snapshots/` sits beside `media/` and `tmp/` and is not served by nginx.
+- **API.** `GET /api/db-snapshots` (`enabled`, `problem`, `running`, `last {name, made_at, size_bytes}`, `last_error`, `stale`); `POST /api/db-snapshots` returns 202, or 409 when one is running or snapshots are off. `GET /api/health` has a new `snapshots {enabled, last_made_at, stale}`, **information only**: it never makes the status `degraded`.
+- **UI.** `components/settings/DatabaseSnapshotsSection.tsx` (a fixed "Backups" tab in `SettingsPage.tsx`), `api/dbSnapshots.ts`, and a note in `BackendStatus.tsx`. `schema.d.ts` regenerated.
+- **No migration, no Compose change, no `.env` change.**
+- **Checked on the real app** (rebuilt with `docker compose up -d --build backend frontend`, no job running, no `down`, no `-v`): a snapshot of the live database (1.5 GB class, `app.db` plus WAL) took **25 s** and is **643 MB** (compact). While it ran, `/api/health` and `/api/projects` answered in under 20 ms every time, and the log shows no "database is locked". `sqlite3` on the Mac: `integrity_check` is `ok`, revision `0097`, 19,148 jobs readable. A second snapshot left exactly one file and no `.partial`. A second press while one ran got 409. Before the first snapshot the status was `stale: true` (header warning).
+- **Checked on throwaway folders** (not the real app): marker missing gives the "not the Visio Studio files folder" problem and the button is refused; `FILES_DIR` unset gives "Snapshots are off: the files folder is not set"; an older snapshot is pruned, an unrelated file is left alone.
+- **Not checked.** The README's restore commands were written but **not run**: restoring over the live database was not tried. The header warning text after a snapshot older than 3 days was not seen in a browser; the logic follows the `stale` field the API reports.
+- **Shutdown.** The snapshot runs in a thread that cannot be interrupted: stopping the backend while one is being made waits for it (about 25 s here).
+- **Disk.** The snapshot of 643 MB sits in the Mac folder; a second one exists next to it for a moment while a new one is made.
 
 ### EVD-001 — Evidence switch, tables and job types
 
@@ -996,3 +1029,7 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 |------|----|-------|-------|
 | 2026-11-13 | — | Document written | From the design discussion with the owner. Before writing, Docker's unused build cache and nine unused images were removed with the owner's go-ahead; the Mac went from 3.4 GB to 40 GB free. |
 | 2026-11-13 | STOR-001 | In Progress | Code, compose, docs and throwaway checks done. The real app was not rebuilt because jobs were running. Then: rebuild the real app, spot check, mark Completed. |
+| 2026-11-16 | STOR-001 | Completed | Real app rebuilt and checked. Throwaway project removed by the owner. Media measured at 28 GB; about 20 GB of caches cleared so STOR-002 has room (43 GB free). |
+| 2026-11-16 | STOR-002 | In Progress | Media (10,342 files, 28.7 GB) copied in 7 min, verified exact (counts, bytes, every SHA-256, database hashes), app switched to the Mac folder. Smoke test left. |
+| 2026-11-16 | STOR-003 | Completed | Old copy removed after a fresh exact re-verification. Docker disk image 75 GB to 48 GB; Mac free space 18 GB to 44 GB. The new-file smoke test of STOR-002 is still open. |
+| 2026-11-16 | STOR-004 | Completed | Daily and on-demand snapshots (one kept) in `db-snapshots/`, Settings Backups tab, header warning, README restore steps. Real app rebuilt: a snapshot took 25 s (643 MB), integrity check ok, app stayed responsive. Restore commands not run. |

@@ -15,6 +15,7 @@ from app.api import (
     character_links,
     character_relations,
     chat_lab,
+    db_snapshots,
     deletion,
     discovery,
     environment_definitions,
@@ -71,6 +72,7 @@ from app.api import (
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(db_snapshots.router, tags=["db-snapshots"])
 api_router.include_router(projects.router, tags=["projects"])
 api_router.include_router(story_bible.router, tags=["story-bible"])
 api_router.include_router(music_bible.router, tags=["music-bible"])

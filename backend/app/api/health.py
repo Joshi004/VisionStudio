@@ -7,6 +7,7 @@ through a separate `sqlite3` session).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Request, Response, status
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_config
 from app.db.session import SessionDep
+from app.services import db_snapshots
 from app.services.storage import get_storage
 
 router = APIRouter()
@@ -36,6 +38,15 @@ class FilesStatus(BaseModel):
     problem: str | None = None
 
 
+class SnapshotsHealth(BaseModel):
+    """Information only (STOR-004): a missing or old snapshot never makes the status degraded."""
+
+    enabled: bool
+    last_made_at: datetime | None = None
+    # Enabled, and there is no snapshot or the newest is older than three days.
+    stale: bool
+
+
 class ToolStatus(BaseModel):
     ok: bool
     version: str | None = None
@@ -45,6 +56,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     database: DatabaseStatus
     files: FilesStatus
+    snapshots: SnapshotsHealth
     ffmpeg: ToolStatus
     ffprobe: ToolStatus
 
@@ -76,6 +88,15 @@ async def _check_files() -> FilesStatus:
     )
 
 
+async def _check_snapshots() -> SnapshotsHealth:
+    current = await db_snapshots.status()
+    return SnapshotsHealth(
+        enabled=current.enabled,
+        last_made_at=current.last.made_at if current.last else None,
+        stale=current.stale,
+    )
+
+
 def _tool_status(request: Request, tool: Literal["ffmpeg", "ffprobe"]) -> ToolStatus:
     # Set once at startup by the lifespan handler in app/main.py.
     version: str | None = getattr(request.app.state, f"{tool}_version", None)
@@ -90,6 +111,7 @@ def _tool_status(request: Request, tool: Literal["ffmpeg", "ffprobe"]) -> ToolSt
 async def get_health(request: Request, response: Response, session: SessionDep) -> HealthResponse:
     database = await _check_database(session)
     files = await _check_files()
+    snapshots = await _check_snapshots()
     ffmpeg = _tool_status(request, "ffmpeg")
     ffprobe = _tool_status(request, "ffprobe")
 
@@ -99,6 +121,7 @@ async def get_health(request: Request, response: Response, session: SessionDep) 
         status="ok" if healthy else "degraded",
         database=database,
         files=files,
+        snapshots=snapshots,
         ffmpeg=ffmpeg,
         ffprobe=ffprobe,
     )

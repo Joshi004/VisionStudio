@@ -174,6 +174,51 @@ database stores each file's exact name, so the app breaks when a file changes.
 Opening, playing and copying files is fine. The warning about
 `docker compose down -v` still applies, because the database is in the volume.
 
+### Database snapshots
+
+With the files folder set, the app keeps a copy of the database in
+`<folder>/db-snapshots/`, named like `app-2026-11-16_1530Z.db` (UTC). A snapshot
+is made by SQLite's `VACUUM INTO`, never by copying the live file, and is
+checked with `PRAGMA integrity_check` before it replaces the old one. The app
+keeps working while it is made.
+
+- When: automatically once the newest snapshot is a day old (checked hourly,
+  the first check five minutes after the backend starts), and with **Make a
+  snapshot now** in Settings, Backups.
+- How many: **one**. A snapshot is about 1.5 GB, and room for two at once is
+  needed while a new one is made. Because only the newest is kept, a mistake in
+  the live data is carried into the snapshot within a day. Copy the file
+  elsewhere first if you want to keep a particular state.
+- Age: Settings, Backups shows the last snapshot, and the header warns when it
+  is over three days old or none exists. A failed snapshot never replaces a good
+  one. Files ending in `.partial` are unfinished and are removed at the next start.
+- Without the files folder, snapshots are off: a copy inside the volume would not
+  survive losing the volume.
+
+**Restoring** is a manual step, not a button. Stop the app, move the live
+database aside (do not delete it), then copy the snapshot in:
+
+```bash
+docker compose stop backend frontend    # never `down -v`
+docker run --rm --network none --user root --entrypoint sh \
+  -v visio-studio_data:/data \
+  -v "$HOME/VisioStudioData/db-snapshots":/snap:ro \
+  visio-studio-backend -c '
+    set -e
+    stamp=$(date +%Y%m%d-%H%M%S)
+    for f in app.db app.db-wal app.db-shm; do
+      [ -e /data/$f ] && mv /data/$f /data/$f.before-restore-$stamp
+    done
+    cp /snap/app-YYYY-MM-DD_HHMMZ.db /data/app.db   # the snapshot file to restore
+    chown 10001:10001 /data/app.db
+  '
+docker compose up -d
+```
+
+Then check `/api/health`. Moving the `-wal` and `-shm` files aside matters: a
+leftover `-wal` from the old database would be applied to the restored one.
+The `*.before-restore-*` files stay in the volume until you remove them yourself.
+
 ## Secrets
 
 `.env` holds secrets (API keys, etc.) and is never committed — it's
