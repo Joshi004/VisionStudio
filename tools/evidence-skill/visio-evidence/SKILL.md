@@ -1,7 +1,7 @@
 ---
 name: visio-evidence
 description: Research the claims of a Visio Studio evidence round. Use only inside a round folder that has brief/claims.json (a folder like ~/VisioStudioData/evidence/<project>/r1). Finds a source for each claim, captures the exact quote with the capture tool, and reports honestly, including when nothing was found.
-allowed-tools: Bash({{TOOL}}:*), Bash(ls:*), Read, Glob, Grep, WebSearch, WebFetch
+allowed-tools: Bash({{TOOL}}:*), Bash(ls:*), Bash(curl -sS -X POST http://127.0.0.1:5480/api/projects/*/evidence/import), Bash(curl -sS http://127.0.0.1:5480/api/projects/*/evidence), Read, Glob, Grep, WebSearch, WebFetch
 ---
 
 # Visio evidence research
@@ -20,7 +20,7 @@ In this file, `TOOL` means this command, and nothing else:
 2. **Only the capture tool writes files.** You never create or edit a file yourself. The tool writes only inside `results/<claim id>/`.
 3. **Never edit `brief/` or any `result.json`.** To change a result, run `TOOL` again (`web`, `pdf`, `remove` or `report`).
 4. **No credentials.** Do not log in, do not use cookies, tokens, keys or a paid account, and do not read any file outside this round folder.
-5. **The only commands you run are `TOOL ...` and `ls`.** No `curl`, no `cat`, no shell scripts, no installs. To read a file, use the file reading tool.
+5. **The only commands you run are `TOOL ...`, `ls` and, once at the very end, the two `curl` commands of the "Import" step below.** No other `curl`, no `cat`, no shell scripts, no installs. To read a file, use the file reading tool.
 6. **Stop and ask the owner** if this folder has no `brief/claims.json`, or if you are asked to do anything other than research this round.
 
 ## The round
@@ -73,4 +73,28 @@ Never make a source say more than it does. If you are unsure between `found` and
 1. Run `TOOL validate`. If it reports a problem, fix it (capture again, `TOOL remove`, or `TOOL report` again) and run `validate` again, until it passes.
 2. Print one table with a row per claim: id, status, and the sources kept (publisher and tier).
 3. Under the table, list every `not_found`, `blocked`, `partial` and `contradicted` claim with its reason in one line.
-4. Tell the owner to go back to Visio Studio and press Import. Do not say anything has been imported.
+4. Import the results (next section). Only do this after `validate` printed `Checks passed`.
+
+## Import
+
+The owner has allowed you to start the import yourself, so that they do not have to press Import in Visio Studio. Use `project.id` from `brief/claims.json` for `<id>`, and only these two commands, with this exact address and no other:
+
+1. Start the import:
+
+```
+curl -sS -X POST http://127.0.0.1:5480/api/projects/<id>/evidence/import
+```
+
+   It answers `{"job_id": ...}`. If it answers an error (for example `422`, or the app is not running), do not retry more than once. Tell the owner the message and that they can press Import in Visio Studio.
+
+2. Wait a few seconds, then check the result:
+
+```
+curl -sS http://127.0.0.1:5480/api/projects/<id>/evidence
+```
+
+   Read `round.status` (`imported` when done), `import_job.status` and `latest_import.report` (`by_status`, `items`, `usable_items`). If the job is still running, check once more after a few seconds, at most 3 times.
+
+3. Tell the owner what the answer said (round status and the counts). Say that the import is done but that **they still have to review every piece of evidence** in Visio Studio: the import does not accept or reject anything. Never say more than the answer says.
+
+Importing is the only thing you do in the app. Do not call any other address, do not accept or reject evidence, and do not press "Review done".

@@ -169,7 +169,7 @@ tools/evidence-skill/install.sh
 
 The script runs `uv sync` for the capture tool, then copies the skill to `~/.claude/skills/visio-evidence/` and writes the capture tool's full command into the copy. Cursor and Claude Code both read that folder, so one copy is enough. It is a copy, not a link (Cursor does not follow links to skills reliably): **run the script again after you edit the skill**, and restart an open Cursor or Claude Code session. It refuses a repository path with spaces or other unusual characters, and it replaces only that one folder.
 
-To run a round: in Visio Studio write the brief (the Evidence step), open the round folder (`~/VisioStudioData/evidence/<project_id>/r<n>/`) in Cursor or Claude Code, not the repository, and paste the prompt from the round's `README.md` (the panel has a copy button). When the agent has finished, press Import in Visio Studio.
+To run a round: in Visio Studio write the brief (the Evidence step), open the round folder (`~/VisioStudioData/evidence/<project_id>/r<n>/`) in Cursor or Claude Code, not the repository, and paste the prompt from the round's `README.md` (the panel has a copy button). When the agent has finished, it starts the import itself (`POST /api/projects/<id>/evidence/import`, allowed in the skill); if it could not, press Import in Visio Studio. Then review the evidence in the app.
 
 How far the rules can be enforced differs:
 

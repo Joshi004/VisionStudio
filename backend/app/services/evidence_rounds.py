@@ -262,7 +262,8 @@ repository tells how to install the browser of the tool). Run it again after the
 3. The agent asks before it runs commands. Allow the capture tool (it needs the internet) and
    web searches, and no other command. In Cursor, do not set the run mode to run everything
    without asking.
-4. When the agent has finished, go back to Visio Studio and press Import.
+4. When the agent has finished it starts the import itself (the skill allows it). If it could not,
+   go back to Visio Studio and press Import. Then review each piece of evidence there.
 
 ## What is in this folder
 
