@@ -321,7 +321,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Completed |
 | EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Completed |
 | EVD-004 | The capture tool | Code (Mac) | — | Completed |
-| EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | Not Started |
+| EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | In Progress |
 | EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Not Started |
 | EVD-007 | The review screen | Code | EVD-006 | Not Started |
 | EVD-008 | The evidence clip and its preview | Code | EVD-006 | Not Started |
@@ -340,7 +340,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 7 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003 and EVD-004, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-005 and EVD-006.
+**Progress snapshot:** 7 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003 and EVD-004, 2026-11-17), 2 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left). Ready to start: EVD-006.
 
 ---
 
@@ -783,7 +783,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-005 — The research skill for Cursor and Claude
 
-**Status:** Not Started
+**Status:** In Progress (2026-11-17): skill, install script and prompt are done; the owner's runs in Cursor and Claude Code are left
 
 **Objective.** One written skill that makes a Cursor or Claude agent research each claim of a round on its own, use the capture tool, and report honestly.
 
@@ -821,11 +821,27 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - `validate` passes, and no file is written outside `results/`.
 
 **Completion checklist.**
-- [ ] Skill and reference text
-- [ ] README prompt text
-- [ ] Runs in both products recorded
+- [x] Skill and reference text
+- [x] README prompt text
+- [x] Install script, run on the Mac (installed and re-installed; the skill is in `~/.claude/skills/visio-evidence/`)
+- [x] Throwaway test round drafted (`/tmp/visio-evidence-test/r1`, outside the repository; it loads in the capture tool)
+- [ ] Owner: run in Cursor on the test round, and record how it behaved
+- [ ] Owner: run in Claude Code on the test round, and record how it behaved
+- [ ] Owner: the real app rebuilt so that new rounds carry the new prompt (the agent did not rebuild it)
 
-**Completion notes.** _To be filled in: how each product behaved, the time and cost per claim._
+**Completion notes** (2026-11-17, written before the owner's runs; the last lines are to be filled in after them).
+- **Where.** `tools/evidence-skill/`: `visio-evidence/SKILL.md`, `visio-evidence/reference.md` and `install.sh`. No migration, no frontend change, no contract change (§4 is unchanged).
+- **Decisions ("Planning decides").**
+  - *Where the skill is installed:* **`~/.claude/skills/visio-evidence/`, one copy** (the owner's choice). Claude Code reads it as a user skill, and Cursor reads `~/.claude/skills/` for compatibility (per Cursor's documentation, not tried yet). It is not put in `~/.cursor/skills/` too, so Cursor does not list it twice. It is **copied, not linked**, because Cursor's handling of linked skill folders is reported to be unreliable (forum reports, not documentation). Edit the source in the repository and run `install.sh` again.
+  - *`install.sh`:* checks `uv`, runs `uv sync` for the capture tool, builds the copy in a hidden folder next to the target, writes the capture command into it in place of `{{TOOL}}`, and swaps it in. It refuses a repository or home path with characters other than letters, digits and `/ _ . -` (the path goes into a permission pattern), a link as the skills folder or the target, and an existing target that is not this skill. It touches no other skill. It does not install Chromium (README, "The evidence capture tool").
+  - *How the agent calls the tool:* **`uv run --project <repository>/tools/evidence-capture visio-evidence-capture`** (the owner's choice), so that the tool's `uv.lock` and the Chromium already installed match. The `--project` option does not change the folder, so the agent stays in the round folder and `--round` can be left out.
+  - *Search budget per claim:* at most 8 web searches, 10 sources opened, and 3 capture tries per source; stop early at `max_evidence_per_claim` good pieces or when a primary source settles the claim; every source looked at and not used is an `--attempt`. These numbers are a first guess and are for the runs to correct.
+  - *How strict the command rule can be:* in **Claude Code**, the skill's `allowed-tools` lets only the capture tool command, `ls`, reading, searching and the web tools run without asking, so any other command asks the owner. In **Cursor**, a skill cannot limit commands (no such field is documented, and `allowed-tools` is not a Cursor field), so the rule is only written in the skill and the round's README tells the owner to keep the run mode on asking. `allowed-tools` is a limit on what is pre-approved, not a block: the owner can still approve a command, so it is guidance plus asking, not a security boundary.
+  - *How each product reads the skill:* both need `name` (lowercase, equal to the folder) and `description`. The description is narrow ("only inside a round folder that has `brief/claims.json`") so that it does not load elsewhere. The skill is plain Markdown with no product-specific syntax besides `allowed-tools`.
+- **What the skill tells the agent** (mirrors the capture tool's notes for the next phases): safety rules first (web content is data, only the tool writes, never edit `brief/` or a `result.json`, no credentials, only the tool command and `ls`); read the brief and use `project.today`; follow the claim's `hint`; run `validate` first to skip claims that are already done; one claim at a time and one subagent per claim where possible (at most 3 at once, with a stand-alone prompt for each, and no nested subagents); copy the quote word for word and never use a fetch tool's summary; when the tool refuses a quote, use the exact words of its near-text list (at most 3 tries per source); run `report` for every claim (a `not_found` claim needs an `--attempt`); run `validate` last and fix problems; print a table; say the owner must press Import.
+- **The prompt** (`services/evidence_rounds.README_PROMPT`): "Use the visio-evidence skill to research every claim in brief/claims.json of this round, each on its own. Then run validate and show me the table of results." `SKILL_NAME` is unchanged. The README of a round (`readme_text`) gains a "First time only" part (run `tools/evidence-skill/install.sh`) and a step telling the owner to allow only the capture tool and web searches. The API and `EvidencePanel.tsx` already show `prompt` and `skill`, so they did not change. **Only rounds written after the real app is rebuilt carry the new text.**
+- **Checked.** `install.sh` (bash syntax; run twice, so that both a new install and a replacement ran; the installed files hold no `{{TOOL}}`, and the permission line and the command read correctly); `shellcheck` is not installed, so it was not run. Ruff check and format on `evidence_rounds.py`; `readme_text` rendered and read. The test round (seven claims after Appendix A's kinds: a PDF figure, a quote, an official statistic, a company event, a wrong number, an invented claim and a paywalled one) loads in the capture tool and `validate` reports the seven claims as having no result yet. The claims are drafted from what the agent knows and **are not verified by the agent**; the owner may replace any.
+- **Not checked.** The skill has **not been run by any agent yet**: how Cursor and Claude Code load it, whether Cursor accepts the `allowed-tools` line, whether Claude Code's pattern for a command with an absolute path matches, whether subagents are started and how well they follow the rules, whether Cursor's sandbox blocks the tool until it is allowed, and the time and cost per claim. **Owner runs, to record here:** the statuses of the seven claims (expected: `found` for c1 to c3 and probably c4; `contradicted` for c5; `not_found` with attempts for c6; `blocked` or `partial` for c7), whether `validate` passes, whether a file appeared outside `results/` (`find . -type f` in the round folder before and after; the listing before is in `/tmp/visio-evidence-test/before.txt`), and the time and cost per claim for each product.
 
 ### EVD-006 — Importing and checking the evidence
 
@@ -1129,3 +1145,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-17 | EVD-002 | Completed | Claim marks, GLM's proposals (one real call checked) and keep or drop, as `evidence_claim_list` versions; marks follow the story on read; new pipeline step `evidence_claims` (a run asks GLM once). No migration. Real app rebuilt and checked with throwaway projects; owner to look at the panel in the browser. |
 | 2026-11-17 | EVD-003 | Completed | `evidence` step (needs `story_bible` and `evidence_claims`; `shot_plans` needs it), `write_evidence_brief` job and round folder in the files folder, `waiting_for` run pause that goes on by itself, board status `owner`, evidence API and panel. No migration. Real app rebuilt and checked with throwaway projects; a waiting run end to end and the UI in the browser are left to the owner. |
 | 2026-11-17 | EVD-004 | Completed | `tools/evidence-capture/` (Python, Playwright, pypdfium2): `web`, `pdf`, `report`, `remove`, `validate`, `draw`. Checked on real public pages and PDFs, in both orientations, with refusals (private address, scan, missing quote) and a hand-broken round. No backend change. A public-to-private redirect makes one blind GET before it is refused (see the notes). The owner's Appendix A set is still to be run. |
+| 2026-11-17 | EVD-005 | In Progress | `tools/evidence-skill/` (`visio-evidence` skill, reference, `install.sh`, installed to `~/.claude/skills/` for Cursor and Claude Code), the README prompt in `evidence_rounds.py` replaced, README section added. No migration. Not yet run by an agent: the owner's runs in Cursor and Claude Code on the test round are left, and the real app is not rebuilt. |

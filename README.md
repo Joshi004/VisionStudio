@@ -157,6 +157,27 @@ TOOL draw --claim c1 --evidence e1        # a picture of the rectangles in the s
 
 It only opens public `http` and `https` addresses (never local or private ones), uses no logins or stored cookies, and writes only inside `results/<claim_id>/` of the round. A PDF needs a text layer (there is no OCR). Run `TOOL <command> --help` for every option.
 
+## The evidence research skill
+
+`tools/evidence-skill/visio-evidence/` is the skill that makes a Cursor or Claude Code agent research the claims of a round: it reads `brief/claims.json`, finds a source for each claim, captures the exact quote with the capture tool, reports a status for every claim (`not_found` is an accepted answer) and runs `validate` at the end. "Claude" here means Claude Code (the CLI, or the Code tab of the desktop app); the claude.ai chat cannot run local commands.
+
+Install it once, after the capture tool and its browser (see above):
+
+```bash
+tools/evidence-skill/install.sh
+```
+
+The script runs `uv sync` for the capture tool, then copies the skill to `~/.claude/skills/visio-evidence/` and writes the capture tool's full command into the copy. Cursor and Claude Code both read that folder, so one copy is enough. It is a copy, not a link (Cursor does not follow links to skills reliably): **run the script again after you edit the skill**, and restart an open Cursor or Claude Code session. It refuses a repository path with spaces or other unusual characters, and it replaces only that one folder.
+
+To run a round: in Visio Studio write the brief (the Evidence step), open the round folder (`~/VisioStudioData/evidence/<project_id>/r<n>/`) in Cursor or Claude Code, not the repository, and paste the prompt from the round's `README.md` (the panel has a copy button). When the agent has finished, press Import in Visio Studio.
+
+How far the rules can be enforced differs:
+
+- **Claude Code:** the skill's `allowed-tools` lets only the capture tool, `ls`, reading, searching and the web tools run without asking. Anything else asks you first. Say no to anything else.
+- **Cursor:** a skill cannot limit commands, so the rule is only written in the skill. Keep the run mode on asking, not on running everything, and allow the capture tool when it asks (it needs the internet, so outside the sandbox).
+
+The agent should never write a file itself: only the capture tool writes, and only inside `results/`.
+
 ## Where the data lives
 
 The database is always on the named volume `visio-studio_data`:

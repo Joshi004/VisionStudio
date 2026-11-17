@@ -60,11 +60,12 @@ BRIEF_VERSION: Final = 1
 # What the agent may keep for one claim (§4.4 `rules`). Domain lists are for a later phase.
 MAX_EVIDENCE_PER_CLAIM: Final = 3
 
-# The skill the agent is told to use. EVD-005 writes the skill and replaces the prompt.
+# The skill the agent is told to use (`tools/evidence-skill/`, EVD-005). The prompt is plain text
+# so that it works the same in Cursor and in Claude Code.
 SKILL_NAME: Final = "visio-evidence"
 README_PROMPT: Final = (
-    f"Use the {SKILL_NAME} skill. Research every claim in brief/claims.json of this round, "
-    "one by one, and write each result only inside the results/ folder."
+    f"Use the {SKILL_NAME} skill to research every claim in brief/claims.json of this round, "
+    "each on its own. Then run validate and show me the table of results."
 )
 
 STATUS_NONE: Final = "none"
@@ -242,9 +243,15 @@ def readme_text(*, round_id: str, project_id: int, host_folder: str | None) -> s
 
 Written by Visio Studio for project {project_id}. Folder on the Mac: `{where}`
 
+## First time only
+
+Run `tools/evidence-skill/install.sh` in the Visio Studio repository. It installs the
+`{SKILL_NAME}` skill for Cursor and Claude Code and the capture tool it uses (the README of the
+repository tells how to install the browser of the tool). Run it again after the skill changes.
+
 ## How to run it
 
-1. Open this folder in Cursor or Claude. Do not open the Visio Studio repository: it holds
+1. Open this folder in Cursor or Claude Code. Do not open the Visio Studio repository: it holds
    secrets the research does not need.
 2. Paste this prompt:
 
@@ -252,7 +259,10 @@ Written by Visio Studio for project {project_id}. Folder on the Mac: `{where}`
 {README_PROMPT}
 ```
 
-3. When the agent has finished, go back to Visio Studio and press Import.
+3. The agent asks before it runs commands. Allow the capture tool (it needs the internet) and
+   web searches, and no other command. In Cursor, do not set the run mode to run everything
+   without asking.
+4. When the agent has finished, go back to Visio Studio and press Import.
 
 ## What is in this folder
 
