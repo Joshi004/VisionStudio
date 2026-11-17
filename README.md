@@ -124,7 +124,38 @@ This writes `frontend/src/api/schema.d.ts`, which is committed to the repo.
 ```bash
 cd backend && uv run ruff check . && uv run ruff format --check .
 cd frontend && npm run lint && npm run typecheck
+cd tools/evidence-capture && uv run ruff check . && uv run ruff format --check .
 ```
+
+## The evidence capture tool
+
+`tools/evidence-capture/` is a command-line tool that runs on the Mac, outside Docker. A research agent (Cursor or Claude) uses it inside a round folder to capture web pages and PDFs as evidence. It finds the exact quote in the source first, and only then makes the screenshot and the highlight rectangles. It writes the whole `result.json` of a claim itself.
+
+Install it once (this also downloads Chromium, about 100 MB, into `~/Library/Caches/ms-playwright`):
+
+```bash
+cd tools/evidence-capture
+uv sync
+uv run playwright install chromium
+```
+
+Run it from the round folder (`~/VisioStudioData/evidence/<project_id>/<round_id>/`), so that `--round` can be left out. Replace `TOOL` with `uv run --project <repository>/tools/evidence-capture visio-evidence-capture`.
+
+```bash
+TOOL web --claim c1 --evidence e1 --url https://example.com/report \
+  --quote "the exact words" --relation supports --tier primary \
+  --publisher "Example Corp" --what-it-says "A plain sentence." --published 2026-10-03
+TOOL pdf --claim c2 --evidence e1 --url https://example.com/annual.pdf --quote "the exact words" \
+  --relation supports --tier primary --publisher "Example Corp" --what-it-says "..."
+TOOL report --claim c1 --status found --summary "What the sources say."
+TOOL report --claim c3 --status not_found --summary "Nothing usable." \
+  --attempt "search: the words" "only blogs, no primary source"
+TOOL remove --claim c1 --evidence e1      # removes one piece of evidence and its files
+TOOL validate                             # checks every claim's result; run it before finishing
+TOOL draw --claim c1 --evidence e1        # a picture of the rectangles in the system temp folder
+```
+
+It only opens public `http` and `https` addresses (never local or private ones), uses no logins or stored cookies, and writes only inside `results/<claim_id>/` of the round. A PDF needs a text layer (there is no OCR). Run `TOOL <command> --help` for every option.
 
 ## Where the data lives
 

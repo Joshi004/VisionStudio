@@ -265,6 +265,13 @@ The `evidence/` folder is never served by nginx. The import copies what it accep
 - **`kind`** is `web` or `pdf` in version 1. `video` and `data` are kept for later phases.
 - **`capture`** is written only by the capture tool (EV-5). `rects` are `[x, y, width, height]` as fractions of `image`, one per line of the quote. For a PDF, `page` is the page number counted from 1, and `source_copy` is the copied PDF. For a web page, `text_copy` is the page's text as the tool read it.
 - `evidence` is empty for `not_found` and `blocked`.
+- **Added by EVD-004** (no break of the contract above):
+  - `capture.context_box`: `[x, y, width, height]` as fractions of `context_image`, where `image` sits inside it (EVD-008 zooms from the context to the quote with it). For a PDF it is clamped to the page.
+  - A PDF capture has `viewport: null` and `render_scale` (pixels per point), and also a `text_copy` (the page's text as the tool read it, for the review). Check 3 of a PDF still reads the PDF.
+  - `image` always has the video's shape: a web capture is `viewport * device_scale` (2560x1440 landscape, 1440x2560 portrait); a PDF crop is 2560x1440 or 1440x2560 unless the scale limit of 8 makes it smaller.
+  - The tool writes the whole `result.json`. Before `report` is run, `status` is `null` and `summary` is empty, and `validate` fails on them.
+  - `quote` is the words as the source has them (white space made single spaces), except for a PDF quote that joins a hyphenated line end or has a U+FFFE hyphen, where it is the agent's words.
+  - The quote rules (§4.6 check 3) are in `tools/evidence-capture/src/visio_evidence_capture/text.py` (`normalise_with_map`, three line-hyphen modes) and `pdf.find_in_text`. **EVD-006 must repeat them exactly.**
 
 ### 4.6 The checks on import
 
@@ -313,7 +320,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | EVD-001 | Evidence switch, tables and job types | Code | — | Completed |
 | EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Completed |
 | EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Completed |
-| EVD-004 | The capture tool | Code (Mac) | — | Not Started |
+| EVD-004 | The capture tool | Code (Mac) | — | Completed |
 | EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | Not Started |
 | EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Not Started |
 | EVD-007 | The review screen | Code | EVD-006 | Not Started |
@@ -333,7 +340,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 6 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002 and EVD-003, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-004.
+**Progress snapshot:** 7 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003 and EVD-004, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-005 and EVD-006.
 
 ---
 
@@ -691,7 +698,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Not checked.** (1) **A pipeline run that waits and goes on** was not made: a run on an explainer starts paid and GPU steps, so it needs your go-ahead. The code path (`_apply` in `jobs/story_pipeline.py`, `waiting_phase`, `continue_run`) was reasoned through and its parts checked as above. (2) The step panel, the board header and the run panel were not opened in a browser. (3) The "undecided GLM proposals" wait was checked on the pure logic only, not with a real GLM answer. (4) Importing and reviewing (EVD-006, EVD-007) do not exist yet, so a round cannot go past `brief_written` in the app.
 ### EVD-004 — The capture tool
 
-**Status:** Not Started
+**Status:** Completed (2026-11-17)
 
 **Objective.** A command-line tool, run on the Mac, that turns "this source contains these words" into verified captures: the screenshot, the highlight rectangles, the text copy and the result entry (§4.5). It is the only way coordinates are made (EV-5).
 
@@ -745,11 +752,34 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Lint for the tool passes.
 
 **Completion checklist.**
-- [ ] Web capture, PDF capture, reporting, `validate`
-- [ ] Safety limits
-- [ ] Test set run
+- [x] Web capture, PDF capture, reporting, `validate`
+- [x] Safety limits
+- [x] Test set run (real public sources, not the owner's Appendix A set; see "Checked")
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-17).
+- **Where.** `tools/evidence-capture/`: a Python 3.13 package (`pyproject.toml`, `uv.lock`, `src/visio_evidence_capture/`), not in any Docker image, no backend or compose change, no migration. Install: `uv sync` and `uv run playwright install chromium` (README, "The evidence capture tool"). The executable is `visio-evidence-capture`; it is run from the round folder (`--round` defaults to the current folder).
+- **Decisions ("Planning decides").**
+  - *Language:* **Python** (the owner's choice).
+  - *Libraries (all permissive):* `playwright` (Chromium), `pypdfium2` (PDF text, character boxes, rendering), `Pillow`, `httpx`. PyMuPDF (AGPL) and poppler (GPL) are not used. **EVD-006 should use `pypdfium2` too** so that the import reads a PDF's text like the tool does.
+  - *Who writes `result.json`:* **only the tool** (the owner's choice). The agent passes every field as a flag. Until `report` is run `status` is `null` and `validate` fails on it.
+  - *Commands:* `web`, `pdf` (`--url`, or `--file` with `--source-url`; `--page` to search one page), `report` (`--status`, `--summary`, repeatable `--attempt WHAT OUTCOME`; attempts are added each time it runs), `remove`, `validate`, `draw`. Exit code 0 done, 1 refused or checks failed, 2 wrong usage.
+  - *Viewports:* landscape 1280x720 at scale 2 (image 2560x1440); portrait 360x640 at scale 4 (image 1440x2560), with a phone user agent and touch, but **not** Chromium's `is_mobile` mode (deviation from the plan: that mode zooms pages that have no viewport tag, which would make the rectangles wrong). Both the screenshot and the rectangles are checked against `window.innerWidth` and the visual scale.
+  - *PDF rendering:* the crop has the video's shape, is centred on the quote, is at least 40% of the page's width, is moved inside the page when it fits (white around it when it does not), and is rendered so that it is 2560x1440 or 1440x2560, with the scale at most 8. The context image is the whole page at 150 DPI. A quote across a page break is refused with a plain message; a rotated page is refused.
+  - *Cookie banners:* click a known consent button (OneTrust, Didomi, Cookiebot, TrustArc, Quantcast), else a button with exactly the text "reject all", "reject", "decline", "necessary only", "only necessary", "accept all", "accept all cookies", "accept", "i agree", "agree" or "got it" (reject first) inside something that looks like a consent box (fixed, a dialog, or named cookie/consent/...), in the page or in a consent frame. Then every `position: fixed` element is hidden, `sticky` ones become static, and a scroll lock is released. No code for particular sites. The English texts only: a banner in another language is hidden by the fixed-element rule instead.
+  - *Quote rules* (EVD-006 must repeat them exactly, `text.py`): NFKC (a letter with its marks together), curly quotes straight, soft hyphens and zero-width characters removed, white space runs made one space, ends trimmed, case kept. pdfium's U+FFFE (a hyphen at a line end) counts as a hyphen. **A PDF is searched three ways** (the plan said two): as it is, with a line-end hyphen and the line break dropped ("trans-" "former" gives "transformer"), and with only the line break dropped ("English-" "to-German" gives "English-to-German"). A match needs the first line to end in a hyphen and the next to start with a letter.
+  - *Web text:* the visible text nodes in reading order (hidden and script elements left out, a line break between blocks and at `<br>`); the same text, with white space compacted, is the text copy, and the tool checks that the quote is found in that copy. Open shadow roots and frames are not read.
+- **What a web capture does.** Opens the address in a fresh Chromium context (no stored state, service workers blocked, no downloads, no permissions), waits for load (30 s) and a short quiet period, closes consent boxes, finds the quote, scrolls so that its middle is at 40% of the screen height, checks that it is wholly inside the screen and that nothing covers it (`elementFromPoint` at each line), takes the screenshot, and measures one rectangle per line (merged from the text nodes' own rectangles, 2 CSS pixels of room). Refused with a reason when: the quote is not on the page (with up to three nearest stretches of the page), it is taller than 80% of the screen, it is covered or clipped, the page is a PDF or a download, the server answers 4xx or 5xx, or the page moves while it is captured.
+- **Context image: a change from the plan.** The plan said to use Playwright's `full_page` clip. On a 55,000 px Wikipedia page that took 30 s to time out (and 54 s through CDP), so the tool scrolls and joins up to three viewport screenshots instead (up to three screens tall, centred on the screen of the quote), and checks that the quote did not move while scrolling.
+- **Safety, as built.**
+  - Writes only in `results/<claim_id>/` for a claim of the brief; claim ids `^c\d+$`, evidence ids `^e\d{1,2}$`; refuses a link as `results/` or a claim folder; writes to a partial name then renames; refuses to write over a link; `remove` deletes only the four names the tool makes (`eN.png`, `eN-context.png`, `eN.txt`, `eN.pdf`); the brief is never written. At most `max_evidence_per_claim` pieces of evidence (replace one by using its id).
+  - Addresses: only http and https, no user name or password, and every address the host name leads to must be globally routable (`ipaddress.is_global`), so localhost, 10.x, 172.16.x, 192.168.x, link-local and CGNAT are refused. The browser's own requests go through a route handler that aborts refused hosts. PDF downloads are followed by the tool, one redirect at a time (at most 5), each checked, with the size capped (50 MB) while streaming.
+  - **A limit to know about:** Playwright does not show server redirects to the route handler, and Chromium follows them itself. So a public page that redirects to a private address makes **one blind GET** to it before the tool notices. After the load, the tool checks the server address of every response and every step of the main redirect chain, and refuses and **stores nothing**. Checked with a local server (the tool refused: "answered from a private address"); the data is never kept. A DNS answer that changes between the tool's check and the browser's own lookup is caught by the same server-address check.
+  - Limits (`__init__.py`): load 30 s, whole capture 120 s, PDF 50 MB, text 5 MB, an image file 20 MB, 12 rectangles, quote 3 to 600 characters, 2000 pages without `--page`.
+- **`validate`.** For every claim of the brief: a result exists; shape (schema, version, round id, status, summary, attempts, evidence fields, `published` as a date); status against evidence (found, partial and contradicted need some; not_found and blocked none; not_found needs an attempt); files (plain names, regular, no link, inside the round, type by content, size, SHA-256, `image_px` equals the real PNG size and the viewport times the scale, `tool` is `visio-evidence-capture`); the quote in the text copy (web) or on the PDF's page (pdf, with the three hyphen readings); the rectangles (1 to 12, `[x, y, w, h]`, not empty, inside the image). Warnings (do not fail): a status that no evidence backs, a file the result does not use, a folder that is not a claim of the round. A link in a claim folder fails.
+- **`draw`.** Writes `<round>-<claim>-<evidence>.png` (rectangles over the image) and `...-context.png` (the image's place in the context) under the system temporary folder (`visio-evidence-debug/`), never in the round.
+- **Checked** (2026-11-17, throwaway rounds in `/tmp`, deleted afterwards; nothing under `~/VisioStudioData`). These were real public sources, not the owner's Appendix A set (which does not exist yet): Wikipedia (landscape and portrait, a two-line and a three-line quote); the "Attention Is All You Need" PDF from arXiv, as a file and downloaded (a two-line quote, and a quote across a hyphenated line end), landscape and portrait; spiegel.de (a Sourcepoint consent box, hidden, quote on the headline, three lines); example.com through an httpbin redirect (`final_url` recorded); a missing quote (near text shown, for a page and a PDF); `http://192.168.1.1`, `http://localhost:5480/` and `file:///etc/passwd` refused; a scanned PDF (made with Pillow) refused with "no text layer"; a made-up quote across no page refused; the limit of three pieces of evidence, replacing, `remove` (its files go), bad ids and a claim not in the brief refused. In every good capture the rectangles drawn by `draw` sit on the quote (looked at). `validate` passed the good round (nine claims: found, blocked and not_found) and failed a hand-edited copy for each of: a rectangle outside the image, a changed byte (hash), a quote not in the text, a text file named `.png`, a `..` in a name, a link in a claim folder, and a `found` status without evidence. Ruff check and format pass.
+- **Not checked.** (1) The owner's Appendix A set (an annual report with a two-line quote, a paywalled page, a "partial" stock-price case). (2) A site with a consent box in English that needed the button text rule: the only click seen was lemonde.fr's "accept", and no screenshot of it was taken. (3) A page whose quote sits in a scrolling box or is covered by a pop-up (the refusals are written, not seen). (4) A PDF page break and a rotated page (refusals written, not run). (5) A redirect from a public page to a private address, end to end (no public host would do it; only the post-load check was run against a local server). (6) Sites that block headless browsers answer 4xx or a check page (ft.com gave a Cloudflare check; the tool says to report the claim as `blocked`).
+- **For the next phases.** EVD-005's skill must tell the agent: always pass the quote from the near-text list when a quote is refused; run `report` for every claim (a `not_found` claim needs an `--attempt`); never edit `result.json`; run `validate` last. Its prompt replaces `README_PROMPT` in `services/evidence_rounds.py`. EVD-006 reads `result.json` as written here, applies the quote rules above, and must open PDFs with `pypdfium2`. EVD-008 can use `capture.context_box` and `viewport` (null for a PDF).
 
 ### EVD-005 — The research skill for Cursor and Claude
 
@@ -1098,3 +1128,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-17 | EVD-001 | Completed | Migration `0098`: `project.evidence`, six evidence tables, four job types. Real app rebuilt and the API rules checked with throwaway projects; owner to look at the create and settings forms. |
 | 2026-11-17 | EVD-002 | Completed | Claim marks, GLM's proposals (one real call checked) and keep or drop, as `evidence_claim_list` versions; marks follow the story on read; new pipeline step `evidence_claims` (a run asks GLM once). No migration. Real app rebuilt and checked with throwaway projects; owner to look at the panel in the browser. |
 | 2026-11-17 | EVD-003 | Completed | `evidence` step (needs `story_bible` and `evidence_claims`; `shot_plans` needs it), `write_evidence_brief` job and round folder in the files folder, `waiting_for` run pause that goes on by itself, board status `owner`, evidence API and panel. No migration. Real app rebuilt and checked with throwaway projects; a waiting run end to end and the UI in the browser are left to the owner. |
+| 2026-11-17 | EVD-004 | Completed | `tools/evidence-capture/` (Python, Playwright, pypdfium2): `web`, `pdf`, `report`, `remove`, `validate`, `draw`. Checked on real public pages and PDFs, in both orientations, with refusals (private address, scan, missing quote) and a hand-broken round. No backend change. A public-to-private redirect makes one blind GET before it is refused (see the notes). The owner's Appendix A set is still to be run. |
