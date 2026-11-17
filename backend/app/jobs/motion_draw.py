@@ -30,7 +30,14 @@ class MotionRenderFailed(RenderFailed):
 
 
 async def draw_in_motion(
-    job_id: int, base_url: str, body: dict[str, Any], dest: Path, *, note_phase: bool = True
+    job_id: int,
+    base_url: str,
+    body: dict[str, Any],
+    dest: Path,
+    *,
+    note_phase: bool = True,
+    path: str = motion_renderer.RENDERS_PATH,
+    start_timeout_s: float = motion_renderer.START_TIMEOUT_S,
 ) -> float | None:
     """Has the motion service draw the video and downloads it to `dest`. Returns the service's
     own render time in seconds. With `note_phase` False the job's phase is left alone (the story
@@ -38,7 +45,9 @@ async def draw_in_motion(
     """
     if note_phase:
         await phase_writer.note(job_id, phases.SENDING_GRAPHIC)
-    service_id = await motion_renderer.start_render(base_url, body)
+    service_id = await motion_renderer.start_render(
+        base_url, body, path=path, timeout_s=start_timeout_s
+    )
     try:
         status = await wait_for_service(job_id, base_url, service_id, note_phase=note_phase)
         if note_phase:

@@ -7,6 +7,9 @@ import { measureLayout } from "./layout.ts";
 import {
   checksProblem,
   checksRequestSchema,
+  EVIDENCE_BODY_LIMIT_BYTES,
+  EVIDENCE_ENGINE,
+  evidenceRenderRequestSchema,
   idParamsSchema,
   layoutProblem,
   layoutRequestSchema,
@@ -49,6 +52,22 @@ app.get("/health", async () => ({
 app.post<{ Body: RenderRequest }>(
   "/renders",
   { schema: { body: renderRequestSchema } },
+  async (request, reply) => {
+    if (request.body.engine === EVIDENCE_ENGINE) {
+      return reply.code(400).send({ error: "An evidence clip is asked for on /evidence-renders." });
+    }
+    const problem = requestProblem(request.body);
+    if (problem !== null) return reply.code(400).send({ error: problem });
+    const renderId = enqueue(request.body);
+    return reply.code(202).send({ render_id: renderId });
+  },
+);
+
+// An evidence clip (EVD-008): the same render, with the screenshot and its context in the body. Only
+// this route takes a body this large; the others keep the 1 MB limit.
+app.post<{ Body: RenderRequest }>(
+  "/evidence-renders",
+  { bodyLimit: EVIDENCE_BODY_LIMIT_BYTES, schema: { body: evidenceRenderRequestSchema } },
   async (request, reply) => {
     const problem = requestProblem(request.body);
     if (problem !== null) return reply.code(400).send({ error: problem });

@@ -38,7 +38,13 @@ from app.api.projects import load_project
 from app.db.models import EvidenceItem, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
-from app.services import evidence_import, evidence_review, evidence_rounds
+from app.services import (
+    evidence_clip_layout,
+    evidence_clips,
+    evidence_import,
+    evidence_review,
+    evidence_rounds,
+)
 from app.services.storage import media_url
 
 router = APIRouter()
@@ -381,6 +387,35 @@ class ReviewSourceOut(BaseModel):
     archive_url: str | None
 
 
+class ReadabilityOut(BaseModel):
+    """Whether the quote can be read in the video (EVD-008): the height of its lines on the output
+    frame after the zoom, against the least that is readable. Worked out from the capture's
+    rectangles, with no render."""
+
+    text_height_px: float
+    min_px: float
+    ok: bool
+
+
+class PreviewOut(BaseModel):
+    """The newest preview video of a piece of evidence (EVD-008)."""
+
+    job_id: int | None
+    status: JobStatus
+    error: str | None
+    video_url: str | None
+    # The video's own warnings, such as a quote too small to read.
+    warnings: list[str]
+    # It was made with another colour, size or length than a preview made now would have.
+    out_of_date: bool
+    # The video's size, and where the captions go in it as fractions of its height, so the screen
+    # can draw the caption area over the video.
+    width: int
+    height: int
+    caption_top: float
+    caption_bottom: float
+
+
 class ReviewItemOut(BaseModel):
     item_key: str
     evidence_id: str
@@ -407,6 +442,10 @@ class ReviewItemOut(BaseModel):
     page: int | None
     # The owner's verdict, or null while undecided. Always null for a piece that is not usable.
     verdict: Verdict | None
+    # Null for a piece that is not usable.
+    readability: ReadabilityOut | None
+    # Null until a preview was asked for.
+    preview: PreviewOut | None
 
 
 class ReviewAttemptOut(BaseModel):
@@ -501,8 +540,33 @@ def _numbers(value: Any, length: int) -> list[float] | None:
     return None
 
 
-def _item_out(item: EvidenceItem, verdict: str | None) -> ReviewItemOut:
+def _preview_out(preview: evidence_clips.Preview | None) -> PreviewOut | None:
+    if preview is None:
+        return None
+    # The video's own size, which is not the project's size if that changed afterwards.
+    _, caption = evidence_clip_layout.safe_and_caption(preview.width, preview.height)
+    return PreviewOut(
+        width=preview.width,
+        height=preview.height,
+        caption_top=caption["top"] / preview.height,
+        caption_bottom=caption["bottom"] / preview.height,
+        job_id=preview.job_id,
+        status=cast(JobStatus, preview.status),
+        error=preview.error,
+        video_url=media_url(preview.media_path) if preview.media_path else None,
+        warnings=preview.warnings,
+        out_of_date=preview.out_of_date,
+    )
+
+
+def _item_out(
+    item: EvidenceItem,
+    verdict: str | None,
+    frame: tuple[int, int],
+    preview: evidence_clips.Preview | None,
+) -> ReviewItemOut:
     capture = item.capture if isinstance(item.capture, dict) else {}
+    readable = evidence_clip_layout.readability(capture, *frame) if item.usable else None
     raw_rects = capture.get("rects")
     parsed = [_numbers(entry, 4) for entry in (raw_rects if isinstance(raw_rects, list) else [])]
     rects = [rect for rect in parsed if rect is not None]
@@ -528,10 +592,16 @@ def _item_out(item: EvidenceItem, verdict: str | None) -> ReviewItemOut:
         context_box=_numbers(capture.get("context_box"), 4),
         page=page if isinstance(page, int) and not isinstance(page, bool) else None,
         verdict=cast(Any, verdict) if item.usable else None,
+        readability=ReadabilityOut(**readable) if readable is not None else None,
+        preview=_preview_out(preview) if item.usable else None,
     )
 
 
-def _claim_out(claim: evidence_review.ReviewClaim) -> ReviewClaimOut:
+def _claim_out(
+    claim: evidence_review.ReviewClaim,
+    frame: tuple[int, int],
+    previews: dict[str, evidence_clips.Preview],
+) -> ReviewClaimOut:
     entry, result = claim.entry, claim.result
     problems = [text for text in result.get("problems", []) if isinstance(text, str)]
     claim_status = result.get("status")
@@ -555,14 +625,25 @@ def _claim_out(claim: evidence_review.ReviewClaim) -> ReviewClaimOut:
         attempts=attempts,
         problems=problems,
         warnings=[text for text in result.get("warnings", []) if isinstance(text, str)],
-        items=[_item_out(item, claim.decision.verdicts.get(item.item_key)) for item in claim.items],
+        items=[
+            _item_out(
+                item, claim.decision.verdicts.get(item.item_key), frame, previews.get(item.item_key)
+            )
+            for item in claim.items
+        ],
         shown=list(claim.decision.shown),
         no_proof_on_screen=claim.decision.no_proof_on_screen,
         decided=claim.decided,
     )
 
 
-def _review_out(view: evidence_review.ReviewView) -> EvidenceReviewOut:
+async def _review_out(
+    session: AsyncSession, project: Project, view: evidence_review.ReviewView
+) -> EvidenceReviewOut:
+    """The review answer: the claims with each piece's readability and newest preview video."""
+    frame = (project.out_width, project.out_height)
+    keys = [item.item_key for claim in view.claims for item in claim.items if item.usable]
+    previews = await evidence_clips.previews_for(session, project, keys)
     return EvidenceReviewOut(
         round_id=view.round_id,
         import_version=view.import_version,
@@ -571,7 +652,7 @@ def _review_out(view: evidence_review.ReviewView) -> EvidenceReviewOut:
         editable=view.editable,
         blocked_reason=view.blocked_reason,
         undecided=view.undecided,
-        claims=[_claim_out(claim) for claim in view.claims],
+        claims=[_claim_out(claim, frame, previews) for claim in view.claims],
     )
 
 
@@ -590,7 +671,7 @@ def _review_refusal(exc: evidence_review.EvidenceReviewError) -> HTTPException:
 )
 async def get_evidence_review(project_id: int, session: SessionDep) -> EvidenceReviewOut:
     project = await load_project(session, project_id)
-    return _review_out(await evidence_review.view(session, project))
+    return await _review_out(session, project, await evidence_review.view(session, project))
 
 
 @router.put(
@@ -620,7 +701,7 @@ async def put_evidence_claim_decision(
         result = await evidence_review.save_claim_decision(session, project, claim_id, decision)
     except evidence_review.EvidenceReviewError as exc:
         raise _review_refusal(exc) from exc
-    return _review_out(result)
+    return await _review_out(session, project, result)
 
 
 @router.post(
@@ -635,4 +716,26 @@ async def finish_evidence_review(project_id: int, session: SessionDep) -> Eviden
         result = await evidence_review.finish_review(session, project)
     except evidence_review.EvidenceReviewError as exc:
         raise _review_refusal(exc) from exc
-    return _review_out(result)
+    return await _review_out(session, project, result)
+
+
+@router.post(
+    "/projects/{project_id}/evidence/review/items/{item_key}/preview",
+    response_model=EvidenceBriefRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_REVIEW_REFUSED,
+)
+async def preview_evidence_item(
+    project_id: int, item_key: str, session: SessionDep
+) -> EvidenceBriefRun:
+    """Starts the job that draws a short preview video of one accepted piece of evidence (EVD-008).
+    If a preview of that piece is already waiting or running, its job is returned. 422 when the
+    piece is not an accepted piece of the newest import, 409 while an import runs.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await evidence_clips.queue_preview(session, project, item_key)
+    except evidence_review.EvidenceReviewError as exc:
+        raise _review_refusal(exc) from exc
+    dispatcher.nudge()
+    return EvidenceBriefRun(job_id=job.id)

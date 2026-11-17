@@ -114,11 +114,25 @@ async def health(base_url: str) -> dict[str, Any]:
     return _json(base_url, response, 200)
 
 
-async def start_render(base_url: str, body: dict[str, Any]) -> str:
-    """Asks the service to render. Returns its render id."""
+RENDERS_PATH: Final = "/renders"
+# An evidence clip (EVD-008) carries its screenshots in the body, so it has a route of its own
+# with a larger body limit, and a longer time to send.
+EVIDENCE_RENDERS_PATH: Final = "/evidence-renders"
+EVIDENCE_START_TIMEOUT_S: Final = 90.0
+
+
+async def start_render(
+    base_url: str,
+    body: dict[str, Any],
+    *,
+    path: str = RENDERS_PATH,
+    timeout_s: float = START_TIMEOUT_S,
+) -> str:
+    """Asks the service to render. Returns its render id. `path` is `/renders`, or
+    `/evidence-renders` for an evidence clip."""
     try:
         response = await outbound.request(
-            "POST", join_url(base_url, "/renders"), json=body, timeout_s=START_TIMEOUT_S
+            "POST", join_url(base_url, path), json=body, timeout_s=timeout_s
         )
     except outbound.OutboundError as exc:
         raise _unreachable(base_url, exc) from exc

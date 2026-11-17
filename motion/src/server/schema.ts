@@ -8,8 +8,17 @@ export const ENGINES = [
   "generated_component",
   "callout_component",
   "callout_blocks",
+  // An evidence clip (EVD-008): a screenshot zoomed to a quote. Its images travel in the request,
+  // so it is asked for on POST /evidence-renders only, never on POST /renders.
+  "evidence_clip",
 ] as const;
 export type Engine = (typeof ENGINES)[number];
+
+export const EVIDENCE_ENGINE: Engine = "evidence_clip";
+// The body of POST /evidence-renders: a screenshot and a context image as base64, so far more than
+// the 1 MB of the other routes. The backend refuses to send more than 30 MB.
+export const EVIDENCE_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
+const EVIDENCE_IMAGE_BASE64_MAX = 28 * 1024 * 1024;
 
 // The engines that draw a callout (CMO-001): a transparent clip laid over a shot. Only they may be
 // asked for ProRes 4444, and only they may be longer than MAX_FRAMES. `callout_blocks` (CMO-004)
@@ -94,6 +103,37 @@ export const renderRequestSchema = {
       },
     },
     time_limit_s: { type: "integer", minimum: 10, maximum: MAX_TIME_LIMIT_S },
+  },
+} as const;
+
+const evidenceImageSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["mime", "base64"],
+  properties: {
+    mime: { type: "string", enum: ["image/png", "image/jpeg"] },
+    base64: { type: "string", minLength: 4, maxLength: EVIDENCE_IMAGE_BASE64_MAX },
+  },
+} as const;
+
+// The body of POST /evidence-renders (EVD-008): a render request of the engine `evidence_clip`,
+// whose `input` is `{image, context}`. The screenshot is always there; the context image only when
+// the camera goes past the screenshot's edge.
+export const evidenceRenderRequestSchema = {
+  ...renderRequestSchema,
+  required: [...renderRequestSchema.required, "input"],
+  properties: {
+    ...renderRequestSchema.properties,
+    engine: { type: "string", enum: [EVIDENCE_ENGINE] },
+    input: {
+      type: "object",
+      additionalProperties: false,
+      required: ["image"],
+      properties: {
+        image: evidenceImageSchema,
+        context: { anyOf: [evidenceImageSchema, { type: "null" }] },
+      },
+    },
   },
 } as const;
 
@@ -206,6 +246,9 @@ const BACKDROP = /^#[0-9a-fA-F]{6}$/;
 export function requestProblem(request: RenderRequest): string | null {
   const { engine, encoding, frames, resolved } = request;
   const callout = isCalloutEngine(engine);
+  if (engine === EVIDENCE_ENGINE && (request.input === null || request.input === undefined)) {
+    return "An evidence clip needs its images in `input`.";
+  }
   if (!callout && frames > MAX_FRAMES) {
     return `The engine "${engine}" draws at most ${MAX_FRAMES} frames.`;
   }

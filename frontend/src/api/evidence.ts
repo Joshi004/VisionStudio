@@ -16,6 +16,7 @@ export type EvidenceReview = components["schemas"]["EvidenceReviewOut"];
 export type EvidenceReviewClaim = components["schemas"]["ReviewClaimOut"];
 export type EvidenceReviewItem = components["schemas"]["ReviewItemOut"];
 export type EvidenceClaimDecision = components["schemas"]["ClaimDecisionIn"];
+export type EvidencePreview = components["schemas"]["PreviewOut"];
 
 /**
  * The evidence query of a project. It sits under the project's own key, so whatever refreshes
@@ -122,12 +123,46 @@ async function fetchEvidenceReview(projectId: number) {
   return data;
 }
 
-/** The newest import, claim by claim, with the owner's decisions. */
+/**
+ * The newest import, claim by claim, with the owner's decisions. Loaded again every few seconds
+ * while a preview video is being drawn.
+ */
 export function useEvidenceReview(projectId: number, enabled = true) {
   return useQuery({
     queryKey: evidenceReviewKey(projectId),
     queryFn: () => fetchEvidenceReview(projectId),
     enabled: enabled && isValidProjectId(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.claims.some((claim) =>
+        claim.items.some((item) => isJobActive(item.preview)),
+      )
+        ? ACTIVE_POLL_MS
+        : false,
+  });
+}
+
+/** Starts the job that draws a short preview video of one accepted piece of evidence. */
+export function useStartEvidencePreview(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (itemKey: string) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/evidence/review/items/{item_key}/preview",
+        { params: { path: { project_id: projectId, item_key: itemKey } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not start the preview (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: evidenceReviewKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
   });
 }
 

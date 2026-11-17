@@ -20,10 +20,12 @@ import {
   useEvidenceReview,
   useFinishEvidenceReview,
   useSaveEvidenceClaimDecision,
+  useStartEvidencePreview,
   type EvidenceClaimDecision,
   type EvidenceReviewClaim,
   type EvidenceReviewItem,
 } from "../../api/evidence";
+import { EvidencePreview, ReadabilityWarning } from "./EvidencePreview";
 import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
 
 type EvidenceReviewProps = {
@@ -145,9 +147,19 @@ type PieceProps = {
   disabled: boolean;
   onVerdict: (verdict: "accepted" | "rejected") => void;
   onShown: (shown: boolean) => void;
+  previewStarting: boolean;
+  onPreview: () => void;
 };
 
-function PieceCard({ item, shown, disabled, onVerdict, onShown }: PieceProps) {
+function PieceCard({
+  item,
+  shown,
+  disabled,
+  onVerdict,
+  onShown,
+  previewStarting,
+  onPreview,
+}: PieceProps) {
   const [contextOpen, setContextOpen] = useState(false);
   return (
     <Paper withBorder p="sm" radius="md">
@@ -236,6 +248,8 @@ function PieceCard({ item, shown, disabled, onVerdict, onShown }: PieceProps) {
           </Text>
         ))}
 
+        <ReadabilityWarning item={item} />
+
         {item.usable && (
           <Group gap="sm">
             <Button
@@ -266,6 +280,15 @@ function PieceCard({ item, shown, disabled, onVerdict, onShown }: PieceProps) {
               />
             )}
           </Group>
+        )}
+
+        {item.usable && item.verdict === "accepted" && (
+          <EvidencePreview
+            item={item}
+            disabled={disabled}
+            starting={previewStarting}
+            onStart={onPreview}
+          />
         )}
       </Stack>
 
@@ -316,11 +339,15 @@ function ClaimCard({
   editable,
   saving,
   onSave,
+  previewingKey,
+  onPreview,
 }: {
   claim: EvidenceReviewClaim;
   editable: boolean;
   saving: boolean;
   onSave: (claimId: string, decision: EvidenceClaimDecision) => void;
+  previewingKey: string | null;
+  onPreview: (itemKey: string) => void;
 }) {
   const key = claim.status ?? claim.result_state;
   const disabled = !editable || saving;
@@ -442,6 +469,8 @@ function ClaimCard({
             disabled={disabled}
             onVerdict={(verdict) => setVerdict(item.item_key, verdict)}
             onShown={(on) => setShown(item.item_key, on)}
+            previewStarting={previewingKey === item.item_key}
+            onPreview={() => onPreview(item.item_key)}
           />
         ))}
 
@@ -501,6 +530,7 @@ export function EvidenceReview({ projectId }: EvidenceReviewProps) {
   const { data, isLoading, isError, error } = useEvidenceReview(projectId);
   const save = useSaveEvidenceClaimDecision(projectId);
   const finish = useFinishEvidenceReview(projectId);
+  const preview = useStartEvidencePreview(projectId);
 
   const onSave = (claimId: string, decision: EvidenceClaimDecision) =>
     save.mutate({ claimId, decision });
@@ -537,12 +567,20 @@ export function EvidenceReview({ projectId }: EvidenceReviewProps) {
           editable={data.editable}
           saving={save.isPending}
           onSave={onSave}
+          previewingKey={preview.isPending ? preview.variables : null}
+          onPreview={(itemKey) => preview.mutate(itemKey)}
         />
       ))}
 
       {save.isError && (
         <Alert color="red" title="Could not save the decision">
           {describeError(save.error)}
+        </Alert>
+      )}
+
+      {preview.isError && (
+        <Alert color="red" title="Could not start the preview">
+          {describeError(preview.error)}
         </Alert>
       )}
 

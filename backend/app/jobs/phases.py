@@ -358,6 +358,9 @@ CHECKING_GRAPHIC: Final = "checking the video"
 COMPARING_GRAPHIC_FRAMES: Final = "comparing the frames"
 ADDING_GRAPHIC_VOICE: Final = "adding the voice"
 SAVING_GRAPHIC: Final = "saving the video"
+# An evidence clip (EVD-008): the screenshot is cut and shrunk before it is sent to the motion
+# service; the other phases are those of a graphic.
+PREPARING_EVIDENCE: Final = "preparing the evidence pictures"
 
 
 def rendering_graphic(percent: int) -> str:

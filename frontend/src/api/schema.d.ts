@@ -804,6 +804,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence/review/items/{item_key}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Evidence Item
+         * @description Starts the job that draws a short preview video of one accepted piece of evidence (EVD-008).
+         *     If a preview of that piece is already waiting or running, its job is returned. 422 when the
+         *     piece is not an accepted piece of the newest import, 409 while an import runs.
+         */
+        post: operations["preview_evidence_item_api_projects__project_id__evidence_review_items__item_key__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -13846,6 +13868,35 @@ export interface components {
             /** Leaves After Event Id */
             leaves_after_event_id: string | null;
         };
+        /**
+         * PreviewOut
+         * @description The newest preview video of a piece of evidence (EVD-008).
+         */
+        PreviewOut: {
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Error */
+            error: string | null;
+            /** Video Url */
+            video_url: string | null;
+            /** Warnings */
+            warnings: string[];
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Caption Top */
+            caption_top: number;
+            /** Caption Bottom */
+            caption_bottom: number;
+        };
         /** ProfileRef */
         ProfileRef: {
             /** Id */
@@ -14300,6 +14351,20 @@ export interface components {
             seed?: number | null;
             /** Steps */
             steps?: number | null;
+        };
+        /**
+         * ReadabilityOut
+         * @description Whether the quote can be read in the video (EVD-008): the height of its lines on the output
+         *     frame after the zoom, against the least that is readable. Worked out from the capture's
+         *     rectangles, with no render.
+         */
+        ReadabilityOut: {
+            /** Text Height Px */
+            text_height_px: number;
+            /** Min Px */
+            min_px: number;
+            /** Ok */
+            ok: boolean;
         };
         /** ReferenceCandidateOut */
         ReferenceCandidateOut: {
@@ -14860,6 +14925,8 @@ export interface components {
             page: number | null;
             /** Verdict */
             verdict: ("accepted" | "rejected") | null;
+            readability: components["schemas"]["ReadabilityOut"] | null;
+            preview: components["schemas"]["PreviewOut"] | null;
         };
         /**
          * ReviewOut
@@ -21702,6 +21769,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_evidence_item_api_projects__project_id__evidence_review_items__item_key__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
                 };
             };
             /** @description No such project, or no such claim in the round. */
