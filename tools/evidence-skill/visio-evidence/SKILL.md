@@ -57,12 +57,6 @@ For one claim:
 6. **Describe the evidence honestly** in the same command: `--relation` (`supports`, `partly_supports`, `contradicts` or `context`), `--tier` (`primary`, `secondary` or `other`) and `--what-it-says` (one plain sentence, including any difference from the claim, such as a different number or year).
 7. **Report the claim** with `TOOL report --claim <id> --status ... --summary "..."`. Do this for every claim, also the ones with no evidence. Add one `--attempt "<what you tried>" "<why it was not used>"` for every search and source you looked at and did not use.
 
-### Search budget, per claim
-
-- At most 8 web searches and 10 sources opened.
-- At most 3 capture tries per source.
-- Stop early when `max_evidence_per_claim` good pieces are saved, or when a primary source settles the claim.
-- When the budget is spent, report what you have. Do not go on.
 
 ### Status rules
 
