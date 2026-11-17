@@ -4,7 +4,10 @@
 EVD-008 made the **preview** (`evidence_clip.purpose = 'preview'`): from the review screen the
 owner asks for a short video of an accepted piece, and watches how it will look. EVD-009 makes the
 **shot clips** (`purpose = 'shot'`): one clip for each evidence shot of the cut plan, at the exact
-length of the shot, with the same job and the same layout.
+length of the shot, with the same job and the same layout. EVD-011 makes the **card clips**
+(`purpose = 'card'`): `card_state` and `queue_card_clip`, for the cards that `evidence_cards` places
+over presenter and B-roll shots, drawn by the same job as a transparent ProRes clip at the card's
+own size.
 
 - `queue_preview` makes the `evidence_clip` row and the `render_evidence_clip` job for one accepted
   piece. A second press while one is waiting or running returns the same job.
@@ -40,11 +43,14 @@ from app.jobs import store
 from app.services import (
     callout_plan,
     caption_plan,
+    evidence_cards,
     evidence_claims,
     evidence_clip_layout,
     evidence_import,
     evidence_review,
     evidence_rounds,
+    evidence_source_lines,
+    frame_counts,
     graphic_theme,
     graphics_lab,
     scene_timeline,
@@ -61,6 +67,12 @@ PURPOSE_PREVIEW: Final = "preview"
 # and two presses on one shot make one job.
 PURPOSE_SHOT: Final = "shot"
 SHOT_DEDUPE_KEY: Final = "shot_clip_ref"
+# The clip of an evidence card (EVD-011): a transparent clip laid over presenter and B-roll shots.
+# Its job's input is `{evidence_clip_id, card_clip_ref}`, and two presses on one card make one job.
+PURPOSE_CARD: Final = "card"
+# The layout of an evidence shot drawn together with a callout (EVD-016); the others are full.
+LAYOUT_SPLIT: Final = "split"
+CARD_DEDUPE_KEY: Final = "card_clip_ref"
 # Recorded on every clip. A change to the composition or the layout rules that changes how a clip
 # looks raises it, so the previews made before read as out of date.
 CLIP_VERSION: Final = 1
@@ -154,9 +166,18 @@ def resolved_for(
     """The `resolved` of the motion service's request for an evidence clip. `context_box` is where
     the (cropped) context image sits in the world, or None when it is not sent. Pure."""
     geometry = plan.geometry
-    safe, caption = evidence_clip_layout.safe_and_caption(plan.width, plan.height)
+    if plan.panel is not None and plan.safe is not None:
+        # A split shot (EVD-016): the picture lives in the evidence panel's own pixels.
+        safe = plan.safe
+        caption = plan.caption or {"top": plan.height, "bottom": plan.height}
+    elif plan.card:
+        # A card has its own canvas and no captions in it (EVD-011).
+        safe = evidence_clip_layout.card_safe(plan.width, plan.height)
+        caption = {"top": plan.height, "bottom": plan.height}
+    else:
+        safe, caption = evidence_clip_layout.safe_and_caption(plan.width, plan.height)
     line = plan.timeline
-    return {
+    resolved: dict[str, Any] = {
         "width": plan.width,
         "height": plan.height,
         "fps": plan.fps,
@@ -180,6 +201,20 @@ def resolved_for(
         "badge_box": list(plan.badge),
         "badge": badge,
     }
+    if plan.panel is not None:
+        resolved["panel"] = {
+            "x": plan.panel[0],
+            "y": plan.panel[1],
+            "width": plan.panel[2],
+            "height": plan.panel[3],
+            "edge": plan.panel_edge,
+        }
+    if plan.card:
+        resolved["card"] = {
+            "radius": plan.card_radius,
+            "fade_frames": evidence_clip_layout.card_fade_frames(plan.fps),
+        }
+    return resolved
 
 
 def small_text_warning(plan: evidence_clip_layout.ClipPlan) -> dict[str, str] | None:
@@ -223,13 +258,23 @@ def preview_frames() -> int:
 
 
 async def current_look(
-    session: AsyncSession, project: Project, frames: int | None = None
+    session: AsyncSession, project: Project, frames: int | None = None, *, split: bool = False
 ) -> dict[str, Any]:
     """What a clip made now would be made with: a preview's length, or the `frames` of an evidence
-    shot. A stored clip that differs is out of date.
+    shot. A stored clip that differs is out of date. `split` is a shot drawn split with a callout
+    (EVD-016): the look then names the layout and the panel the picture is drawn in.
     """
     accent, source = await accent_for(session, project)
+    layout: dict[str, Any] = (
+        {
+            "layout": LAYOUT_SPLIT,
+            "panel": list(evidence_clip_layout.split_panel(project.out_width, project.out_height)),
+        }
+        if split
+        else {}
+    )
     return {
+        **layout,
         "width": project.out_width,
         "height": project.out_height,
         "fps": FPS,
@@ -240,7 +285,11 @@ async def current_look(
     }
 
 
-_LOOK_KEYS: Final = ("width", "height", "fps", "frames", "accent", "clip_version")
+_LOOK_KEYS: Final = ("width", "height", "fps", "frames", "accent", "clip_version", "frame")
+# The layout of a split shot (EVD-016) is compared whether or not the look has it: a clip drawn
+# split is out of date once its shot is not split any more, and the other way round. A clip made
+# before the layout existed has neither, which equals a look without.
+_LAYOUT_KEYS: Final = ("layout", "panel")
 
 
 # --- Starting a preview --------------------------------------------------------------------
@@ -338,7 +387,10 @@ def _warning_messages(warnings: Any) -> list[str]:
 
 def _is_out_of_date(clip: EvidenceClip, look: dict[str, Any]) -> bool:
     inputs = clip.inputs if isinstance(clip.inputs, dict) else {}
-    return any(inputs.get(key) != look[key] for key in _LOOK_KEYS)
+    # `frame` is only in the look of a card.
+    return any(inputs.get(key) != look[key] for key in _LOOK_KEYS if key in look) or any(
+        inputs.get(key) != look.get(key) for key in _LAYOUT_KEYS
+    )
 
 
 async def previews_for(
@@ -421,10 +473,16 @@ class ShotClipEntry:
     last_error: str | None
     # Why the clip cannot be made now, or None.
     blocked_reason: str | None
+    # The shot is drawn split with the callouts of this list (EVD-016); empty for a full shot.
+    split_callouts: tuple[str, ...] = ()
 
     @property
     def done(self) -> bool:
         return self.status == "ready"
+
+    @property
+    def split(self) -> bool:
+        return bool(self.split_callouts)
 
     @property
     def ref(self) -> str:
@@ -541,7 +599,7 @@ async def shot_state(session: AsyncSession, project: Project) -> ShotClipsState:
     plans = await shot_plans.state(session, project)
     pieces = await _newest_pieces(session, project)
     newest = await _newest_shot_clips(session, project)
-    looks: dict[int, dict[str, Any]] = {}
+    looks: dict[tuple[int, bool], dict[str, Any]] = {}
 
     scenes: list[SceneShotClips] = []
     for entry in plans.entries:
@@ -559,10 +617,14 @@ async def shot_state(session: AsyncSession, project: Project) -> ShotClipsState:
             frames = _span_frames(entry, shot["id"])
             clip, job = newest.get((entry.item["id"], shot["id"]), (None, None))
             look = {}
+            split_callouts = entry.splits.get(str(shot["id"]), ())
             if frames is not None:
-                if frames not in looks:
-                    looks[frames] = await current_look(session, project, frames)
-                look = looks[frames]
+                key = (frames, bool(split_callouts))
+                if key not in looks:
+                    looks[key] = await current_look(
+                        session, project, frames, split=bool(split_callouts)
+                    )
+                look = looks[key]
             status, error = _clip_status(clip, job, item_key, look) if look else ("none", None)
             shots.append(
                 ShotClipEntry(
@@ -578,6 +640,7 @@ async def shot_state(session: AsyncSession, project: Project) -> ShotClipsState:
                     job=job,
                     last_error=error,
                     blocked_reason=_blocked_reason(entry, item, frames),
+                    split_callouts=split_callouts,
                 )
             )
         if shots:
@@ -612,7 +675,7 @@ async def queue_shot_clip(
         raise EvidenceClipError(found.blocked_reason)
     assert found.item is not None and found.frames is not None  # the refusal made sure
 
-    look = await current_look(session, project, found.frames)
+    look = await current_look(session, project, found.frames, split=found.split)
     job, created = await store.create_job(
         session,
         project_id=project.id,
@@ -640,12 +703,247 @@ async def queue_shot_clip(
             "piece": found.piece,
             "orientation": project.orientation,
             "length_s": round(found.frames / FPS, 3),
+            **({"callouts": list(found.split_callouts)} if found.split else {}),
             **look,
         },
     )
     session.add(clip)
     await session.flush()
     job.input = {CLIP_KEY: clip.id, SHOT_DEDUPE_KEY: found.ref}
+    clip.render_job_id = job.id
+    await session.commit()
+    return job
+
+
+# --- The clips of the evidence cards (EVD-011) -----------------------------------------------
+
+UNKNOWN_CARD_MESSAGE: Final = "There is no such evidence card in the newest shot plan."
+CARD_ALREADY_MADE_MESSAGE: Final = "The clip of this card is already made."
+
+
+def card_ref(scene_id: str, card_id: str) -> str:
+    return f"{scene_id}/{card_id}"
+
+
+def card_frames(start_s: float, end_s: float) -> int:
+    """The frames of a card's clip: its own length, and one spare frame as for a drawn shot."""
+    return frame_counts.target_frames(start_s, end_s, frame_counts.H3_FPS) + 1
+
+
+async def card_look(
+    session: AsyncSession, project: Project, frames: int, box: tuple[int, int, int, int]
+) -> dict[str, Any]:
+    """What a card made now would be made with: the size of its box, the frame it is laid on, and
+    its frames. A stored clip that differs is out of date."""
+    look = await current_look(session, project, frames)
+    look["width"], look["height"] = box[2], box[3]
+    look["frame"] = [project.out_width, project.out_height]
+    return look
+
+
+@dataclass(frozen=True)
+class CardClipEntry:
+    """One card of a scene's newest plan and where its clip stands."""
+
+    scene_id: str
+    plan_id: int
+    card: evidence_cards.Card
+    item: EvidenceItem | None
+    # The card's box on the output frame, `(x, y, width, height)`.
+    box: tuple[int, int, int, int]
+    frames: int
+    status: ShotClipStatus
+    clip: EvidenceClip | None
+    job: Job | None
+    last_error: str | None
+    blocked_reason: str | None
+
+    @property
+    def done(self) -> bool:
+        return self.status == "ready"
+
+    @property
+    def ref(self) -> str:
+        return card_ref(self.scene_id, self.card.card_id)
+
+
+def source_line_text(item: EvidenceItem) -> str:
+    """The words of a source line (EVD-012): "Source: Reuters, 3 Oct 2026". The publisher and the
+    date are cut short and cleaned like the badge's. Pure."""
+    badge = badge_of(item)
+    return "Source: " + ", ".join(part for part in (badge["publisher"], badge["date"]) if part)
+
+
+@dataclass(frozen=True)
+class SceneCardClips:
+    """What one scene of the newest plans has beside its evidence shots: its cards with their
+    clips, the pieces that got no room for a card, and its source lines (with their words, by
+    claim id)."""
+
+    item: dict[str, Any]
+    cards: list[CardClipEntry]
+    unplaced: tuple[evidence_cards.Unplaced, ...]
+    source_lines: tuple[evidence_source_lines.SourceLine, ...]
+    line_texts: dict[str, str]
+
+
+@dataclass(frozen=True)
+class CardClipsState:
+    """What the `evidence_clips` step reads for cards. `wanted` is False without evidence."""
+
+    wanted: bool
+    entries: list[SceneCardClips]
+
+
+async def _newest_card_clips(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], tuple[EvidenceClip, Job | None]]:
+    """The newest clip of each card of the project, by `(scene_id, card_id)`."""
+    statement = (
+        select(EvidenceClip, Job)
+        .outerjoin(Job, EvidenceClip.render_job_id == Job.id)
+        .where(EvidenceClip.project_id == project.id, EvidenceClip.purpose == PURPOSE_CARD)
+        .order_by(EvidenceClip.id.desc())
+        .execution_options(populate_existing=True)
+    )
+    found: dict[tuple[str, str], tuple[EvidenceClip, Job | None]] = {}
+    for clip, job in (await session.execute(statement)).all():
+        inputs = clip.inputs if isinstance(clip.inputs, dict) else {}
+        card_id = inputs.get("card_id")
+        if clip.scene_id is None or not isinstance(card_id, str):
+            continue
+        found.setdefault((clip.scene_id, card_id), (clip, job))
+    return found
+
+
+def _card_blocked(entry: shot_plans.SceneEntry, item: EvidenceItem | None) -> str | None:
+    if entry.status != "planned":
+        return SHOT_PLAN_OUT_OF_DATE_MESSAGE
+    if item is None:
+        return PIECE_GONE_MESSAGE
+    if not item.image_path:
+        return NO_PICTURE_MESSAGE
+    return None
+
+
+@memoized_state
+async def card_state(session: AsyncSession, project: Project) -> CardClipsState:
+    """The cards of the newest plans, scene by scene, with where each clip stands. Worked out on
+    every read; nothing here is stored but the clips."""
+    if not evidence_claims.wanted(project):
+        return CardClipsState(wanted=False, entries=[])
+    plans = await shot_plans.state(session, project)
+    pieces = await _newest_pieces(session, project)
+    newest = await _newest_card_clips(session, project)
+    box = evidence_clip_layout.card_box(project.out_width, project.out_height)
+    looks: dict[int, dict[str, Any]] = {}
+
+    scenes: list[SceneCardClips] = []
+    for entry in plans.entries:
+        if not (entry.cards or entry.unplaced_cards or entry.source_lines):
+            continue
+        cards: list[CardClipEntry] = []
+        for card in entry.cards:
+            frames = card_frames(card.start_s, card.end_s)
+            if frames not in looks:
+                looks[frames] = await card_look(session, project, frames, box)
+            item = pieces.get(card.item_key)
+            clip, job = newest.get((entry.item["id"], card.card_id), (None, None))
+            status, error = _clip_status(clip, job, card.item_key, looks[frames])
+            cards.append(
+                CardClipEntry(
+                    scene_id=entry.item["id"],
+                    plan_id=entry.row.id if entry.row is not None else 0,
+                    card=card,
+                    item=item,
+                    box=box,
+                    frames=frames,
+                    status=status,
+                    clip=clip,
+                    job=job,
+                    last_error=error,
+                    blocked_reason=_card_blocked(entry, item),
+                )
+            )
+        scenes.append(
+            SceneCardClips(
+                item=entry.item,
+                cards=cards,
+                unplaced=entry.unplaced_cards,
+                source_lines=entry.source_lines,
+                line_texts={
+                    line.claim_id: source_line_text(found)
+                    for line in entry.source_lines
+                    if (found := pieces.get(line.item_key)) is not None
+                },
+            )
+        )
+    return CardClipsState(wanted=True, entries=scenes)
+
+
+async def queue_card_clip(
+    session: AsyncSession, project: Project, scene_id: str, card_id: str
+) -> Job:
+    """Queues the clip of one card, at its exact length, and commits. A clip that is already
+    waiting or running gives its job. Raises EvidenceClipError (with the reason) when the clip
+    cannot be made now or is already made."""
+    state = await card_state(session, project)
+    found = next(
+        (
+            card
+            for scene in state.entries
+            for card in scene.cards
+            if card.scene_id == scene_id and card.card.card_id == card_id
+        ),
+        None,
+    )
+    if found is None:
+        raise EvidenceClipError(UNKNOWN_CARD_MESSAGE)
+    if found.status == "working" and found.job is not None:
+        return found.job
+    if found.status == "ready":
+        raise EvidenceClipError(CARD_ALREADY_MADE_MESSAGE)
+    if found.blocked_reason is not None:
+        raise EvidenceClipError(found.blocked_reason)
+    assert found.item is not None  # the refusal made sure
+
+    look = await card_look(session, project, found.frames, found.box)
+    job, created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="local",
+        input={CARD_DEDUPE_KEY: found.ref},
+        commit=False,
+        dedupe_key=CARD_DEDUPE_KEY,
+    )
+    if not created:
+        return job
+    card = found.card
+    clip = EvidenceClip(
+        project_id=project.id,
+        purpose=PURPOSE_CARD,
+        item_id=found.item.id,
+        scene_id=scene_id,
+        shot_id=card.shot_ids[0] if card.shot_ids else None,
+        shot_plan_id=found.plan_id or None,
+        attempt=(found.clip.attempt + 1) if found.clip is not None else 1,
+        inputs={
+            "items": [card.item_key],
+            "item_ids": [found.item.id],
+            "item_key": card.item_key,
+            "claim_id": card.claim_id,
+            "piece": card.piece,
+            "card_id": card.card_id,
+            "box": list(found.box),
+            "orientation": project.orientation,
+            "length_s": round(found.frames / FPS, 3),
+            **look,
+        },
+    )
+    session.add(clip)
+    await session.flush()
+    job.input = {CLIP_KEY: clip.id, CARD_DEDUPE_KEY: found.ref}
     clip.render_job_id = job.id
     await session.commit()
     return job

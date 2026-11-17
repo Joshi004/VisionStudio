@@ -3639,15 +3639,17 @@ class EvidenceReview(Base):
 class EvidenceClip(Base):
     """One rendered evidence video (EVD-001, revision 0098).
 
-    `purpose` is `preview` (from the review screen, with no scene or shot) or `shot` (the clip of
-    an evidence shot at its exact length). `inputs.items` is the ordered list of the pieces the
+    `purpose` is `preview` (from the review screen, with no scene or shot), `shot` (the clip of
+    an evidence shot at its exact length) or `card` (EVD-011, revision 0099: a transparent clip
+    laid over a presenter or B-roll shot; `shot_id` is the first shot it covers).
+    `inputs.items` is the ordered list of the pieces the
     clip shows; `item_id` is set when it shows exactly one. The row is made when its render is
     queued, so the video columns are NULL until the render has written them, like `ShotGraphic`.
     """
 
     __tablename__ = "evidence_clip"
     __table_args__ = (
-        CheckConstraint("purpose IN ('preview', 'shot')", name="purpose_valid"),
+        CheckConstraint("purpose IN ('preview', 'shot', 'card')", name="purpose_valid"),
         Index("idx_evidence_clip_project_scene", "project_id", "scene_id"),
         Index("idx_evidence_clip_item", "item_id"),
     )

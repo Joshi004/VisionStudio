@@ -411,12 +411,64 @@ def _evidence_source(
     clip = entry.clip if entry is not None and entry.done else None
     if clip is None or clip.media_path is None:
         return None
+    inputs = clip.inputs if isinstance(clip.inputs, dict) else {}
     return story_render_plan.EvidenceSource(
         clip_id=clip.id,
         path=clip.media_path,
         frame_count=clip.frame_count,
         file_exists=file_exists(clip.media_path),
+        split=inputs.get("layout") == evidence_clips.LAYOUT_SPLIT,
     )
+
+
+def _card_clip_source(
+    entry: evidence_clips.CardClipEntry,
+) -> story_render_plan.CardClipSource | None:
+    """The clip an evidence card plays: its newest clip, once it is ready and is the current one."""
+    clip = entry.clip if entry.done else None
+    if clip is None or clip.media_path is None:
+        return None
+    return story_render_plan.CardClipSource(
+        clip_id=clip.id,
+        path=clip.media_path,
+        frame_count=clip.frame_count,
+        file_exists=file_exists(clip.media_path),
+    )
+
+
+def _evidence_overlays(
+    scene: evidence_clips.SceneCardClips | None,
+) -> tuple[list[story_render_plan.CardSource], list[story_render_plan.SourceLineSource]]:
+    """The cards and the source lines of a scene (EVD-011, EVD-012), for the render plan."""
+    if scene is None:
+        return [], []
+    cards = [
+        story_render_plan.CardSource(
+            card_id=entry.card.card_id,
+            claim_id=entry.card.claim_id,
+            item_key=entry.card.item_key,
+            start_s=entry.card.start_s,
+            end_s=entry.card.end_s,
+            x=entry.box[0],
+            y=entry.box[1],
+            width=entry.box[2],
+            height=entry.box[3],
+            clip=_card_clip_source(entry),
+        )
+        for entry in scene.cards
+    ]
+    lines = [
+        story_render_plan.SourceLineSource(
+            claim_id=line.claim_id,
+            item_key=line.item_key,
+            start_s=line.start_s,
+            end_s=line.end_s,
+            text=scene.line_texts[line.claim_id],
+        )
+        for line in scene.source_lines
+        if line.claim_id in scene.line_texts
+    ]
+    return cards, lines
 
 
 def _graphic_source(used: shot_graphics.UsedVideo | None) -> story_render_plan.GraphicSource | None:
@@ -450,6 +502,10 @@ async def scene_sources(
     continuous = word_timings.times_takes(project)
     graphics = await graphic_videos(session, project)
     evidence = await evidence_clips_now(session, project)
+    card_scenes = {
+        scene.item["id"]: scene
+        for scene in (await evidence_clips.card_state(session, project)).entries
+    }
     scenes: list[story_render_plan.SceneSource] = []
     for entry in plans.entries:
         scene_id = entry.item["id"]
@@ -457,6 +513,8 @@ async def scene_sources(
         shots: list[story_render_plan.ShotSource] = []
         units: list[story_render_plan.UnitSource] = []
         voice: story_render_plan.VoiceSource | None = None
+        cards: list[story_render_plan.CardSource] = []
+        source_lines: list[story_render_plan.SourceLineSource] = []
         clock = clocks.get(scene_id)
         if continuous and blocked is None:
             blocked = _voice_blocked_reason(entry, clock)
@@ -536,6 +594,7 @@ async def scene_sources(
                 )
             else:
                 units = await _unit_sources(session, entry, speech, timings)
+            cards, source_lines = _evidence_overlays(card_scenes.get(scene_id))
         scenes.append(
             story_render_plan.SceneSource(
                 scene_id=scene_id,
@@ -548,6 +607,8 @@ async def scene_sources(
                 shots=shots,
                 units=units,
                 voice=voice,
+                cards=cards,
+                source_lines=source_lines,
             )
         )
     return scenes

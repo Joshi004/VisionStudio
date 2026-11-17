@@ -2074,29 +2074,57 @@ async def _start_graphics(
 
 # --- Evidence clips (EVD-009) -----------------------------------------------------------------
 
+# The last part of the `ref` of a target that is the clip of an evidence card (EVD-011).
+CARD_REF: Final = "card"
+
 
 def _evidence_notes(plans: shot_plans.ShotPlansState) -> list[str]:
-    """What the planner did with each claim that has evidence to show, when it did less than
-    show every chosen piece: "Scene 2: 'revenue rose 40%' has no evidence shot: <reason>". Not a
-    problem, so it is a note, not a failure. Pure.
+    """What happened to each claim that has evidence to show, when every chosen piece is not an
+    evidence shot: "Scene 2: 'revenue rose 40%' has no evidence shot: <reason>", or that it is
+    shown as a card (EVD-011) or as a source line on a graphic shot (EVD-012) instead, or that a
+    piece got no room for a card. Not a problem, so it is a note, not a failure. Pure.
     """
     notes: list[str] = []
     for entry in plans.entries:
         content = entry.content
         results = content.get(cut_planning_writer.EVIDENCE_KEY) if content is not None else None
+        label = _scene_label(entry.item)
+        carded = {card.claim_id for card in entry.cards}
+        lined = {line.claim_id for line in entry.source_lines}
         for result in results if isinstance(results, list) else []:
             if not isinstance(result, dict):
                 continue
-            label = _scene_label(entry.item)
             words = f"'{result.get('text')}'"
+            claim_id = result.get("claim_id")
             if result.get("left_out") is not None:
                 reason = result.get("reason") or "no reason was given"
-                notes.append(f"{label}: {words} has no evidence shot: {reason}")
+                if claim_id in carded:
+                    notes.append(
+                        f"{label}: {words} is shown as a card (no evidence shot: {reason})"
+                    )
+                elif claim_id in lined:
+                    notes.append(
+                        f"{label}: {words} shows a source line on its graphic shot "
+                        f"(no evidence shot: {reason})"
+                    )
+                else:
+                    notes.append(f"{label}: {words} has no evidence shot: {reason}")
             elif isinstance(result.get("shown"), int) and result["shown"] < result.get("pieces", 0):
-                notes.append(
-                    f"{label}: {words} shows {result['shown']} of {result['pieces']} pieces "
-                    "of evidence."
-                )
+                if claim_id in carded:
+                    notes.append(
+                        f"{label}: {words} shows {result['shown']} of {result['pieces']} pieces "
+                        "of evidence as shots, and the rest as cards."
+                    )
+                else:
+                    notes.append(
+                        f"{label}: {words} shows {result['shown']} of {result['pieces']} pieces "
+                        "of evidence."
+                    )
+        for missing in entry.unplaced_cards:
+            notes.append(
+                f"{label}: '{missing.text}' has no card for piece {missing.piece}: "
+                f"{missing.message}"
+            )
     return notes
 
 
@@ -2127,6 +2155,24 @@ async def _evaluate_evidence_clips(
                     group=scene_id,
                 )
             )
+    # The cards over presenter and B-roll shots (EVD-011) have a clip each, like a shot.
+    for card_scene in (await evidence_clips.card_state(session, project)).entries:
+        scene_id = card_scene.item["id"]
+        for card in card_scene.cards:
+            active = card.status == "working"
+            targets.append(
+                Target(
+                    f"card:{scene_id}/{card.card.card_id}",
+                    f"{_scene_label(card_scene.item)}, evidence card {card.card.card_id}",
+                    card.done,
+                    active=active,
+                    block=None if card.done or active else card.blocked_reason,
+                    last_error=None if card.done else card.last_error,
+                    ref=(scene_id, card.card.card_id, CARD_REF),
+                    stale=card.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
     return StepView(targets, warnings=_evidence_notes(await shot_plans.state(session, project)))
 
 
@@ -2138,7 +2184,14 @@ async def _start_evidence_clips(
     deadline: float,
 ) -> list[Started]:
     async def make(target: Target) -> tuple[int, ...]:
-        job = await evidence_clips.queue_shot_clip(session, project, target.ref[0], target.ref[1])
+        if target.ref[-1] == CARD_REF:
+            job = await evidence_clips.queue_card_clip(
+                session, project, target.ref[0], target.ref[1]
+            )
+        else:
+            job = await evidence_clips.queue_shot_clip(
+                session, project, target.ref[0], target.ref[1]
+            )
         return (job.id,)
 
     return await _start_each(session, targets, deadline, make)

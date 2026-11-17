@@ -114,9 +114,9 @@ What does not exist: anything about claims or evidence; a pipeline step that wai
 | EV-7 | The round folder is **untrusted input**. The import checks every file and copies the usable ones into storage under generated names. The agent's file names and text are never used as paths or shown as HTML. |
 | EV-8 | **Nothing reaches the video without the owner's acceptance.** The owner reviews every piece of evidence, can reject any, and chooses which accepted ones are shown, and in what order. |
 | EV-9 | **Only the consumers wait.** Shot planning and the steps that draw and render evidence shots need the evidence step. Everything before them (Story Bible, speech, voices and the rest) keeps running while the owner does the research. |
-| EV-10 | On video, evidence is a **full-screen evidence shot** drawn by the motion service: a clip of the timeline like a graphic shot, never made by H3. The highlight is drawn at render time from the stored rectangles; the stored screenshot stays clean. The owner can preview each clip from the review screen. |
+| EV-10 | On video, evidence is a **full-screen evidence shot** drawn by the motion service: a clip of the timeline like a graphic shot, never made by H3. The highlight is drawn at render time from the stored rectangles; the stored screenshot stays clean. The owner can preview each clip from the review screen. Since EVD-011, a proof without a shot can also be a transparent **card** over a presenter or B-roll shot, and since EVD-016 a shot can be split to share the screen with a callout. |
 | EV-11 | The agent runs in the round folder, not in the repository (which holds `.env`). The skill tells it to treat everything it reads on the web as data, never as instructions, and to write only inside the round's `results/` folder. |
-| EV-12 | Phase 1 covers **web pages and PDFs**. Evidence cards over presenter shots, text-only source lines, data charts, automated research and video evidence are later phases (EVD-011 to EVD-015). |
+| EV-12 | Phase 1 covers **web pages and PDFs**. Data charts, automated research and video evidence are later phases (EVD-013 to EVD-015). Evidence cards over presenter and B-roll shots, source lines on graphic shots and the split evidence shot were brought forward after the first real video (EVD-011, EVD-012, EVD-016). |
 
 ---
 
@@ -293,6 +293,7 @@ A failure in checks 1 to 4 makes that piece of evidence unusable, and the review
 - **Readability.** After the zoom, the quote's text must be at least a minimum height on the output frame: **0.035 of the shorter side of the frame (38 px at 1080), decided in EVD-008**. Below it, the review card shows a warning, and a preview carries a `small_text` warning.
 - **Length.** The clip is as long as its shot. An evidence shot is at least the longer of the shortest length the owner set for shots and 3 s (like a graphic shot; EVD-009). There is **no reading-rate minimum** (the owner's decision): the viewer can pause, and the shot is shown where it makes sense for the script, however long the text is. The graphic shot over the same words is always kept whole; an evidence shot may be shorter than its piece would like, but never under the floor.
 - **Captions** keep showing in their zone, and the composition keeps the highlight out of the caption zone (`caption_zone`). **Callouts are hidden during an evidence shot**, as during a graphic shot (EVD-009): the render's callout track keeps clear of both.
+- **Who wins (EVD-011, EVD-012, EVD-016).** Code decides on read; the cut planning prompt is unchanged. In order: (1) a **graphic shot** is always whole, and a claim on it with no evidence shot gets a **source line** in the top margin; (2) a **full-screen evidence shot** is as planned, and when a callout starts inside it the clip is drawn **split** (portrait: callout 30 % on top, evidence 70 % below; landscape: evidence left, callout right, 50/50) and the callout is kept; (3) every claim or piece without a shot is an **evidence card** over the presenter or B-roll shot under its words, and the card wins over a callout.
 - **Preview.** From the review screen, the owner can render a preview of a fixed length (EVD-008). The real clip is drawn at the shot's exact length after shot planning (EVD-009).
 
 ### 4.8 What the one migration creates (EVD-001)
@@ -327,8 +328,9 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | EVD-008 | The evidence clip and its preview | Code | EVD-006 | Completed |
 | EVD-009 | Evidence shots in the cut plan and the render | Code | EVD-007, EVD-008 | In Progress |
 | EVD-010 | One explainer end to end | Owner | EVD-005, EVD-009, STOR-002 | Not Started |
-| EVD-011 | Evidence card over presenter shots | Code, later | EVD-010 | Deferred |
-| EVD-012 | Source lines without a screenshot | Code, later | EVD-010 | Deferred |
+| EVD-011 | Evidence card over presenter and B-roll shots | Code | EVD-009 | In Progress |
+| EVD-012 | Source lines on graphic shots | Code | EVD-011 | In Progress |
+| EVD-016 | Split evidence shot with a callout | Code | EVD-011 | In Progress |
 | EVD-013 | Data evidence (prices and series as charts) | Code, later | EVD-010 | Deferred |
 | EVD-014 | Automated research | Code, later | EVD-010 | Deferred |
 | EVD-015 | Video evidence | Code, later | EVD-010 | Deferred |
@@ -340,7 +342,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 10 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004, EVD-006, EVD-007 and EVD-008, 2026-11-17), 3 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left; EVD-009: code done and checked on pure parts, one real planning call and a real render are left).
+**Progress snapshot:** 10 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004, EVD-006, EVD-007 and EVD-008, 2026-11-17), 6 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left; EVD-009: code done and checked on pure parts, one real planning call and a real render are left; EVD-011, EVD-012 and EVD-016: code done and checked on pure parts and on throwaway motion renders, a real render of a real project is left).
 
 ---
 
@@ -1085,7 +1087,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 *Decisions (the owner's answers to the planning questions).*
 - **Pieces.** One `evidence` shot per accepted piece, one right after the other in the owner's order. The first piece is required; later ones are planned when there is time. A claim has at most as many shots as it has shown pieces.
-- **Callouts** are hidden during an evidence shot (the callout track keeps clear of graphic and evidence shots alike; the "left out" warning now says "a graphic or evidence shot").
+- **Callouts** are hidden during an evidence shot (*changed by EVD-016: a callout that starts inside an evidence shot is kept and the shot is drawn split; callouts stay off graphic shots and off evidence cards*) (the callout track keeps clear of graphic and evidence shots alike; the "left out" warning now says "a graphic or evidence shot").
 - **No reading-rate minimum.** The floor is `max(shortest shot, 3.0 s)` (`SHORTEST_EVIDENCE_S`). §4.7 is updated.
 - **Graphic first.** A graphic shot is always kept whole. An evidence shot goes directly before or after the graphic shot that covers the claim's first word, and may be shorter, never under the floor. Otherwise the first evidence shot starts on the claim's first word or at most 3 words before it (`EVIDENCE_LEAD_WORDS`). A claim that spans scenes belongs to the scene with its first word.
 - **Leaving a claim out** takes one of three fixed codes: `scene_too_short`, `too_close_to_other_evidence`, `opening_or_closing_shot` (and `not_in_take`, set by code when the words are not in the take). The board shows them; nothing is left out silently.
@@ -1125,19 +1127,64 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 **Dependencies.** EVD-005, EVD-009, STOR-002.
 
-**Result (owner fills in):** _To be filled in. The owner then decides which deferred phases to move to Not Started._
+**Result (owner fills in):** _Partly filled in on 2026-11-17._ The verified video showed fewer proofs than expected. Causes found in EVD-009's rules: a graphic shot is always kept whole and pushes evidence out of the plan; callouts are hidden during every evidence shot; later pieces of a claim are only planned when there is time. The owner decided: evidence cards (EVD-011), source lines on graphics (EVD-012), and a split shot for evidence plus callout (EVD-016). The owner still judges the other questions above and decides the rest of the deferred phases.
 
-### EVD-011 — Evidence card over presenter shots (later)
+### EVD-011 — Evidence card over presenter and B-roll shots
 
-**Status:** Deferred
+**Status:** In Progress
 
-A smaller evidence card in the callout zone over a presenter shot, instead of a full-screen shot, for claims the presenter should stay on screen for.
+**Objective.** More proof on screen: a claim or piece of evidence that the cut planner gave no full-screen shot is shown as a card over the shot under its words.
 
-### EVD-012 — Source lines without a screenshot (later)
+**Scope.**
+- Migration `0099`: `evidence_clip.purpose` may be `card`.
+- `services/evidence_cards.py` (pure): `cards_for` places a card for every claim left out by the planner and every shown-later piece, starting on the claim's first word, at least `SHORTEST_EVIDENCE_S` (3 s), only over presenter and B-roll shots (never over a graphic or an evidence shot), ending `CUT_BEFORE_NEXT_MS` before a graphic, an evidence shot or the next card. No room: no card, and a reason on the board.
+- The card is drawn by the motion service as a transparent ProRes 4444 clip (like a callout), at the card's size, and laid over the shot with the same overlay path as motion callouts.
+- A card wins over a callout: a callout that starts inside a card is left out, with a warning.
+- Code decides; the cut planning prompt and request are unchanged.
 
-**Status:** Deferred
+**Out of scope.** The planner or the owner choosing shot or card per claim.
 
-A short text-only source line ("Source: Reuters, 3 Oct 2026") shown while a claim is spoken, for claims where a screenshot would add little.
+**Completion notes (code done, real render left).**
+
+*What was built.*
+- **Placement** (`services/evidence_cards.py`, pure): `place_cards(claims, slots, total_s)` gives a card to every shown piece that has no evidence shot of its own (the planner left the claim out, or a later piece got no shot). It starts on the last own shot's end or the claim's first word, is `MIN_CARD_S` (3 s) to `MAX_CARD_S` (8 s) long, never over a graphic or an evidence shot or another card, and may start up to `MAX_LEAD_S` (1 s) before the words when there is no room after them. A claim on a graphic shot with no evidence shot of its own gets no card (it gets a source line, EVD-012). A piece with no room is `unplaced` with the code `no_room` or `too_late`; the board says so. `shot_plans.SceneEntry` carries `cards`, `unplaced_cards`, `source_lines` and `splits`, worked out on read from the plan and the words of the take (`_claim_times`, `_evidence_overlays`); nothing is stored for them.
+- **Migration `0099`** drops and recreates `ck_evidence_clip_purpose_valid` as `purpose IN ('preview', 'shot', 'card')` (SQLite batch alter; the downgrade deletes card rows first). Upgrade, downgrade and upgrade again were run on a throwaway `DATA_DIR`.
+- **Clips** (`services/evidence_clips.py`): `card_state`, `queue_card_clip`, `CardClipEntry`, `SceneCardClips`; `evidence_clip` rows with `purpose='card'` and `inputs.card_id`, `box` and `frame`; the pipeline step `evidence_clips` makes the cards after the shots (targets `card:{scene}/{card_id}`). `render_evidence_clip` draws a card at the card's own size (`evidence_clip_layout.card_box`: landscape the right half of the safe area down to the captions, portrait the callout zone) as a **transparent ProRes 4444** clip, checked for an alpha channel (`graphics_render.check_probe(transparent=True)`).
+- **Motion** (`motion/src/evidence/Evidence.tsx`, `props.ts`, `server/schema.ts`): a card is the same composition with `resolved.card = {radius, fade_frames}`: a rounded panel on a transparent canvas that fades in and out. (*Deviation from the plan: no new engine, one flag.*)
+- **Render** (`story_render_plan.py`, `story_renders.py`, `jobs/render_story.py`): the frozen timeline has the optional key `evidence_cards` (id, scene, claim, times, frames, clip, box); a full render without a card clip is refused with a sentence, a scene render leaves the card out with the warning `card_without_clip` (*deviation: a warning, not a placeholder*); `render_story` lays each card over the shots it spans with the same `Overlay` path as motion callouts (`card_overlays`). A callout that starts inside a card is left out (the card span is a graphic span), with the usual `callout_dropped` warning.
+- **Board** (`story_pipeline_targets._evidence_notes`): notes for a piece shown as a card, a piece with no room, and a claim left out.
+
+*Checked.* Ruff check and format, `npm run lint` and `npm run typecheck` in `frontend/`, `npm run typecheck` in `motion/`. `place_cards` run on sample claims (room after the shot, no room, a late claim, two pieces). **A throwaway motion service** (own bundle in `/tmp`, own port, deleted afterwards) drew a card for 1920 x 1080 and 1080 x 1920 from a made-up page: the clip is ProRes with alpha and the frame count asked for, and the frame laid over a plain picture shows the rounded panel with the badge and the highlight. `render_commands.trim_args` with a card `Overlay` (starting at frame 30) laid it over a test clip correctly. `story_render_plan._card_entries` read back by `render_story.parse_timeline`'s `_parse_cards`, and `card_overlays` split a card over three shots.
+
+*Not checked.* No real planning call, no real card drawn from a real round, no full render of the Phase 10 project (needs the owner's go-ahead). **Landscape cards are small:** the card is half the width, so the quote is often under the readability floor (38 px at 1080); the clip then carries the `small_text` warning. The browser was not opened. The "Evidence to show" list of the shot plan panel does not mark cards yet (the board notes do). Staleness of a render when a card clip is drawn again is not listed (a card that changes follows from the shot plan going out of date).
+
+### EVD-012 — Source lines on graphic shots (narrowed)
+
+**Status:** In Progress
+
+A short text source line ("Source: Reuters, 3 Oct 2026") shown on a graphic shot while a claim whose first word falls on the graphic is spoken, when that claim has no evidence shot and no card. The graphic is never changed: the line is drawn as subtitle text in the top margin, outside the safe area. Text-only claims with no screenshot at all stay later work.
+
+**Completion notes (code done, real render left).** `services/evidence_source_lines.py` (pure): `place_lines(claims, slots, carded)` gives a source line to a claim whose first word is inside a graphic shot, that has no evidence shot and no card; at least 3 s inside the graphic, ending 0.15 s before it ends when there is room. The text is `Source: {publisher}, {date}` (`evidence_clips.source_line_text`). The frozen timeline has the optional key `source_lines` (scene, claim, times, text). `services/caption_ass.py` writes each as a `SourceLine` event (layer 2, style `SourceLine`, alignment 8, size 2.8 % of the shorter side, fades 200 ms) in the top margin, outside the safe area, so the graphic is never touched; text is cleaned like all subtitle text and cut at 90 characters. `render_story.write_subtitles` writes the file also when a render has only source lines. *Checked:* the ASS file for a 1920 x 1080 frame, and the line burned with libass over a test clip (it sits above the safe area, white with a black outline). *Not checked:* a real graphic shot with a real claim; the portrait frame was only checked by the numbers (a margin of 96 px against a line about 40 px tall).
+
+### EVD-016 — Split evidence shot when a callout lands on it
+
+**Status:** In Progress
+
+**Objective.** An evidence shot and a callout share the screen instead of the callout being dropped.
+
+**Scope.** `evidence_layout.split_shots` decides which evidence shots have a callout starting inside them (same phrase timing as `callout_render`). Those clips are drawn `split`: portrait puts the callout panel on top (30 %) and the evidence below (70 %); landscape puts the evidence on the left and the callout on the right, 50/50. The callout is kept and drawn in the callout panel. A callout whose component does not fit the panel falls back to the box callout (`callout_fallback`).
+
+**Completion notes (code done, real render left).**
+
+*What was built.*
+- **Decision** (`services/evidence_layout.py`, pure): `split_shots(callouts, shots, min_visible_ms)` returns the evidence shots with a callout that starts inside them and can stay up for `MIN_VISIBLE_MS` (1.2 s) before the shot ends; a section title never splits a shot. `shot_plans._split_shots` gives it the times `callout_render.timing_of` works out (the same phrase match as the render) from the words of the scene's take, for the callouts turned on in the current callout plan (`_current_callouts`: none when the plan is missing, being written, blocked or out of date). So the clip's layout is part of its look: `evidence_clip.inputs.layout = 'split'` and `inputs.panel = [x, y, w, h]` (`evidence_clips._LAYOUT_KEYS`, compared always, so a clip made before is not touched and a clip whose shot is no longer split is out of date).
+- **Panels** (`evidence_layout.panels`): portrait, callout panel on top (30 %, `PORTRAIT_CALLOUT_SHARE`) and evidence below (70 %); landscape, evidence left and callout right (50 / 50). A callout's zone (`callout_zone`): landscape has the size of the zone beside the presenter that callouts already have, portrait is the upper part of the callout panel.
+- **Clip**: `evidence_clip_layout.plan(..., panel=, panel_edge=)` plans the camera, badge and stage for the evidence panel only, above the part of the caption zone that falls in it; `render_evidence_clip` draws the full frame (H.264 as before). `Evidence.tsx` draws everything inside a clipped panel and a line (accent colour, 4 px) between the panels; the callout panel is the plain background.
+- **Callouts** (`callout_render.resolve(..., splits=)`, `zone_box/zone_rect/placement_of(..., split=True)`, `timing_of`): a callout that starts in a split shot is kept, laid out (box) or drawn (motion) in the callout panel, and ends with the shot; one that would run into a split shot ends 150 ms before it. A callout with a split shot but no callout in it gives the warning `evidence_split_empty`. The render plan treats a clip with `layout = 'split'` as a split span, not a graphic span (`EvidenceSource.split`; the timeline's `evidence` entry gets `layout: "split"`).
+
+*Checked.* Ruff, lint and both typechecks. `split_shots` on sample times (inside, too late in the shot, a title, before the shot). `callout_render.resolve` with `splits` for emphasis and number callouts in both orientations: the part is laid in the right half (x 1440 at 1920 x 1080) and in the top panel (y 109 at 1080 x 1920); a title is left out. A throwaway motion service drew a split shot in both orientations from a made-up page: the picture and highlight stay inside the evidence panel, the callout panel is empty background, the line is on the right edge (landscape) and the top edge (portrait).
+
+*Not checked.* No real render with a real callout in a split shot; the motion callout components were checked at their old zones only, so a component may draw badly in the new portrait zone (908 x 442 against 908 x 826). **The "falls back to a box callout if it does not fit" of the plan is only the existing fallback**: a callout that cannot be drawn is a box (`callout_fallback`); no new fit check was made for the panel zone. The callout panel of a shot whose callout is later left out for another reason is empty (the warning says so).
 
 ### EVD-013 — Data evidence (later)
 
@@ -1233,4 +1280,7 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-17 | EVD-006 | Completed | `import_evidence` job: reads the newest round's `results/` safely, runs checks 1 to 5 with the tool's quote rules (`pypdfium2` added to the backend), copies the files of usable pieces into `media/` under generated names (identical files are shared), stores `evidence_import` and `evidence_item` rows; Import button and report on the evidence panel. No migration. Checked end to end on a throwaway backend with real captures and six hand-broken cases; the real app is not rebuilt yet (new dependency) and the panel is not seen in the browser. |
 | 2026-11-17 | EVD-007 | Completed | Review of the newest import: `services/evidence_review.py`, `GET .../evidence/review`, `PUT .../review/claims/{claim_id}`, `POST .../review/done`, and the review in the evidence panel (claim cards, highlights drawn over the clean screenshot, context window, accept or reject, shown order, "No proof on screen"). Every change is an `evidence_review` version; "Review done" completes the `evidence` step. No migration. Checked end to end on a throwaway backend with real captures (decisions, reload, re-import, a re-captured piece, claims changed, evidence off). The real app is not rebuilt (EVD-006 is still waiting for it too) and the screen is not seen in the browser. |
 | 2026-11-17 | EVD-008 | Completed | The evidence clip: a `Evidence` composition in the motion service (camera from the whole screenshot to the quote, a highlight sweep in the accent colour, a source badge, the caption zone kept free), a new `POST /evidence-renders` route with a 32 MB body limit that takes the images as base64 (the motion service still has no network, volume or secrets), `services/evidence_clip_layout.py`, the `render_evidence_clip` job (checks the video with `ffprobe`), and on the review screen a readability warning and a "Preview video" button with the video and a caption-area switch. 6 s previews at 24 fps. No migration, no compose change. Checked on a throwaway backend with the motion service run locally, real captures (web and PDF, landscape and portrait), frames looked at, the small-text warning and the refusals. The real app is not rebuilt (the motion image must be rebuilt too) and the screen is not seen in the browser. |
+| 2026-11-17 | EVD-010 | Not Started | The owner watched the first real video: less evidence on screen than expected, because a graphic always wins a claim's words and callouts are hidden during every evidence shot. Result recorded in EVD-010. |
+| 2026-11-17 | EVD-011, EVD-012, EVD-016 | In Progress | Screen layouts decided with the owner: evidence cards over presenter and B-roll shots (EVD-011), source lines on graphic shots (EVD-012, narrowed), a split evidence shot when a callout lands on it (EVD-016, new). Code decides on read; the cut planning prompt is not touched. |
+| 2026-11-17 | EVD-011, EVD-012, EVD-016 | In Progress | Code done: migration 0099, `evidence_cards`, `evidence_source_lines`, `evidence_layout`, card and split modes in the motion `Evidence` composition, `evidence_cards` and `source_lines` in the frozen timeline, `SourceLine` in the ASS file, `splits` in `callout_render.resolve`. Checked on pure parts and throwaway motion renders; a real render of a real project needs the owner's go-ahead. |
 | 2026-11-17 | EVD-009 | In Progress | Evidence shots: the `evidence` shot type and code checks in cut planning (one shot per accepted piece in the owner's order, graphics kept whole, fixed leave-out codes, no reading rate), `evidence_clips` step, shot clips made by EVD-008's job, evidence clip as a shot of the render (callouts clear), board notes, "Evidence to show" list. No migration. Evidence-off prompts byte-identical (checked). Left: one real GLM planning call (owner's go-ahead) and a real render. |

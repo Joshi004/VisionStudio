@@ -64,6 +64,8 @@ WarningCode = Literal[
     "shot_placeholder",
     "dialogue_not_heard",
     "scene_start_unknown",
+    "card_without_clip",
+    "evidence_split_empty",
 ]
 
 

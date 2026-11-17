@@ -20,6 +20,8 @@ const BADGE_MUTED = "#C9D1DC";
 const BADGE_FADE_FRAMES = 8;
 // How much of the line's height the highlight reaches above and below the text, in output pixels.
 const HIGHLIGHT_PAD_PX = 2;
+// The line between the evidence panel and the callout panel of a split shot.
+const PANEL_LINE_PX = 4;
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -62,7 +64,11 @@ export function Evidence(props: GraphicInput) {
   const imageUrl = useBlobUrl(input.image);
   const contextUrl = useBlobUrl(input.context);
   const frame = useCurrentFrame();
-  const { width, height } = props;
+  // A split shot draws in its evidence panel: the camera has the panel's shape, so the picture's
+  // size is worked out from the panel and not from the frame.
+  const { panel } = resolved;
+  const width = panel === null ? props.width : panel.width;
+  const height = panel === null ? props.height : panel.height;
 
   const { start, end, timeline, accent } = resolved;
   const camera = cameraAt(frame, start, end, timeline.zoom_start, timeline.zoom_end);
@@ -95,8 +101,14 @@ export function Evidence(props: GraphicInput) {
   const { publisher, date, page } = resolved.badge;
   const meta = [date, page === null ? null : `p. ${page}`].filter((part) => part !== null).join("  ·  ");
 
-  return (
-    <AbsoluteFill style={{ background: resolved.background, overflow: "hidden" }}>
+  // An evidence card is a rounded panel on a transparent canvas that fades in and out at its ends.
+  const { card } = resolved;
+  const fadeIn = card === null || card.fade_frames === 0 ? 1 : clamp(frame / card.fade_frames, 0, 1);
+  const fadeOut =
+    card === null || card.fade_frames === 0 ? 1 : clamp((props.frames - 1 - frame) / card.fade_frames, 0, 1);
+
+  const content = (
+    <>
       {contextUrl !== null && resolved.context_box !== null && (
         <Img src={contextUrl} style={place(resolved.context_box)} />
       )}
@@ -176,6 +188,48 @@ export function Evidence(props: GraphicInput) {
           </span>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <AbsoluteFill
+      style={{
+        background: resolved.background,
+        overflow: "hidden",
+        // A card: the rounded panel is the whole canvas, so the corners outside it stay transparent.
+        ...(card === null
+          ? {}
+          : { borderRadius: card.radius, opacity: Math.min(fadeIn, fadeOut), isolation: "isolate" as const }),
+      }}
+    >
+      {panel === null ? (
+        content
+      ) : (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              left: panel.x,
+              top: panel.y,
+              width: panel.width,
+              height: panel.height,
+              overflow: "hidden",
+              background: resolved.background,
+            }}
+          >
+            {content}
+          </div>
+          <div
+            style={{
+              position: "absolute",
+              background: accent,
+              ...(panel.edge === "top"
+                ? { left: panel.x, top: panel.y - PANEL_LINE_PX / 2, width: panel.width, height: PANEL_LINE_PX }
+                : { left: panel.x + panel.width - PANEL_LINE_PX / 2, top: panel.y, width: PANEL_LINE_PX, height: panel.height }),
+            }}
+          />
+        </>
+      )}
     </AbsoluteFill>
   );
 }

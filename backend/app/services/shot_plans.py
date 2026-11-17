@@ -30,7 +30,7 @@ audio, and the planning target range of the duration policy (D-8). Code checks t
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import func, select
@@ -41,13 +41,19 @@ from app.db.models import Job, Project, SceneDiscovery, ShotPlan, SpeechUnits, S
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    callout_plan,
+    callout_plan_writer,
+    callout_render,
     cut_planning_writer,
     discovery,
     duration_policy,
     event_extraction_writer,
+    evidence_cards,
     evidence_claims,
+    evidence_layout,
     evidence_review,
     evidence_rounds,
+    evidence_source_lines,
     graphic_suggestions,
     h3_lengths,
     provenance,
@@ -145,6 +151,16 @@ class SceneEntry:
     # Whether generation may use this scene's shots, and why not when it may not.
     generation_ready: bool
     generation_blocked_reason: str | None
+    # Where evidence shows without a shot of its own (EVD-011, EVD-012), on this scene's
+    # timeline: cards over presenter and B-roll shots, the pieces that got no room for a card, and
+    # source lines on graphic shots. Worked out on read from the plan and the words of the take;
+    # empty unless the plan is current and the scene has claims with evidence to show.
+    cards: tuple[evidence_cards.Card, ...] = ()
+    unplaced_cards: tuple[evidence_cards.Unplaced, ...] = ()
+    source_lines: tuple[evidence_source_lines.SourceLine, ...] = ()
+    # The evidence shots of this scene drawn split with a callout (EVD-016): the callout ids that
+    # land in each shot, by shot id.
+    splits: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -218,6 +234,10 @@ class _Loaded:
     evidence: list[evidence_review.ShownClaim]
     # Why shots cannot be planned before the evidence is gathered (EVD-009), or None.
     evidence_problem: str | None
+    # The callouts that are turned on in the current callout plan (EVD-016), which decide the
+    # evidence shots that are drawn split. Empty unless the project has evidence and callouts on,
+    # and a callout plan that is current and not being written.
+    callouts: tuple[dict[str, Any], ...] = ()
 
 
 EVIDENCE_FIRST_MESSAGE: Final = (
@@ -256,6 +276,10 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         else:
             evidence_problem = EVIDENCE_FIRST_MESSAGE
 
+    callouts: tuple[dict[str, Any], ...] = ()
+    if evidence_claims.wanted(project) and callout_plan.wanted(project):
+        callouts = await _current_callouts(session, project)
+
     return _Loaded(
         story=project.script_text,
         bible=await story_bible.latest(session, project.id),
@@ -278,7 +302,24 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         ),
         evidence=evidence,
         evidence_problem=evidence_problem,
+        callouts=callouts,
     )
+
+
+async def _current_callouts(session: AsyncSession, project: Project) -> tuple[dict[str, Any], ...]:
+    """The callouts turned on in the callout plan a render would use: none when there is no plan,
+    it is being written, blocked or out of date (the render is refused then, so no shot is split
+    for it)."""
+    state = await callout_plan.state(session, project)
+    if (
+        state.latest is None
+        or state.blocked_reason is not None
+        or state.out_of_date
+        or (state.job is not None and state.job.status in store.ACTIVE_STATUSES)
+        or not isinstance(state.latest.content, dict)
+    ):
+        return ()
+    return tuple(callout_plan_writer.enabled_callouts(state.latest.content))
 
 
 def _scene_evidence(
@@ -1029,6 +1070,146 @@ def _evidence_reasons(
     return ["The evidence to show in this scene changed since these shots were planned."]
 
 
+def _claim_times(
+    loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock, lead_in_s: float
+) -> list[evidence_cards.ClaimTime]:
+    """The claims with evidence to show whose words are in this scene's take, placed on the
+    scene's timeline (`lead_in_s` after the start of the scene, like the shots)."""
+    found: list[evidence_cards.ClaimTime] = []
+    for claim in _scene_evidence(loaded, item, clock.words):
+        positions = [position for position in claim["words"] if 0 <= position < len(clock.words)]
+        if not positions or not claim["pieces"]:
+            continue
+        first = clock.words[min(positions)].get("start")
+        last = clock.words[max(positions)].get("end")
+        if not isinstance(first, int | float) or not isinstance(last, int | float):
+            continue
+        found.append(
+            evidence_cards.ClaimTime(
+                claim_id=str(claim["id"]),
+                text=str(claim["text"]),
+                pieces=tuple(claim["pieces"]),
+                first_s=round(lead_in_s + float(first), 3),
+                last_s=round(lead_in_s + float(last), 3),
+            )
+        )
+    return found
+
+
+def _evidence_overlays(
+    loaded: _Loaded,
+    item: dict[str, Any],
+    row: ShotPlan | None,
+    timeline: scene_timeline.SceneTimeline | None,
+    clock: take_timings.TakeClock | None,
+) -> tuple[
+    tuple[evidence_cards.Card, ...],
+    tuple[evidence_cards.Unplaced, ...],
+    tuple[evidence_source_lines.SourceLine, ...],
+]:
+    """The cards, the pieces without room for one, and the source lines of a scene with a current
+    cut plan (EVD-011, EVD-012). Nothing for any other scene, and nothing without evidence."""
+    nothing: tuple[Any, Any, Any] = ((), (), ())
+    if not loaded.evidence or row is None or timeline is None or clock is None or not clock.words:
+        return nothing
+    if not cut_planning_writer.is_cut_plan(row.content):
+        return nothing
+    lead_in = float(row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"])
+    claims = _claim_times(loaded, item, clock, lead_in)
+    if not claims:
+        return nothing
+    spans = {span.shot_id: span for span in timeline.shots}
+    slots: list[evidence_cards.Slot] = []
+    for shot in row.content["shots"]:
+        span = spans.get(shot["id"])
+        if span is None:
+            continue
+        about = shot.get("evidence")
+        if shot.get("type") != scene_timeline.EVIDENCE_SHOT_TYPE or not isinstance(about, dict):
+            about = {}
+        slots.append(
+            evidence_cards.Slot(
+                shot_id=str(shot["id"]),
+                type=str(shot.get("type")),
+                start_s=span.start_s,
+                end_s=span.end_s,
+                claim_id=about.get("claim_id"),
+                item_key=about.get("item_key"),
+            )
+        )
+    placement = evidence_cards.place_cards(claims, slots, timeline.total_s)
+    lines = evidence_source_lines.place_lines(
+        claims, slots, {card.claim_id for card in placement.cards}
+    )
+    return placement.cards, placement.unplaced, lines
+
+
+def _split_shots(
+    loaded: _Loaded,
+    item: dict[str, Any],
+    row: ShotPlan | None,
+    timeline: scene_timeline.SceneTimeline | None,
+    clock: take_timings.TakeClock | None,
+) -> dict[str, tuple[str, ...]]:
+    """The evidence shots of a scene with a current cut plan that a callout lands in (EVD-016),
+    with the callouts, by shot id. The callouts are placed with the times `callout_render` uses,
+    from the words of the scene's take. Empty without callouts or evidence shots."""
+    if not loaded.callouts or row is None or timeline is None or clock is None or not clock.words:
+        return {}
+    if not cut_planning_writer.is_cut_plan(row.content):
+        return {}
+    scene_id = str(item["id"])
+    mine = [callout for callout in loaded.callouts if callout.get("scene_id") == scene_id]
+    evidence_ids = {
+        str(shot["id"])
+        for shot in row.content["shots"]
+        if shot.get("type") == scene_timeline.EVIDENCE_SHOT_TYPE
+    }
+    shots = [
+        evidence_layout.ShotAt(span.shot_id, round(span.start_s * 1000), round(span.end_s * 1000))
+        for span in timeline.shots
+        if span.shot_id in evidence_ids
+    ]
+    if not mine or not shots:
+        return {}
+    spans = {span.unit_id: span for span in clock.spans}
+    units: dict[str, callout_render.CalloutUnit] = {}
+    for placed in timeline.units:
+        span = spans.get(placed.unit_id)
+        if span is None:
+            continue
+        units[placed.unit_id] = callout_render.CalloutUnit(
+            scene_id=scene_id,
+            unit_id=placed.unit_id,
+            start_ms=round(placed.start_s * 1000),
+            end_ms=round(placed.end_s * 1000),
+            words=tuple(
+                (
+                    str(word["text"]),
+                    float(word["start"]) - span.start,
+                    float(word["end"]) - span.start,
+                )
+                for word in clock.words[span.first_word : span.last_word + 1]
+            ),
+        )
+    total_ms = round(timeline.total_s * 1000)
+    times: list[evidence_layout.CalloutAt] = []
+    for callout in mine:
+        unit = units.get(str(callout.get("unit_id")))
+        if unit is None:
+            continue
+        start_ms, end_ms = callout_render.timing_of(callout, unit, total_ms)
+        times.append(
+            evidence_layout.CalloutAt(
+                callout_id=str(callout["id"]),
+                kind=str(callout["type"]),
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
+        )
+    return evidence_layout.split_shots(times, shots, callout_render.MIN_VISIBLE_MS)
+
+
 def _out_of_date_reasons(
     row: ShotPlan,
     loaded: _Loaded,
@@ -1341,6 +1522,16 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             blocked_reason = "The shots are already being planned."
         timeline = timelines[item["id"]]
         generation_blocked = _generation_refusal(status, active, timeline)
+        cards, unplaced_cards, source_lines = (
+            _evidence_overlays(loaded, item, row, timeline, loaded.clocks.get(item["id"]))
+            if status == "planned"
+            else ((), (), ())
+        )
+        splits = (
+            _split_shots(loaded, item, row, timeline, loaded.clocks.get(item["id"]))
+            if status == "planned"
+            else {}
+        )
         entries.append(
             SceneEntry(
                 item=item,
@@ -1355,6 +1546,10 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                 replan_attempt=_replan_attempt(row, job, active),
                 generation_ready=generation_blocked is None,
                 generation_blocked_reason=generation_blocked,
+                cards=cards,
+                unplaced_cards=unplaced_cards,
+                source_lines=source_lines,
+                splits=splits,
             )
         )
     policy = loaded.policy

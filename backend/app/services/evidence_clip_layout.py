@@ -28,7 +28,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Any, Final
 
-from app.services import graphics_resolve
+from app.services import evidence_layout, graphics_resolve
 
 Box = tuple[float, float, float, float]
 
@@ -55,6 +55,19 @@ SWEEP_S: Final = 1.2
 MIN_HOLD_S: Final = 1.0
 # The length of a preview from the review screen (EVD-008).
 PREVIEW_S: Final = 6.0
+
+# An evidence card (EVD-011) is the same clip drawn on a canvas the size of the card, which sits in
+# the output frame at `card_box`. The picture keeps `CARD_PAD_RATIO` of the card's shorter side
+# free, the corners are `CARD_RADIUS_RATIO` of the frame's shorter side, and the card fades in and
+# out over `CARD_FADE_S`.
+CARD_PAD_RATIO: Final = 0.03
+CARD_RADIUS_RATIO: Final = 0.02
+CARD_FADE_S: Final = 0.25
+MIN_CARD_SIDE_PX: Final = 64
+# Portrait: the card is in the callout zone (`callout_render.zone_box`): from 12 % of the height
+# down to 55 % of it, or to the captions when they are higher.
+PORTRAIT_CARD_TOP: Final = 0.12
+PORTRAIT_CARD_BOTTOM: Final = 0.55
 
 
 @dataclass(frozen=True)
@@ -101,6 +114,18 @@ class ClipPlan:
     context_crop: Box | None
     text_height_px: float
     min_text_height_px: float
+    # An evidence card (EVD-011): `width` and `height` are the card's own size, and the corners of
+    # its panel have this radius in pixels.
+    card: bool = False
+    card_radius: int = 0
+    # A split evidence shot (EVD-016): `width` and `height` are the evidence panel's own size,
+    # `panel` is where the panel sits on the output frame and `panel_edge` the side that touches
+    # the callout panel. `safe` and `caption` are then the panel's own safe area and the part of
+    # the caption zone that falls in it (None when none does).
+    panel: tuple[int, int, int, int] | None = None
+    panel_edge: str | None = None
+    safe: dict[str, int] | None = None
+    caption: dict[str, int] | None = None
 
     @property
     def readable(self) -> bool:
@@ -163,13 +188,14 @@ def badge_box(width: int, height: int, safe: dict[str, int]) -> Box:
     )
 
 
-def stage_box(width: int, height: int, safe: dict[str, int], caption: dict[str, int]) -> Box:
-    """Where the quote ends up: inside the safe area, below the badge, above the captions."""
+def stage_box(width: int, height: int, safe: dict[str, int], caption: dict[str, int] | None) -> Box:
+    """Where the quote ends up: inside the safe area, below the badge, above the captions. A card
+    has no captions (`caption` None): the stage reaches the bottom of its safe area."""
     unit = min(width, height)
     gap = round(STAGE_GAP_RATIO * unit)
     badge = badge_box(width, height, safe)
     top = badge[1] + badge[3] + gap
-    bottom = caption["top"] - gap
+    bottom = safe["bottom"] if caption is None else caption["top"] - gap
     return (
         float(safe["left"]),
         float(top),
@@ -241,9 +267,86 @@ def timeline(frames: int, fps: int) -> Timeline:
     return Timeline(zoom_start, zoom_end, sweep_start, min(sweep_end, frames - 1))
 
 
-def plan(geometry: Geometry, width: int, height: int, fps: int, frames: int) -> ClipPlan:
-    """The camera, the stage, the timeline and the readability of a clip of this size. Pure."""
+def _even(value: float) -> int:
+    return max(MIN_CARD_SIDE_PX, round(value / 2) * 2)
+
+
+def card_box(width: int, height: int) -> tuple[int, int, int, int]:
+    """Where an evidence card sits on the output frame, `(x, y, width, height)` in pixels with
+    even sizes (EVD-011). Landscape: the right half of the safe area, from its top down to the
+    captions (the presenter is expected on the left, as for callouts). Portrait: the full width of
+    the safe area, in the callout zone. Pure.
+    """
     safe, caption = safe_and_caption(width, height)
+    gap = round(STAGE_GAP_RATIO * min(width, height))
+    bottom = caption["top"] - gap
+    if width > height:
+        left = safe["left"] + (safe["right"] - safe["left"]) // 2
+        top = safe["top"]
+        right = safe["right"]
+    else:
+        left = safe["left"]
+        top = round(PORTRAIT_CARD_TOP * height)
+        bottom = min(bottom, round(PORTRAIT_CARD_BOTTOM * height))
+        right = safe["right"]
+    card_w = min(_even(right - left), width // 2 * 2)
+    card_h = min(_even(bottom - top), height // 2 * 2)
+    x = max(0, min(left, width - card_w))
+    y = max(0, min(top, height - card_h))
+    return x, y, card_w, card_h
+
+
+def split_panel(width: int, height: int) -> tuple[int, int, int, int]:
+    """Where the evidence panel of a split shot sits on the output frame (EVD-016)."""
+    return evidence_layout.panels(width, height).evidence
+
+
+def _panel_caption(
+    frame: tuple[int, int], panel: tuple[int, int, int, int]
+) -> dict[str, int] | None:
+    """The part of the frame's caption zone that falls in the panel, in the panel's own pixels, or
+    None when the captions are not over the panel."""
+    zone = graphics_resolve.caption_zone(frame[0], frame[1])
+    top, bottom = zone["top"] - panel[1], zone["bottom"] - panel[1]
+    if bottom <= 0 or top >= panel[3]:
+        return None
+    return {"top": max(0, top), "bottom": min(panel[3], bottom)}
+
+
+def card_fade_frames(fps: int) -> int:
+    return round(CARD_FADE_S * fps)
+
+
+def card_safe(width: int, height: int) -> dict[str, int]:
+    """The safe area of a card's own canvas: the picture and the badge stay inside it."""
+    pad = round(CARD_PAD_RATIO * min(width, height))
+    return {"left": pad, "top": pad, "right": width - pad, "bottom": height - pad}
+
+
+def plan(
+    geometry: Geometry,
+    width: int,
+    height: int,
+    fps: int,
+    frames: int,
+    *,
+    card: bool = False,
+    frame: tuple[int, int] | None = None,
+    panel: tuple[int, int, int, int] | None = None,
+    panel_edge: str | None = None,
+) -> ClipPlan:
+    """The camera, the stage, the timeline and the readability of a clip of this size. For a card
+    (`card`), `width` and `height` are the card's own size and `frame` is the output frame it is
+    laid on: the text is judged against the frame's shorter side, and there are no captions in the
+    card. For a split shot (`panel`, with `frame`), `width` and `height` are the evidence panel's
+    size and the picture is drawn only inside the panel, above the captions that fall in it.
+    Pure."""
+    if panel is not None and frame is not None:
+        safe, caption = card_safe(width, height), _panel_caption(frame, panel)
+    elif card:
+        safe, caption = card_safe(width, height), None
+    else:
+        safe, caption = safe_and_caption(width, height)
     stage = stage_box(width, height, safe, caption)
     end, zoom = end_camera(geometry, width, height, stage)
     start = start_camera(geometry, width, height, end)
@@ -279,7 +382,13 @@ def plan(geometry: Geometry, width: int, height: int, fps: int, frames: int) -> 
         timeline=timeline(frames, fps),
         context_crop=crop,
         text_height_px=round(_median_line_height(geometry.rects) * zoom, 1),
-        min_text_height_px=round(MIN_TEXT_HEIGHT_RATIO * min(width, height), 1),
+        min_text_height_px=round(MIN_TEXT_HEIGHT_RATIO * min(frame or (width, height)), 1),
+        card=card,
+        card_radius=round(CARD_RADIUS_RATIO * min(frame or (width, height))) if card else 0,
+        panel=panel,
+        panel_edge=panel_edge,
+        safe=safe if panel is not None else None,
+        caption=caption if panel is not None else None,
     )
 
 

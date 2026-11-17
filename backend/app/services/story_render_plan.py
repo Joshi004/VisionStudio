@@ -160,6 +160,8 @@ PLACEHOLDER_EVIDENCE_FILE_MISSING: Final = "Evidence clip file missing"
 PLACEHOLDER_CLIP_TOO_SHORT: Final = "Clip too short"
 PLACEHOLDER_GRAPHIC_TOO_SHORT: Final = "Graphic too short"
 PLACEHOLDER_EVIDENCE_TOO_SHORT: Final = "Evidence clip too short"
+# An evidence card (EVD-011) with no clip is left out of a scene render, with this warning code.
+CARD_WITHOUT_CLIP: Final = "card_without_clip"
 
 # A music sound cut by the edge of a scene render fades over this long (a starting value, not yet
 # tuned by ear).
@@ -216,6 +218,48 @@ class EvidenceSource:
     path: str
     frame_count: int | None
     file_exists: bool
+    # True for a clip drawn split with a callout (EVD-016): callouts that start in it are kept.
+    split: bool = False
+
+
+@dataclass(frozen=True)
+class CardClipSource:
+    """The clip of an evidence card (EVD-011): the newest ready clip made for it, a transparent
+    ProRes video at the card's own size."""
+
+    clip_id: int
+    path: str
+    frame_count: int | None
+    file_exists: bool
+
+
+@dataclass(frozen=True)
+class CardSource:
+    """An evidence card over the shots of a scene (EVD-011): `start_s` and `end_s` sit on the
+    scene's timeline like a shot's, `(x, y, width, height)` is where it is laid on the frame, and
+    `clip` is None while it has no clip."""
+
+    card_id: str
+    claim_id: str
+    item_key: str
+    start_s: float
+    end_s: float
+    x: int
+    y: int
+    width: int
+    height: int
+    clip: CardClipSource | None
+
+
+@dataclass(frozen=True)
+class SourceLineSource:
+    """A source line on a graphic shot (EVD-012), on the scene's timeline."""
+
+    claim_id: str
+    item_key: str
+    start_s: float
+    end_s: float
+    text: str
 
 
 @dataclass(frozen=True)
@@ -310,6 +354,10 @@ class SceneSource:
     units: list[UnitSource]
     # Set for every scene of a continuous explainer, and only then.
     voice: VoiceSource | None = None
+    # The evidence cards over its shots and the source lines on its graphic shots (EVD-011,
+    # EVD-012). Empty without evidence.
+    cards: list[CardSource] = field(default_factory=list)
+    source_lines: list[SourceLineSource] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -959,6 +1007,94 @@ def build_timing_plan(
     )
 
 
+def _card_entries(
+    scenes: list[SceneSource],
+    fps: int,
+    total_frames: int,
+    *,
+    placeholders: bool,
+    warnings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The evidence cards of the scenes as timeline entries (EVD-011), and the cards that have no
+    usable clip. A card is laid over whatever shots it spans, so it only needs a frame range of
+    the story and a clip with at least that many frames (one short is allowed, as for a shot). In
+    a scene render a card without a clip is left out with a warning; in a full render it is
+    returned as missing, and the plan refuses.
+    """
+    entries: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for scene in scenes:
+        if scene.story_start_s is None:
+            continue
+        for card in scene.cards:
+            start_ms = _ms(scene.story_start_s + card.start_s)
+            end_ms = _ms(scene.story_start_s + card.end_s)
+            start_frame = frame_at(start_ms, fps)
+            frames = min(frame_at(end_ms, fps), total_frames) - start_frame
+            if frames < 1:
+                continue
+            label = f"{card.card_id} of scene {scene.index}"
+            clip = card.clip
+            if (
+                clip is None
+                or not clip.file_exists
+                or clip.frame_count is None
+                or clip.frame_count < frames - 1
+            ):
+                if not placeholders:
+                    missing.append(label)
+                    continue
+                warnings.append(
+                    {
+                        "code": CARD_WITHOUT_CLIP,
+                        "scene_id": scene.scene_id,
+                        "shot_id": None,
+                        "message": f"The evidence card {label} is left out: it has no clip yet.",
+                    }
+                )
+                continue
+            entries.append(
+                {
+                    "id": f"{scene.scene_id}/{card.card_id}",
+                    "scene_id": scene.scene_id,
+                    "claim_id": card.claim_id,
+                    "item_key": card.item_key,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "start_frame": start_frame,
+                    "frames": frames,
+                    "clip_id": clip.clip_id,
+                    "path": clip.path,
+                    "clip_frames": clip.frame_count,
+                    "x": card.x,
+                    "y": card.y,
+                    "width": card.width,
+                    "height": card.height,
+                }
+            )
+    return entries, missing
+
+
+def _source_line_entries(scenes: list[SceneSource]) -> list[dict[str, Any]]:
+    """The source lines of the scenes as timeline entries (EVD-012), in story order."""
+    entries: list[dict[str, Any]] = []
+    for scene in scenes:
+        if scene.story_start_s is None:
+            continue
+        for line in scene.source_lines:
+            entries.append(
+                {
+                    "scene_id": scene.scene_id,
+                    "claim_id": line.claim_id,
+                    "item_key": line.item_key,
+                    "start_ms": _ms(scene.story_start_s + line.start_s),
+                    "end_ms": _ms(scene.story_start_s + line.end_s),
+                    "text": line.text,
+                }
+            )
+    return entries
+
+
 def _build(
     scenes: list[SceneSource],
     *,
@@ -991,8 +1127,10 @@ def _build(
     too_short: list[str] = []
     graphics_too_short: list[str] = []
     evidence_too_short: list[str] = []
-    # The graphic and the evidence shots, in ms: no callout is on screen over them.
+    # The graphic and the evidence shots, in ms: no callout is on screen over them. The evidence
+    # shots drawn split (EVD-016) are apart: a callout may start in them.
     graphic_spans: list[tuple[int, int]] = []
+    split_spans: list[tuple[int, int]] = []
     narration: list[dict[str, Any]] = []
     narration_spans: list[tuple[float, float]] = []
     dialogue_spans: list[tuple[float, float]] = []
@@ -1112,7 +1250,7 @@ def _build(
                 # stay off it (EVD-009).
                 evidence = shot.evidence
                 assert evidence is not None  # `_check_takes` made sure
-                graphic_spans.append((start_ms, end_ms))
+                (split_spans if evidence.split else graphic_spans).append((start_ms, end_ms))
                 shots.append(
                     {
                         "scene_id": scene.scene_id,
@@ -1131,7 +1269,10 @@ def _build(
                         "voice_window": None,
                         "duck": [],
                         "bed_duck": [],
-                        "evidence": {"clip_id": evidence.clip_id},
+                        "evidence": {
+                            "clip_id": evidence.clip_id,
+                            **({"layout": "split"} if evidence.split else {}),
+                        },
                     }
                 )
                 continue
@@ -1377,6 +1518,19 @@ def _build(
                     BED_SHOT_RAMP_S,
                 )
 
+    # The evidence cards (EVD-011) are laid over the shots: a callout stays off them, as off a
+    # graphic or an evidence shot. The source lines (EVD-012) sit in the top margin.
+    card_entries, cards_missing = _card_entries(
+        scenes, fps, cursor, placeholders=placeholders, warnings=warnings
+    )
+    if cards_missing:
+        raise RenderPlanError(
+            f"These evidence cards have no clip yet: {_named(cards_missing)}. Draw the evidence "
+            "shots first (the step makes the cards too)."
+        )
+    graphic_spans.extend((entry["start_ms"], entry["end_ms"]) for entry in card_entries)
+    source_line_entries = _source_line_entries(scenes)
+
     total_ms = _ms(cursor / fps)
     callouts_entry: dict[str, Any] | None = None
     hidden: list[tuple[int, int]] = []
@@ -1393,6 +1547,7 @@ def _build(
             height,
             measure or font_metrics.measure,
             graphics=graphic_spans,
+            splits=split_spans,
         )
         callouts_entry = callout_render.track_dict(resolution.track)
         callouts_entry["plan_id"] = callouts.plan_id
@@ -1442,6 +1597,9 @@ def _build(
         "music": music_entry,
         "captions": captions_entry,
         "callouts": callouts_entry,
+        # Only a render with evidence cards or source lines has these keys (EVD-011, EVD-012).
+        **({"evidence_cards": card_entries} if card_entries else {}),
+        **({"source_lines": source_line_entries} if source_line_entries else {}),
         "master": master(mix),
         "constants": constants(mix),
         "warnings": warnings,
@@ -1556,6 +1714,13 @@ def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> Non
         for word in group["words"]:
             word["start_ms"] = earlier(word["start_ms"])
             word["end_ms"] = earlier(word["end_ms"])
+    for card in timeline.get("evidence_cards", []):
+        card["start_frame"] -= first_frame
+        card["start_ms"] = earlier(card["start_ms"])
+        card["end_ms"] = earlier(card["end_ms"])
+    for line in timeline.get("source_lines", []):
+        line["start_ms"] = earlier(line["start_ms"])
+        line["end_ms"] = earlier(line["end_ms"])
     callouts = timeline["callouts"]
     for entry in (callouts or {}).get("entries", []):
         entry["start_ms"] = earlier(entry["start_ms"])

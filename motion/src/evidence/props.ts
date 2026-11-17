@@ -26,6 +26,15 @@ export type EvidenceResolved = {
   timeline: { zoom_start: number; zoom_end: number; sweep_start: number; sweep_end: number };
   badge_box: Box;
   badge: { publisher: string; date: string | null; page: number | null };
+  // Only for an evidence card (EVD-011): the clip is a transparent canvas the size of the card, with a
+  // rounded panel that fills it, and it fades in and out over `fade_frames` at each end. Without it
+  // the clip is a full-frame evidence shot on `background`.
+  card: { radius: number; fade_frames: number } | null;
+  // Only for a split evidence shot (EVD-016): the picture, the badge and the highlight are drawn in
+  // the evidence panel `[x, y, width, height]` of the frame, in the panel's own pixels, and the rest
+  // of the frame (the callout panel) is the background. `edge` is the side of the evidence panel that
+  // touches the callout panel, where a line is drawn.
+  panel: { x: number; y: number; width: number; height: number; edge: "top" | "right" } | null;
 };
 
 export type EvidenceInput = { image: EvidenceImage; context: EvidenceImage | null };
@@ -119,6 +128,39 @@ export function readEvidence(props: GraphicInput): Evidence {
   const dateRaw = badge["date"];
   const input = record(props.input, "input");
 
+  let card: EvidenceResolved["card"] = null;
+  if (raw["card"] !== undefined && raw["card"] !== null) {
+    const cardRaw = record(raw["card"], "card");
+    const radius = Number(cardRaw["radius"]);
+    const fade = whole(cardRaw["fade_frames"], "card.fade_frames");
+    if (!Number.isFinite(radius) || radius < 0) throw new Error("The evidence card's radius must be 0 or more.");
+    if (fade < 0 || fade * 2 >= props.frames) throw new Error("The evidence card's fades do not fit its length.");
+    card = { radius, fade_frames: fade };
+  }
+
+  let panel: EvidenceResolved["panel"] = null;
+  if (raw["panel"] !== undefined && raw["panel"] !== null) {
+    const panelRaw = record(raw["panel"], "panel");
+    const x = whole(panelRaw["x"], "panel.x");
+    const y = whole(panelRaw["y"], "panel.y");
+    const panelWidth = whole(panelRaw["width"], "panel.width");
+    const panelHeight = whole(panelRaw["height"], "panel.height");
+    const edge = panelRaw["edge"];
+    if (edge !== "top" && edge !== "right") throw new Error("The evidence panel's edge must be top or right.");
+    if (
+      x < 0 ||
+      y < 0 ||
+      panelWidth < 2 ||
+      panelHeight < 2 ||
+      x + panelWidth > props.width ||
+      y + panelHeight > props.height
+    ) {
+      throw new Error("The evidence panel does not fit the frame.");
+    }
+    if (card !== null) throw new Error("An evidence card cannot be split.");
+    panel = { x, y, width: panelWidth, height: panelHeight, edge };
+  }
+
   const resolved: EvidenceResolved = {
     accent: colour(raw["accent"], "accent"),
     background: colour(raw["background"], "background"),
@@ -142,6 +184,8 @@ export function readEvidence(props: GraphicInput): Evidence {
       date: typeof dateRaw === "string" && dateRaw !== "" ? dateRaw : null,
       page: typeof pageRaw === "number" && Number.isInteger(pageRaw) ? pageRaw : null,
     },
+    card,
+    panel,
   };
 
   const contextRaw = input["context"];

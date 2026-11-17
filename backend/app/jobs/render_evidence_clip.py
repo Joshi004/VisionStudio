@@ -1,7 +1,8 @@
 """The `render_evidence_clip` job: the video of one piece of evidence, zoomed to its quote (EVD-008,
 `Evidence_layer_implementation_phases.md` §4.7).
 
-The input is `{evidence_clip_id, preview_item_id}`. The `evidence_clip` row says what is drawn: the
+The input is `{evidence_clip_id, preview_item_id}` (a shot clip: `shot_clip_ref`, a card:
+`card_clip_ref`). The `evidence_clip` row says what is drawn: the
 piece (`item_id`), the size, frame rate and length (`inputs`) and the highlight's colour. EVD-009
 makes the exact-length clips of evidence shots with this same job.
 
@@ -13,7 +14,10 @@ makes the exact-length clips of evidence shots with this same job.
    `/evidence-renders` route: the motion service gets no volume, no internet and no secrets.
 3. The motion service draws the video, and it is downloaded.
 4. `ffprobe` checks it: the exact frame count, the size, the frame rate, H.264 and `yuv420p`. Any
-   difference fails the job. The file is not kept.
+   difference fails the job. The file is not kept. An evidence card (EVD-011, `purpose` `card`) is
+   drawn at the card's own size as a transparent ProRes 4444 clip instead, and checked for an
+   alpha channel. A split evidence shot (EVD-016, `inputs.layout` `split`) is planned for its
+   evidence panel (`inputs.panel`) and drawn inside it, on the full frame.
 5. The file is stored, and the clip gets its path, its SHA-256, its frame count, its metrics (the
    quote's text height on the frame among them) and its warnings (`small_text` when the quote is
    too small to read).
@@ -47,6 +51,7 @@ from app.providers import motion_renderer
 from app.services import (
     evidence_clip_layout,
     evidence_clips,
+    evidence_layout,
     ffmpeg,
     graphics_render,
 )
@@ -89,6 +94,16 @@ class _Plan:
     badge: dict[str, Any]
     image_path: str
     context_path: str | None
+    # An evidence card (EVD-011): `width` and `height` are the card's own size, and `frame` is the
+    # output frame it is laid on. None for a preview and a shot clip.
+    frame: tuple[int, int] | None = None
+    # A split evidence shot (EVD-016): the evidence panel on the output frame, `(x, y, width,
+    # height)`. `width` and `height` stay the output frame's size, which the video has.
+    panel: tuple[int, int, int, int] | None = None
+
+    @property
+    def card(self) -> bool:
+        return self.frame is not None
 
 
 class RenderEvidenceClipHandler(JobHandler):
@@ -137,7 +152,28 @@ class RenderEvidenceClipHandler(JobHandler):
         geometry = evidence_clip_layout.geometry_of(plan.capture)
         if geometry is None:
             raise RenderFailed("The piece of evidence has no usable position of its quote.")
-        layout = evidence_clip_layout.plan(geometry, plan.width, plan.height, plan.fps, plan.frames)
+        if plan.panel is not None:
+            # The picture is planned for the evidence panel and drawn inside it (EVD-016).
+            layout = evidence_clip_layout.plan(
+                geometry,
+                plan.panel[2],
+                plan.panel[3],
+                plan.fps,
+                plan.frames,
+                frame=(plan.width, plan.height),
+                panel=plan.panel,
+                panel_edge=evidence_layout.panels(plan.width, plan.height).edge,
+            )
+        else:
+            layout = evidence_clip_layout.plan(
+                geometry,
+                plan.width,
+                plan.height,
+                plan.fps,
+                plan.frames,
+                card=plan.card,
+                frame=plan.frame,
+            )
 
         # The service's versions go with the metrics, and an unreachable service is reported
         # now, before anything else is done.
@@ -152,7 +188,9 @@ class RenderEvidenceClipHandler(JobHandler):
             layout, accent=plan.accent, badge=plan.badge, context_box=pictures.context_box
         )
 
-        video = storage.new_temp_path("mp4")
+        # A card is a transparent ProRes clip, like a callout; everything else is H.264.
+        extension = "mov" if plan.card else "mp4"
+        video = storage.new_temp_path(extension)
         temp_paths.append(video)
         body = graphics_render.render_body(
             ENGINE,
@@ -163,6 +201,7 @@ class RenderEvidenceClipHandler(JobHandler):
             resolved=resolved,
             input={"image": pictures.image, "context": pictures.context},
             code=None,
+            encoding=graphics_render.CALLOUT_ENCODING if plan.card else None,
         )
         render_s = await motion_draw.draw_in_motion(
             job_id,
@@ -178,13 +217,19 @@ class RenderEvidenceClipHandler(JobHandler):
         if probe is None or probe.frame_count is None:
             raise RenderFailed("The rendered video could not be read.")
         checks, mismatches = graphics_render.check_probe(
-            probe, width=plan.width, height=plan.height, fps=plan.fps, frames=plan.frames
+            probe,
+            width=plan.width,
+            height=plan.height,
+            fps=plan.fps,
+            frames=plan.frames,
+            transparent=plan.card,
         )
         metrics: dict[str, Any] = {
             "engine": ENGINE,
             "composition": COMPOSITION,
             "text_height_px": layout.text_height_px,
             "min_text_height_px": layout.min_text_height_px,
+            "layout": evidence_clips.LAYOUT_SPLIT if plan.panel is not None else "full",
             "zoom": round(layout.zoom, 4),
             "picture_bytes": pictures.base64_bytes,
             "context_sent": pictures.context is not None,
@@ -198,7 +243,9 @@ class RenderEvidenceClipHandler(JobHandler):
             "codec": probe.codec_name,
             "pix_fmt": probe.pix_fmt,
             "checks": checks,
-            "encoding": dict(graphics_render.ENCODING),
+            "encoding": dict(
+                graphics_render.CALLOUT_ENCODING if plan.card else graphics_render.ENCODING
+            ),
             "versions": versions,
         }
         if mismatches:
@@ -208,7 +255,7 @@ class RenderEvidenceClipHandler(JobHandler):
         warnings = [warning] if warning is not None else []
         await phase_writer.note(job_id, phases.SAVING_GRAPHIC)
         temp = await storage.describe_temp(video)
-        stored = await storage.save(temp, plan.project_id, "mp4")
+        stored = await storage.save(temp, plan.project_id, extension)
         await _save(
             job_id,
             plan.clip_id,
@@ -280,6 +327,30 @@ async def _plan(clip_id: int) -> _Plan:
             raise RenderFailed("The piece of evidence this clip shows is gone.")
         inputs = clip.inputs if isinstance(clip.inputs, dict) else {}
         accent = inputs.get("accent")
+        frame: tuple[int, int] | None = None
+        if clip.purpose == evidence_clips.PURPOSE_CARD:
+            size = inputs.get("frame")
+            if (
+                not isinstance(size, list)
+                or len(size) != 2
+                or not all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in size)
+            ):
+                raise RenderFailed("The evidence card does not say the frame it is laid on.")
+            frame = (size[0], size[1])
+        panel: tuple[int, int, int, int] | None = None
+        if inputs.get("layout") == evidence_clips.LAYOUT_SPLIT:
+            raw_panel = inputs.get("panel")
+            if (
+                not isinstance(raw_panel, list)
+                or len(raw_panel) != 4
+                or not all(
+                    isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in raw_panel
+                )
+                or raw_panel[2] < 1
+                or raw_panel[3] < 1
+            ):
+                raise RenderFailed("The split evidence shot does not say its panel.")
+            panel = (raw_panel[0], raw_panel[1], raw_panel[2], raw_panel[3])
         if not item.usable or not item.image_path:
             raise RenderFailed("The piece of evidence has no picture to draw.")
         try:
@@ -295,6 +366,8 @@ async def _plan(clip_id: int) -> _Plan:
                 badge=evidence_clips.badge_of(item),
                 image_path=item.image_path,
                 context_path=item.context_path,
+                frame=frame,
+                panel=panel,
             )
         except (KeyError, TypeError, ValueError):
             raise RenderFailed("The evidence clip does not say its size and length.") from None
