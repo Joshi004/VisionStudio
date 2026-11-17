@@ -144,6 +144,8 @@ create project (explainer, continuous voice, evidence on)
 
 Changes to `services/story_pipeline.STEPS` (step keys and labels are suggestions; planning decides the final names):
 
+- **`evidence_claims`**, "Propose the evidence claims" (story-wide, no needs; added by EVD-002). It asks GLM once for more claims when GLM has never answered for the project (done once an `ai` claim list version exists), and is skipped as complete when evidence does not apply (EV-1, EV-2). Asking again is the owner's click. EVD-003's `evidence` step should need it.
+
 - **`evidence`**, "Gather the evidence" (story-wide, EVD-003). It needs no model step: it works from the saved script and the claim list. It is complete when the newest round has been imported and reviewed, and the claim list has not changed since that round's brief. It is skipped as complete when evidence does not apply (EV-1, EV-2) and, **planning decides** in EVD-003, when the claim list is empty.
 - **`shot_plans`** gains `evidence` in its needs (EVD-003).
 - **`evidence_clips`**, "Draw the evidence shots" (per scene, EVD-009). It needs `shot_plans` and makes one clip per evidence shot at the shot's exact length. It is skipped as complete when evidence does not apply.
@@ -309,7 +311,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | STOR-003 | Remove the old media copy from the volume | Owner, later | STOR-002 | Completed |
 | STOR-004 | Database snapshots in the files folder | Code, optional | STOR-001 | Completed |
 | EVD-001 | Evidence switch, tables and job types | Code | — | Completed |
-| EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Not Started |
+| EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Completed |
 | EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Not Started |
 | EVD-004 | The capture tool | Code (Mac) | — | Not Started |
 | EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | Not Started |
@@ -331,7 +333,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 4 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-002, EVD-004.
+**Progress snapshot:** 5 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001 and EVD-002, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-003, EVD-004.
 
 ---
 
@@ -564,7 +566,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-002 — Marking claims and GLM's proposals
 
-**Status:** Not Started
+**Status:** Completed (2026-11-17)
 
 **Objective.** The owner marks the words that need proof; GLM proposes more; the owner keeps or drops GLM's proposals. The result is the claim list that research works from.
 
@@ -597,12 +599,28 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Marking UI and storage, re-anchoring
-- [ ] Proposal job, instructions, parsing and locating
-- [ ] Keep or drop review, versions
-- [ ] Standard checks
+- [x] Marking UI and storage, re-anchoring
+- [x] Proposal job, instructions, parsing and locating
+- [x] Keep or drop review, versions
+- [x] Standard checks
+- [x] Real app rebuilt (2026-11-17, no job running, no `down`, no `-v`, no migration) and checked with throwaway projects, which were deleted afterwards (no library item deleted)
+- [ ] Owner: the "Evidence claims" panel seen in the browser (the agent did not open it)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-17).
+- **Decisions ("Planning decides").**
+  - *Evidence marks and graphic suggestions may cover the same words:* yes, the two lists are independent (EVD-009 decides which shot wins). Inside the claim list there are never overlaps.
+  - *Limit on GLM's proposals:* **none** (the owner's decision). The instructions say "fewer and stronger is better"; only the answer's token budget (`MAX_TOKENS` 24,000) bounds it.
+  - *Does a run ask GLM by itself:* **yes, once.** This added a pipeline step that §4.2 did not list: **`evidence_claims`** ("Propose the evidence claims", group `story`, no needs). It is done once an `ai` claim list version exists, and is skipped as complete for a project that is not a continuous explainer with `evidence` on (board status `off`). Re-asking is a click only. EVD-003's `evidence` step should need `evidence_claims`. §4.2 is updated.
+- **Marks follow the script on read, not on save.** `update_project` is not touched (it still re-anchors graphic suggestions only). `services/evidence_claims.reanchor_claims(script, claims)` runs on every read and before every owner action: a claim stays, or moves to the nearest place its words are, or is flagged `words_changed` (words gone, no longer whole words, or now overlapping a claim that counts; the owner's marks are placed first). `words_changed` is never stored. A flagged claim keeps its old place. **Later phases (EVD-003 and after) must treat a claim with `words_changed` as unusable**, and the stored positions are only trustworthy after `reanchor_claims`; read claims through `evidence_claims.state()` (or `reanchor_claims`), never straight from the row. The next version stores the positions as found, with the new `script_sha256`.
+- **Rules of the claim list** (`services/evidence_claims.py`): ids are `c<n>` from `next_id`, never reused; the owner's marks are `origin` `owner`, `kept` true; GLM's are `origin` `glm`, `kept` null until decided. A claim with `kept` false (a dropped proposal) **stays** in the list so it is not proposed again; only the owner's marks are removed (`remove_mark`). An owner's mark over a proposal sets that proposal to `kept` false in the same version. Two owner marks may not overlap (422). `kind_hint` defaults to `number` when `numbers_in` finds a number, otherwise `statement`. The note (`hint`) is one line of plain text, at most 300 characters. At most 100 owner marks (`MAX_OWNER_MARKS`, input hygiene, not the proposal limit). Owner changes are refused with 409 while a `suggest_evidence_claims` job is queued or running. A no-op edit stores nothing.
+- **Re-asking GLM** replaces only the undecided proposals; the owner's marks and every kept or dropped proposal stay. The request tells GLM which words are already marked and which the owner dropped. A new proposal with the same words and place as an old undecided one keeps its id. The job saves against the version and the script hash it started from, and fails ("Ask again") if either changed.
+- **Job `suggest_evidence_claims`** (`jobs/suggest_evidence_claims.py`, `provider='llm'`, `never_rerun`, story model, one `ask_model` call, `job.input`/`job.output` in `DATABASE_STRUCTURE.md` Section 5). The pure parts are in `services/evidence_claims_writer.py` (`build_request`, `check_answer`, `locate_proposals`). The model gives `{claims: [{phrase, kind_hint, reason}]}`, never positions; code finds each phrase (spaces and line breaks count alike), snaps to whole words, and leaves out (listed in `job.output.dropped`) a phrase not in the story, over 300 characters, already marked, dropped before, proposed twice, or only placeable over a claim that counts. New phase text `SAVING_EVIDENCE_CLAIMS`.
+- **API** (`api/evidence_claims.py`, tag `evidence-claims`): `GET /api/projects/{id}/evidence-claims` (`version`, `claims` each with `words_changed`, `job`, `blocked_reason`, `wanted`, `has_ai_version`), `POST .../marks`, `PATCH .../{claim_id}` (`hint`, `kind_hint`, `kept`), `DELETE .../{claim_id}`, `POST .../suggest` (202). 422 for a project without evidence or without a saved story, 404 for an unknown claim, 409 while GLM is proposing. A project with evidence off reads nothing from the tables.
+- **Shared helpers moved, no behaviour change:** `services/script_ranges.py` (`snap_to_words`, `nearest_occurrence`, used by `graphic_suggestions.py`) and `components/story/storyMarks.ts` (`buildPositions`, `unitOffset`, used by `GraphicSuggestions.tsx` and `EvidenceClaims.tsx`).
+- **UI.** `components/story/EvidenceClaims.tsx` (marking view, note and kind, claim cards with Keep, Drop, Remove and a "words changed" warning, "Ask GLM for more claims" with the job badge), mounted in `StoryEditor.tsx` under the graphic suggestions when the voice is continuous and `evidence` is on, and as the panel of the `evidence_claims` step in `StepPanel.tsx`. `api/evidenceClaims.ts` (key under the project's key, so saving the story refreshes the claims). `schema.d.ts` regenerated from the local code (additions only).
+- **No migration, no Compose change, no setting.**
+- **Checked on the rebuilt real app** (throwaway projects only, deleted afterwards): marks stored as versions 1 to 4 with the right `source` and `inputs`, earlier rows unchanged; an edit elsewhere in the story moved both marks (`words_changed` false) and an edit of one mark's own words flagged only that one; overlap, stale text, unknown claim, unknown kind and dropping an owner's mark all refused; a story project, a lines explainer and an explainer with evidence off give `wanted` false and 422 on every change, and the board step reads `off`. **One real GLM call** on a ~100-word sample script (job 31399, succeeded in a few seconds): three proposals, each found in the story with a reason, none overlapping the owner's mark, none left out; a second press while it ran returned the same job, and a mark during it got 409. Keep, drop, keep again, and an owner's mark over a proposal each stored a new version; deleting a proposal was refused; the board step read `done` afterwards. The graphic suggestions still mark and re-anchor as before (checked on the pure functions). Ruff check and format, `npm run lint` and `npm run typecheck` pass.
+- **Not checked.** The panel was not opened in a browser (selection, the note field, the colours). A pipeline **run** that asks GLM once was not made, because a run on a new project would start other paid steps; the step uses the same `start_suggest` as the click, and a second queued job is deduped by `store.create_job`. Re-asking GLM over existing decisions was not tried against the real model (the replace-only-undecided rule in `save_ai_version` was only reasoned through; the phrase locating was checked on sample input).
 
 ### EVD-003 — The research brief and the waiting step
 
@@ -1059,3 +1077,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-16 | STOR-003 | Completed | Old copy removed after a fresh exact re-verification. Docker disk image 75 GB to 48 GB; Mac free space 18 GB to 44 GB. The new-file smoke test of STOR-002 is still open. |
 | 2026-11-16 | STOR-004 | Completed | Daily and on-demand snapshots (one kept) in `db-snapshots/`, Settings Backups tab, header warning, README restore steps. Real app rebuilt: a snapshot took 25 s (643 MB), integrity check ok, app stayed responsive. Restore commands not run. |
 | 2026-11-17 | EVD-001 | Completed | Migration `0098`: `project.evidence`, six evidence tables, four job types. Real app rebuilt and the API rules checked with throwaway projects; owner to look at the create and settings forms. |
+| 2026-11-17 | EVD-002 | Completed | Claim marks, GLM's proposals (one real call checked) and keep or drop, as `evidence_claim_list` versions; marks follow the story on read; new pipeline step `evidence_claims` (a run asks GLM once). No migration. Real app rebuilt and checked with throwaway projects; owner to look at the panel in the browser. |

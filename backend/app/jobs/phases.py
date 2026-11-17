@@ -170,6 +170,10 @@ SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 # `write_graphic_theme` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
 
+# --- Running: the evidence claims of an explainer (EVD-002) ------------------------------
+# `suggest_evidence_claims` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_EVIDENCE_CLAIMS: Final = "saving the evidence claims"
+
 # --- Running: the callout look of a motion explainer (CMO-002) ---------------------------
 # `write_callout_look` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_LOOK: Final = "saving the callout look"

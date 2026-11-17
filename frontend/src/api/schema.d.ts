@@ -605,6 +605,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence Claims */
+        get: operations["get_evidence_claims_api_projects__project_id__evidence_claims_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims/marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Evidence Claim
+         * @description Marks words of the saved story as a claim, as a new version written by the owner.
+         */
+        post: operations["mark_evidence_claim_api_projects__project_id__evidence_claims_marks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Evidence Claims
+         * @description Starts the job that asks GLM for more claims. If one is already waiting or running for the
+         *     project, its id is returned and no second job is made.
+         */
+        post: operations["suggest_evidence_claims_api_projects__project_id__evidence_claims_suggest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims/{claim_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Evidence Claim
+         * @description Removes one of the owner's marks. A proposal of GLM is dropped instead (PATCH).
+         */
+        delete: operations["remove_evidence_claim_api_projects__project_id__evidence_claims__claim_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit Evidence Claim
+         * @description Changes a claim's note or kind, or keeps or drops a proposal of GLM.
+         */
+        patch: operations["edit_evidence_claim_api_projects__project_id__evidence_claims__claim_id__patch"];
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -8930,6 +9012,96 @@ export interface components {
             description?: string | null;
             /** Units */
             units?: string[] | null;
+        };
+        /** EvidenceClaimEditIn */
+        EvidenceClaimEditIn: {
+            /** Hint */
+            hint?: string | null;
+            /** Kind Hint */
+            kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
+            /** Kept */
+            kept?: boolean | null;
+        };
+        /** EvidenceClaimOut */
+        EvidenceClaimOut: {
+            /** Id */
+            id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "owner" | "glm";
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /** Hint */
+            hint: string;
+            /**
+             * Kind Hint
+             * @enum {string}
+             */
+            kind_hint: "number" | "quote" | "statement" | "event" | "other";
+            /** Reason */
+            reason: string;
+            /** Kept */
+            kept: boolean | null;
+            /** Words Changed */
+            words_changed: boolean;
+        };
+        /**
+         * EvidenceClaimsJobOut
+         * @description The newest `suggest_evidence_claims` job of the project, whatever its status.
+         */
+        EvidenceClaimsJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** EvidenceClaimsRun */
+        EvidenceClaimsRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** EvidenceClaimsState */
+        EvidenceClaimsState: {
+            /** Version */
+            version: number | null;
+            /** Claims */
+            claims: components["schemas"]["EvidenceClaimOut"][];
+            job: components["schemas"]["EvidenceClaimsJobOut"] | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+            /** Has Ai Version */
+            has_ai_version: boolean;
+        };
+        /** EvidenceMarkIn */
+        EvidenceMarkIn: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /**
+             * Hint
+             * @default
+             */
+            hint: string;
+            /** Kind Hint */
+            kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
         };
         /** FactsOut */
         FactsOut: {
@@ -20628,6 +20800,252 @@ export interface operations {
                 };
             };
             /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_evidence_claims_api_projects__project_id__evidence_claims_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_evidence_claim_api_projects__project_id__evidence_claims_marks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceMarkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    suggest_evidence_claims_api_projects__project_id__evidence_claims_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsRun"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_evidence_claim_api_projects__project_id__evidence_claims__claim_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                claim_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    edit_evidence_claim_api_projects__project_id__evidence_claims__claim_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                claim_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceClaimEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
             422: {
                 headers: {
                     [name: string]: unknown;

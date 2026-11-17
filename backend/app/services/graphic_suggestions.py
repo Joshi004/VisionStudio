@@ -23,6 +23,8 @@ import re
 from collections.abc import Sequence
 from typing import Any, Final
 
+from app.services.script_ranges import nearest_occurrence, snap_to_words
+
 # The most suggestions a project may have.
 MAX_SUGGESTIONS: Final = 100
 
@@ -44,23 +46,6 @@ class GraphicSuggestionError(ValueError):
 
 
 # --- Checking what the owner sent ---------------------------------------------------------
-
-
-def _snap(story: str, start: int, end: int) -> tuple[int, int]:
-    """The range moved out to whole words: it never begins or ends in the middle of a word, and
-    spaces at its ends are left out. Returns an empty range when it holds only spaces.
-    """
-    while start < end and story[start].isspace():
-        start += 1
-    while end > start and story[end - 1].isspace():
-        end -= 1
-    if start == end:
-        return start, end
-    while start > 0 and not story[start - 1].isspace():
-        start -= 1
-    while end < len(story) and not story[end].isspace():
-        end += 1
-    return start, end
 
 
 def _merge(story: str, ranges: list[tuple[int, int]]) -> list[dict[str, Any]]:
@@ -104,24 +89,13 @@ def normalise(story: str, entries: Sequence[dict[str, Any]]) -> list[dict[str, A
                 f"Suggestion {position} does not match the story. The story may have changed: "
                 "reload it and mark the words again."
             )
-        snapped = _snap(story, start, end)
+        snapped = snap_to_words(story, start, end)
         if snapped[0] < snapped[1]:
             ranges.append(snapped)
     return _merge(story, ranges)
 
 
 # --- Keeping the suggestions right when the story is edited -------------------------------
-
-
-def _nearest(story: str, text: str, near: int) -> int | None:
-    """The start of the occurrence of `text` in `story` that is closest to `near`, or None."""
-    best: int | None = None
-    found = story.find(text)
-    while found != -1:
-        if best is None or abs(found - near) < abs(best - near):
-            best = found
-        found = story.find(text, found + 1)
-    return best
 
 
 def reanchor(
@@ -140,12 +114,12 @@ def reanchor(
     for entry in entries:
         start, end, text = int(entry["start"]), int(entry["end"]), str(entry["text"])
         if new_story[start:end] != text:
-            found = _nearest(new_story, text, start)
+            found = nearest_occurrence(new_story, text, start)
             if found is None:
                 dropped += 1
                 continue
             start, end = found, found + len(text)
-        snapped = _snap(new_story, start, end)
+        snapped = snap_to_words(new_story, start, end)
         if snapped[0] < snapped[1]:
             ranges.append(snapped)
         else:

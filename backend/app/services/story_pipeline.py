@@ -169,6 +169,11 @@ STEPS: Final[tuple[Step, ...]] = (
     # is written from the Story Bible alone. Skipped as complete for any other project. Nothing
     # after it waits for it yet; the graphics will (EXG-005).
     Step("graphic_theme", "Design the graphics look", ("story_bible",)),
+    # EVD-002: GLM proposes more words of the story that need proof, once, when it has never
+    # been asked for the project. It reads the saved story alone. Skipped as complete for any
+    # project that is not a continuous explainer with evidence on. Nothing after it waits for it
+    # yet; the evidence step will (EVD-003).
+    Step("evidence_claims", "Propose the evidence claims"),
     # CMO-006: the callout look and both versions of every callout of a motion project. It needs
     # the callout plan and the graphics look. Skipped as complete for any project whose callouts
     # are not drawn as motion graphics. The renders wait for it: a render is refused while a

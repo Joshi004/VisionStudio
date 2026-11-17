@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
-from app.services import callout_look, callout_plan, graphic_theme, word_timings
+from app.services import callout_look, callout_plan, evidence_claims, graphic_theme, word_timings
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
@@ -74,6 +74,10 @@ GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs", "graphics")
 # (CMO-006).
 CALLOUT_GRAPHICS_STEP: Final = "callout_graphics"
 
+# The step that is switched off for every project but a continuous explainer with evidence on
+# (EVD-002).
+EVIDENCE_CLAIMS_STEP: Final = "evidence_claims"
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -96,6 +100,7 @@ GROUPS: Final[dict[str, str]] = {
     "speech_synthesis": "speech",
     "word_timings": "speech",
     "callout_plan": "speech",
+    "evidence_claims": "story",
     "graphic_theme": "graphics",
     "graphic_briefs": "graphics",
     "graphics": "graphics",
@@ -291,6 +296,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
             or (step.key == CALLOUT_GRAPHICS_STEP and not callout_look.wanted(project))
+            or (step.key == EVIDENCE_CLAIMS_STEP and not evidence_claims.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (

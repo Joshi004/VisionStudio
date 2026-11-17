@@ -3,6 +3,7 @@ import { Alert, Button, Group, Paper, Stack, Text, Textarea, Title } from "@mant
 
 import { describeError } from "../../api/errors";
 import { useUpdateProject, type ProjectDetail } from "../../api/projects";
+import { EvidenceClaims } from "./EvidenceClaims";
 import { GraphicSuggestions } from "./GraphicSuggestions";
 import { countWords, estimateSeconds, formatDuration } from "./storyLength";
 
@@ -100,6 +101,8 @@ export function StoryEditor({ project }: { project: ProjectDetail }) {
   const [droppedSuggestions, setDroppedSuggestions] = useState(0);
   // Only a continuous explainer with graphics on plans graphic shots from the owner's hints.
   const suggestsGraphics = project.voice_track === "continuous" && project.graphics;
+  // Only a continuous explainer with evidence on has claims that need proof.
+  const marksEvidence = project.voice_track === "continuous" && project.evidence;
 
   function save(text: string) {
     const before = project.graphic_suggestions.length;
@@ -145,6 +148,7 @@ export function StoryEditor({ project }: { project: ProjectDetail }) {
       {suggestsGraphics && (
         <GraphicSuggestions project={project} hasUnsavedStory={hasUnsavedStory} />
       )}
+      {marksEvidence && <EvidenceClaims project={project} hasUnsavedStory={hasUnsavedStory} />}
     </Stack>
   );
 }

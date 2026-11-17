@@ -42,6 +42,7 @@ from app.services import (
     environment_definitions,
     environment_links,
     environment_views,
+    evidence_claims,
     explainer,
     generation_requests,
     graphic_theme,
@@ -1739,6 +1740,41 @@ async def _call_graphic_theme(session: AsyncSession, project: Project, options: 
     return await graphic_theme.start_run(session, project)
 
 
+# --- The evidence claims (EVD-002) ------------------------------------------------------------
+
+
+async def _evaluate_evidence_claims(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with evidence on has evidence claims. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not evidence_claims.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await evidence_claims.state(session, project)
+    # GLM is asked once by a run, when it has never answered for the project. Asking again is
+    # the owner's click, because it is a paid call. The owner's marks are never replaced here.
+    done = state.has_ai_version
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                last_error=_failure(state.job),
+            )
+        ]
+    )
+
+
+async def _call_evidence_claims(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> Job:
+    return await evidence_claims.start_suggest(session, project)
+
+
 # --- The callout graphics (CMO-006) -----------------------------------------------------------
 
 # The target of the callout look. Every callout target waits for it.
@@ -2584,6 +2620,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
+    "evidence_claims": Adapter(_evaluate_evidence_claims, _project_start(_call_evidence_claims)),
     "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),
