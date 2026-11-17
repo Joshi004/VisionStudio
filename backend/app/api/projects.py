@@ -72,6 +72,9 @@ class ProjectCreate(BaseModel):
     # Graphic shots (EXG-001). Left out, a continuous explainer gets them on and every other
     # project off. Asking for them on any other project is refused.
     graphics: StrictBool | None = None
+    # The evidence layer (EVD-001). Left out, a continuous explainer gets it on and every other
+    # project off. Asking for it on any other project is refused.
+    evidence: StrictBool | None = None
     # How an explainer's presenter is placed and moves on camera. Only for an explainer.
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Only for an explainer.
@@ -82,7 +85,8 @@ class ProjectCreate(BaseModel):
 
 class ProjectUpdate(BaseModel):
     """Only the fields that are sent are changed. The orientation, the speech mode, the kind,
-    the voice track and the graphics setting cannot be changed.
+    the voice track and the graphics setting cannot be changed. The evidence switch can be
+    changed at any time, but only on a continuous explainer.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -111,6 +115,9 @@ class ProjectUpdate(BaseModel):
     presenter_delivery: StrictStr | None = None
     # Where a continuous explainer's takes come from (REC-002). Can be changed at any time.
     take_source: TakeSource | None = None
+    # Whether a continuous explainer has the evidence layer (EVD-001). Can be changed at any time;
+    # switching it off deletes nothing.
+    evidence: StrictBool | None = None
     # How an explainer's presenter is placed and moves on camera. Null or blank clears it.
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Null or blank clears it.
@@ -211,6 +218,8 @@ class ProjectDetail(BaseModel):
     presenter_named_look_deleted: bool
     # Whether a continuous explainer gets graphic shots (EXG-001). Off for every other project.
     graphics: bool
+    # Whether a continuous explainer has the evidence layer (EVD-001). Off for every other project.
+    evidence: bool
     # The words of the story the owner suggests a graphic for, in story order. Empty when none.
     graphic_suggestions: list[GraphicSuggestionOut]
     story_length: StoryLengthOut
@@ -298,6 +307,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         presenter_named_look_name=picked.name if picked is not None else None,
         presenter_named_look_deleted=picked is not None and picked.deleted_at is not None,
         graphics=project.graphics,
+        evidence=project.evidence,
         graphic_suggestions=_graphic_suggestions(project),
         story_length=StoryLengthOut(
             word_count=length.word_count,
@@ -369,6 +379,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             presenter_named_look_id=body.presenter_named_look_id,
             callout_style=body.callout_style,
             take_source=body.take_source,
+            evidence=body.evidence,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

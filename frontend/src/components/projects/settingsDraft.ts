@@ -24,6 +24,8 @@ export type Draft = {
   callout_style: CalloutStyle;
   /** Whether a continuous explainer's takes are generated or recorded (REC-002). */
   take_source: TakeSource;
+  /** Whether a continuous explainer has the evidence layer (EVD-001). */
+  evidence: boolean;
   /** The text that steers a continuous explainer's voice (FLOW-002). Empty means none. */
   presenter_delivery: string;
   /** How an explainer's presenter is placed and moves on camera. Empty means none. */
@@ -50,6 +52,7 @@ export function initialDraft(project: ProjectDetail): Draft {
     callouts: project.callouts,
     callout_style: project.callout_style,
     take_source: project.take_source,
+    evidence: project.evidence,
     presenter_delivery: project.presenter_delivery ?? "",
     presenter_staging: project.presenter_staging ?? "",
     presenter_outfit: project.presenter_outfit ?? "",
@@ -85,6 +88,9 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
   }
   if (draft.take_source !== saved.take_source) {
     changes.take_source = draft.take_source;
+  }
+  if (draft.evidence !== saved.evidence) {
+    changes.evidence = draft.evidence;
   }
   const delivery = draft.presenter_delivery.trim();
   if (delivery !== saved.presenter_delivery.trim()) {

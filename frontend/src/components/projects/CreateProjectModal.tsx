@@ -142,6 +142,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [outfit, setOutfit] = useState("");
   const [outfitId, setOutfitId] = useState<number | null>(null);
   const [graphics, setGraphics] = useState(true);
+  const [evidence, setEvidence] = useState(true);
   const [name, setName] = useState("");
 
   // Motion callouts are only for a continuous explainer with graphics and callouts on.
@@ -184,6 +185,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         presenter_named_look_id: explainer && outfitId !== null ? outfitId : undefined,
         // Only a continuous explainer can have graphics; any other project leaves it out.
         graphics: explainer && voiceTrack === "continuous" ? graphics : undefined,
+        // Only a continuous explainer can have evidence; any other project leaves it out.
+        evidence: explainer && voiceTrack === "continuous" ? evidence : undefined,
       },
       {
         onSuccess: (project) => {
@@ -397,6 +400,14 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
                 description="Charts, diagrams and text cards drawn by code and timed to the presenter's words, for numbers, comparisons, steps and lists. It cannot be changed later."
                 checked={graphics}
                 onChange={(event) => setGraphics(event.currentTarget.checked)}
+              />
+            )}
+            {voiceTrack === "continuous" && (
+              <Switch
+                label="Evidence"
+                description="Proof on screen for the claims that can be checked: a price, a figure from a report, something a person said. You mark the claims, research them with Cursor or Claude, and review every piece of evidence. You can change it later in the project settings."
+                checked={evidence}
+                onChange={(event) => setEvidence(event.currentTarget.checked)}
               />
             )}
             <Stack gap="xs">

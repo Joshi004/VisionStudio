@@ -72,6 +72,10 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_thumbnail_concepts: "Thumbnail ideas",
   write_youtube_draft: "YouTube draft",
   publish_youtube: "YouTube upload",
+  suggest_evidence_claims: "Evidence claims",
+  write_evidence_brief: "Evidence brief",
+  import_evidence: "Evidence import",
+  render_evidence_clip: "Evidence clip",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

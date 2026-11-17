@@ -266,6 +266,16 @@ export function ProjectSettingsForm({
                       Graphics are fixed after creation.
                     </Text>
                   </Group>
+                  <Switch
+                    label="Evidence"
+                    description="Proof on screen for the claims that can be checked."
+                    checked={draft.evidence}
+                    onChange={(event) => edit("evidence", event.currentTarget.checked)}
+                  />
+                  <Text size="xs" c="dimmed">
+                    Switching evidence off deletes nothing: what was marked, researched and reviewed
+                    is kept, and counts again when you switch it back on.
+                  </Text>
                 </>
               )}
             </Stack>

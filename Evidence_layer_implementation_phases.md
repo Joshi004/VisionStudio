@@ -308,7 +308,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | STOR-002 | Move the existing media | Owner | STOR-001 | In Progress |
 | STOR-003 | Remove the old media copy from the volume | Owner, later | STOR-002 | Completed |
 | STOR-004 | Database snapshots in the files folder | Code, optional | STOR-001 | Completed |
-| EVD-001 | Evidence switch, tables and job types | Code | — | Not Started |
+| EVD-001 | Evidence switch, tables and job types | Code | — | Completed |
 | EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Not Started |
 | EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Not Started |
 | EVD-004 | The capture tool | Code (Mac) | — | Not Started |
@@ -331,7 +331,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 3 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-001, EVD-004.
+**Progress snapshot:** 4 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-002, EVD-004.
 
 ---
 
@@ -503,7 +503,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-001 — Evidence switch, tables and job types
 
-**Status:** Not Started
+**Status:** Completed (2026-11-17)
 
 **Objective.** Create everything the evidence layer stores in one migration (§4.8), and add the project switch.
 
@@ -531,11 +531,36 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Migration, models, `DATABASE_STRUCTURE.md`
-- [ ] Switch on create form and settings, API checks
-- [ ] Standard checks
+- [x] Migration, models, `DATABASE_STRUCTURE.md`
+- [x] Switch on create form and settings, API checks
+- [x] Standard checks
+- [x] Real app rebuilt (2026-11-17, no job running, no `down`, no `-v`) and the API rules checked on it
+- [ ] Owner: the create form and the settings form seen in the browser (the agent did not open them)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-17).
+- **Migration `0098`** (`0098_evidence_layer.py`): `project.evidence`, six tables and four job types. `job` is rebuilt for the new CHECK, as in `0096`. Downgrade deletes the jobs of the four types and every evidence row; files already copied into `media/` and the round folders are left.
+- **`project.evidence`.** BOOLEAN NOT NULL, default 0. Every project that existed reads off (checked on the real app: 67 projects, all `false`). The create form defaults it on for a continuous explainer, and it does **not** need `graphics` on. `ProjectDetail.evidence`, `ProjectCreate.evidence` (`null` means on for a continuous explainer, off otherwise) and `ProjectUpdate.evidence` in `api/projects.py`; rules in `services/projects.py` (`EVIDENCE_ONLY_MESSAGE`, `validate_project`, `create_project(evidence=...)`, `update_project`). Any `PATCH` that sends `evidence` on a project that is not a continuous explainer gets 422, whatever the value.
+- **Tables (decisions).** Six tables, all written as new rows and never changed, so the state of a round is worked out on read (imported: an `evidence_import` exists; reviewed: an `evidence_review` with `done` exists for the round):
+  - `evidence_claim_list` (versions of the claims; `source` `ai` or `manual`; `inputs {script_sha256, based_on_version}`; `content {next_id, claims}`);
+  - `evidence_round` (`round_no`, so the round id is `r<round_no>`; `claim_list_id`; `folder` relative to `config.files_dir`; `brief` JSON; `brief_sha256`);
+  - `evidence_import` (`version` per round; `results`, `report`);
+  - `evidence_item` (one per piece; `item_key`; `kind`, `relation` and `source_tier` nullable with CHECKs; a path and a SHA-256 column for each of image, context, text and PDF; `usable`, `checks`, `warnings`);
+  - `evidence_review` (the owner's decisions, version per project; `content {claims: [{claim_id, items: [{item_key, verdict}], shown, no_proof_on_screen}]}`; `done`);
+  - `evidence_clip` (`purpose` `preview` or `shot`; `item_id`; `scene_id`, `shot_id`, `shot_plan_id`; `inputs.items` is the ordered list of the pieces shown; `media_path`, `sha256`, `frame_count`, `metrics`, `warnings`, `last_error`).
+- **The owner's decisions are their own table**, `evidence_review`, not versions inside the item table. A decision names an item by `item_key`, not by row id, so a re-import keeps decisions for unchanged items without copying. EVD-006 decides what `item_key` is made of.
+- **Job types.** `suggest_evidence_claims` (`llm`, `never_rerun`), `write_evidence_brief`, `import_evidence` and `render_evidence_clip` (`local`, `start_again`). They are in the `job.type` CHECK, `api/jobs.py` `JobType` and the labels of `jobFormat.ts`. No handler, no routes, no job phases yet: the phase that adds each handler registers it and documents its `job.input` and `job.output`.
+- **Turning `evidence` off later keeps everything and ignores it.** Later phases must treat `evidence = false` as "does not apply" and read nothing from these tables. The settings form says that switching it off deletes nothing.
+- **Cleanup on delete.** All `project_id` keys cascade, so deleting a project removes its evidence rows, and `media/<project_id>/` already goes with it. **Not decided here:** whether deleting a project also removes its `evidence/<project_id>/` round folder (left to EVD-003, which creates that folder).
+- **UI.** `CreateProjectModal.tsx` has an "Evidence" switch, on, shown only when the voice is continuous. `ProjectSettingsForm.tsx` has an editable switch in the continuous-voice block, and `settingsDraft.ts` carries the field.
+- **Docs.** `DATABASE_STRUCTURE.md`: an Update entry, the `project.evidence` row, the job type note, Sections 4.93 to 4.98 and a Section 5 block with the JSON shapes. §4.8 of this document needed no change.
+- **Checked.** On a throwaway `DATA_DIR`: `0098` up, down to `0097` and up again, and `alembic check` shows only the `FLOAT` against `REAL` notes on older tables, none for the new ones; a job of a new type inserts and the new tables exist. On the real app, rebuilt with `docker compose up -d --build backend frontend` (the newest database snapshot was about 20 minutes old, none was taken first): `/api/health` is `ok` at revision `0098`, and with four throwaway projects (deleted afterwards; no library item was deleted):
+  - a continuous explainer gets `evidence: true` by default and `false` when sent `false`;
+  - a story or a lines explainer with `evidence: true` gets 422;
+  - `PATCH` of `evidence` on a story or a lines explainer gets 422 (both values);
+  - `PATCH` `false` then `true` on a continuous explainer gets 200;
+  - `null` gets 422 "Evidence cannot be empty" and `"yes"` gets 422.
+  Ruff check and format, `npm run lint` and `npm run typecheck` pass; `schema.d.ts` was generated from the running backend and equals the one generated from the local code.
+- **Not checked.** The two forms were not opened in a browser, and the labs and the Character Lab were only spot-checked through the API (the characters list and the project list answer, the frontend serves). Environment note: `backend/.venv/bin/alembic` has a stale shebang from the old folder name (`VisionPsyStudio`), so `uv run alembic` fails to spawn; `.venv/bin/python -m alembic` works.
 
 ### EVD-002 — Marking claims and GLM's proposals
 
@@ -1033,3 +1058,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-16 | STOR-002 | In Progress | Media (10,342 files, 28.7 GB) copied in 7 min, verified exact (counts, bytes, every SHA-256, database hashes), app switched to the Mac folder. Smoke test left. |
 | 2026-11-16 | STOR-003 | Completed | Old copy removed after a fresh exact re-verification. Docker disk image 75 GB to 48 GB; Mac free space 18 GB to 44 GB. The new-file smoke test of STOR-002 is still open. |
 | 2026-11-16 | STOR-004 | Completed | Daily and on-demand snapshots (one kept) in `db-snapshots/`, Settings Backups tab, header warning, README restore steps. Real app rebuilt: a snapshot took 25 s (643 MB), integrity check ok, app stayed responsive. Restore commands not run. |
+| 2026-11-17 | EVD-001 | Completed | Migration `0098`: `project.evidence`, six evidence tables, four job types. Real app rebuilt and the API rules checked with throwaway projects; owner to look at the create and settings forms. |
