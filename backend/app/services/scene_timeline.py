@@ -54,6 +54,11 @@ _TOLERANCE: Final = 1e-6
 # The type of a cut shot that is a chart, diagram or text card drawn by code (EXG-003). Its clip
 # is not made by H3, so its length is its own frames plus one spare frame.
 GRAPHIC_SHOT_TYPE: Final = "graphic"
+# The type of a cut shot that shows a piece of evidence (EVD-009): a screenshot of a source, drawn
+# by the motion service. Like a graphic, it is never made by H3 and has its own frames plus one.
+EVIDENCE_SHOT_TYPE: Final = "evidence"
+# Every type of shot that code draws instead of H3.
+DRAWN_SHOT_TYPES: Final = (GRAPHIC_SHOT_TYPE, EVIDENCE_SHOT_TYPE)
 _GRAPHIC_SPARE_FRAMES: Final = 1
 
 Severity = Literal["flagged", "blocking"]
@@ -386,7 +391,7 @@ def build_cut_timeline(
                 end_s=end,
                 clip_frames=(
                     frames + _GRAPHIC_SPARE_FRAMES
-                    if shot.get("type") == GRAPHIC_SHOT_TYPE
+                    if shot.get("type") in DRAWN_SHOT_TYPES
                     else h3_num_frames(frames)
                 ),
             )

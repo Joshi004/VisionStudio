@@ -775,7 +775,7 @@ def resolve(
             )
         if on_graphic:
             sentences.append(
-                "These callouts are left out because they fall on a graphic shot: "
+                "These callouts are left out because they fall on a graphic or evidence shot: "
                 f"{_named(on_graphic)}."
             )
         warnings.append({"code": CODE_DROPPED, "message": " ".join(sentences)})

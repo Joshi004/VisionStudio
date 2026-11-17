@@ -223,7 +223,9 @@ function RenderRow({
             Scene {take.scene_index}, {take.shot_id}:{" "}
             {take.graphic !== null
               ? `graphic (${GRAPHIC_ENGINE[take.graphic.engine]}, attempt ${take.graphic.attempt})`
-              : `take ${take.take_number}`}
+              : take.evidence != null
+                ? `evidence clip ${take.evidence.clip_id}`
+                : `take ${take.take_number}`}
             ,{" "}
             {take.frames} frames, {levelText(take.loudness_lufs, take.gain_db)}
           </Text>

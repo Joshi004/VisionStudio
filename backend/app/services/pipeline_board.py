@@ -88,8 +88,8 @@ CALLOUT_GRAPHICS_STEP: Final = "callout_graphics"
 EVIDENCE_CLAIMS_STEP: Final = "evidence_claims"
 
 # The steps that are switched off for every project but a continuous explainer with evidence on
-# (EVD-002, EVD-003).
-EVIDENCE_STEPS: Final = (EVIDENCE_CLAIMS_STEP, "evidence")
+# (EVD-002, EVD-003, EVD-009).
+EVIDENCE_STEPS: Final = (EVIDENCE_CLAIMS_STEP, "evidence", "evidence_clips")
 
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
@@ -115,6 +115,7 @@ GROUPS: Final[dict[str, str]] = {
     "callout_plan": "speech",
     "evidence_claims": "story",
     "evidence": "story",
+    "evidence_clips": "graphics",
     "graphic_theme": "graphics",
     "graphic_briefs": "graphics",
     "graphics": "graphics",
@@ -186,6 +187,9 @@ class BoardStep:
     counts: StepCounts
     # The steps it needs that are not done (and not off).
     blocked_by: tuple[str, ...]
+    # Things to tell the owner that are not problems, from the step's own view (EVD-009: a claim
+    # left without an evidence shot, and why).
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -294,16 +298,16 @@ def _mode_of(run: Job | None, run_output: dict[str, Any], busy: bool) -> BoardMo
 
 async def _read_step(
     session: AsyncSession, project: Project, step: pipeline.Step
-) -> StepCounts | None:
-    """The counts of one step, or None when its stage could not be read. One broken stage must
-    not take the whole board down.
+) -> tuple[StepCounts, tuple[str, ...]] | None:
+    """The counts and the notes of one step, or None when its stage could not be read. One broken
+    stage must not take the whole board down.
     """
     try:
         view = await ADAPTERS[step.key].evaluate(session, project, RunOptions())
     except Exception:
         _logger.exception("pipeline board: step '%s' could not be read", step.key)
         return None
-    return count_targets(view.targets)
+    return count_targets(view.targets), tuple(view.warnings)
 
 
 async def build(session: AsyncSession, project: Project) -> Board:
@@ -325,13 +329,16 @@ async def build(session: AsyncSession, project: Project) -> Board:
             or (step.key in EVIDENCE_STEPS and not evidence_claims.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
-        counts: StepCounts | None = (
-            StepCounts() if off else await _read_step(session, project, step)
-        )
-        if counts is None:
-            status: BoardStatus = "attention"
+        counts = StepCounts()
+        notes: tuple[str, ...] = ()
+        status: BoardStatus
+        if off:
+            status = step_status(counts, needs_done, off)
+        elif (read := await _read_step(session, project, step)) is None:
+            status = "attention"
             counts = StepCounts(reason=_UNREADABLE)
         else:
+            counts, notes = read
             status = step_status(counts, needs_done, off)
         statuses[step.key] = status
         steps.append(
@@ -343,6 +350,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
                 status=status,
                 counts=counts,
                 blocked_by=tuple(key for key in step.needs if statuses[key] not in ("done", "off")),
+                notes=notes,
             )
         )
 

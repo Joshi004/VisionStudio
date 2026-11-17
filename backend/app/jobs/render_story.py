@@ -147,7 +147,8 @@ class Shot:
     scene_index: int
     shot_id: str
     frames: int
-    # None for a graphic shot (EXG-007), which has `graphic_id` instead.
+    # None for a graphic shot (EXG-007), which has `graphic_id` instead, and for an evidence shot
+    # (EVD-009), which has `evidence_clip_id`.
     take_id: int | None
     take_number: int | None
     path: str
@@ -165,6 +166,12 @@ class Shot:
     # in, the last fades out). None: the usual fade.
     fade_in_s: float | None = None
     fade_out_s: float | None = None
+    evidence_clip_id: int | None = None
+
+    @property
+    def is_drawn(self) -> bool:
+        """A graphic or an evidence shot: a video drawn by code, no take, no sound."""
+        return self.graphic_id is not None or self.evidence_clip_id is not None
 
     @property
     def label(self) -> str:
@@ -609,6 +616,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 take_id is not None
                 or number is not None
                 or entry.get("graphic") is not None
+                or entry.get("evidence") is not None
                 or path is not None
             ):
                 raise RenderFailed(_CHANGED_MESSAGE)
@@ -621,13 +629,23 @@ def parse_timeline(recorded: object) -> Timeline:
             raise RenderFailed(_CHANGED_MESSAGE)
         if graphic_id is not None and (take_id is not None or number is not None):
             raise RenderFailed(_CHANGED_MESSAGE)
+        # An evidence shot (EVD-009) has the id of its clip in the same place.
+        evidence = entry.get("evidence")
+        evidence_id = _whole(evidence.get("clip_id")) if isinstance(evidence, dict) else None
+        if evidence is not None and evidence_id is None:
+            raise RenderFailed(_CHANGED_MESSAGE)
+        if evidence_id is not None and (
+            take_id is not None or number is not None or graphic_id is not None
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        drawn = graphic_id is not None or evidence_id is not None
         if (
             frames is None
             or frames < 1
-            or (placeholder is None and take_id is None and graphic_id is None)
+            or (placeholder is None and take_id is None and not drawn)
             or source_frames is None
             or source_frames < 1
-            or (placeholder is None and number is None and graphic_id is None)
+            or (placeholder is None and number is None and not drawn)
             or index is None
             or duck is None
             or bed_duck is None
@@ -655,6 +673,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 placeholder,
                 fade_in,
                 fade_out,
+                evidence_clip_id=evidence_id,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -1044,6 +1063,11 @@ class RenderStoryHandler(JobHandler):
                     "shot_id": shot.shot_id,
                     "take_id": shot.take_id,
                     **({"graphic_id": shot.graphic_id} if shot.graphic_id is not None else {}),
+                    **(
+                        {"evidence_clip_id": shot.evidence_clip_id}
+                        if shot.evidence_clip_id is not None
+                        else {}
+                    ),
                     **({"placeholder": True} if shot.placeholder is not None else {}),
                     "sound": sound.label,
                     "loudness_lufs": _tenth(sound.loudness_lufs),
@@ -1209,15 +1233,21 @@ async def probe_shot(storage: Storage, shot: Shot) -> Source:
         raise RenderFailed(
             f"The clip of shot {shot.label} could not be read. Regenerate it, or use another take."
         )
-    # A graphic is drawn at the shot's frames plus one spare, so at the story's rounding it may be
-    # one frame short: the render repeats its last frame, as the plan allows (D-9).
+    # A graphic or an evidence clip is drawn at the shot's frames plus one spare, so at the
+    # story's rounding it may be one frame short: the render repeats its last frame, as the plan
+    # allows (D-9).
     short_by = shot.source_frames - probe.frame_count
     if shot.graphic_id is not None and short_by > 1:
         raise RenderFailed(
             f"The graphic of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Make the graphics again."
         )
-    if shot.graphic_id is None and short_by > 0:
+    if shot.evidence_clip_id is not None and short_by > 1:
+        raise RenderFailed(
+            f"The evidence clip of shot {shot.label} has {probe.frame_count} frames; the shot "
+            f"needs {shot.source_frames}. Draw the evidence shots again."
+        )
+    if not shot.is_drawn and short_by > 0:
         raise RenderFailed(
             f"The clip of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Regenerate it, or use another take."
@@ -1583,6 +1613,8 @@ def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
         return "clip voice"
     if shot.graphic_id is not None:
         return "none (a graphic)"
+    if shot.evidence_clip_id is not None:
+        return "none (an evidence clip)"
     return "clip" if audio is not None else "none in the clip"
 
 

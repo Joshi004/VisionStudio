@@ -68,6 +68,7 @@ ShotType = Literal[
     "transition",
     "presenter",
     "graphic",
+    "evidence",
 ]
 PictureKind = Literal["character", "environment", "anchor"]
 ManifestStatus = Literal["not_selected", "selected", "out_of_date"]

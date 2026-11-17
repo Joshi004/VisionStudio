@@ -374,11 +374,11 @@ def _resolved_item(item: look_state_resolution.ResolvedItem | None, key: str) ->
     }
 
 
-def is_graphic_shot(shot: dict[str, Any]) -> bool:
-    """Whether a shot of a plan is a graphic shot (EXG-003): drawn by code, never defined,
-    never made by H3.
+def is_drawn_shot(shot: dict[str, Any]) -> bool:
+    """Whether a shot of a plan is a graphic shot (EXG-003) or an evidence shot (EVD-009): drawn
+    by code, never defined, never made by H3.
     """
-    return shot.get("type") == cut_planning_writer.GRAPHIC
+    return cut_planning_writer.drawn_by_code(shot.get("type"))
 
 
 def _skeleton(shot: dict[str, Any], duration: float) -> dict[str, Any]:
@@ -737,15 +737,16 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         )
     placed = _durations(timeline)
     shot = shots[position]
-    if is_graphic_shot(shot):
+    if is_drawn_shot(shot):
         raise ShotDefinitionsError(
-            f"The shot '{shot_id}' is a graphic shot: it is drawn by code, so it has no definition."
+            f"The shot '{shot_id}' is a {shot['type']} shot: it is drawn by code, so it has no "
+            "definition."
         )
     start_s, duration = placed[shot_id]
 
     def neighbour(index: int) -> dict[str, Any] | None:
-        # A graphic shot is no neighbour: the cut across it is not a cut between two H3 shots.
-        if index < 0 or index >= len(shots) or is_graphic_shot(shots[index]):
+        # A drawn shot is no neighbour: the cut across it is not a cut between two H3 shots.
+        if index < 0 or index >= len(shots) or is_drawn_shot(shots[index]):
             return None
         return _skeleton(shots[index], placed[shots[index]["id"]][1])
 
@@ -1399,8 +1400,9 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         )
         shots: list[ShotEntry] = []
         for shot in plan.content["shots"] if plan.content is not None else []:
-            if is_graphic_shot(shot):
-                # Drawn by code, not made by H3 (EXG-003): it leaves the whole H3 chain here.
+            if is_drawn_shot(shot):
+                # Drawn by code, not made by H3 (EXG-003, EVD-009): it leaves the whole H3 chain
+                # here.
                 continue
             key = _shot_key(scene_id, shot["id"])
             row = rows.get(key)

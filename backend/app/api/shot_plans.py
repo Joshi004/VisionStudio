@@ -62,10 +62,16 @@ ShotType = Literal[
     "transition",
     "presenter",
     "graphic",
+    "evidence",
 ]
 
 
 # --- The shots, as `Path_ahead.md` Section 25 gives them -------------------------------------
+
+
+class ShotEvidenceOut(BaseModel):
+    claim_id: str
+    piece: int
 
 
 class ShotOut(BaseModel):
@@ -97,6 +103,22 @@ class ShotOut(BaseModel):
     start_s: float | None = None
     end_s: float | None = None
     spoken_text: str | None = None
+    # EVD-009: only an evidence shot has this: the claim it proves and which of the claim's
+    # chosen pieces (counted from 1) it shows.
+    evidence: ShotEvidenceOut | None = None
+
+
+class EvidenceResultOut(BaseModel):
+    """What became of one claim with evidence to show in a scene (EVD-009): how many pieces were
+    chosen, how many got a shot, and why it got none (`left_out` is a code, `reason` a sentence).
+    """
+
+    claim_id: str
+    text: str
+    pieces: int
+    shown: int
+    left_out: str | None = None
+    reason: str | None = None
 
 
 class GraphicSuggestionResultOut(BaseModel):
@@ -116,6 +138,8 @@ class ShotPlanContentOut(BaseModel):
     shots: list[ShotOut]
     # Only a plan made for a scene with suggested graphics has them. Empty for every other plan.
     graphic_suggestions: list[GraphicSuggestionResultOut] = []
+    # Only a plan made for a scene with evidence to show has them (EVD-009).
+    evidence: list[EvidenceResultOut] = []
 
 
 # --- The stage's state ----------------------------------------------------------------------

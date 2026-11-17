@@ -338,6 +338,63 @@ async def view(session: AsyncSession, project: Project) -> ReviewView:
     return loaded.view
 
 
+@dataclass(frozen=True)
+class ShownPiece:
+    """One piece of evidence the owner chose to show, as the cut planner reads it."""
+
+    item_key: str
+    item_id: int
+
+
+@dataclass(frozen=True)
+class ShownClaim:
+    """A claim that has evidence to show (EVD-009). `start` and `end` are code-point positions in
+    `script_text` (end not included), as for the graphic suggestions; `pieces` are in the owner's
+    order and are never empty.
+    """
+
+    id: str
+    start: int
+    end: int
+    text: str
+    pieces: tuple[ShownPiece, ...]
+
+
+async def shown_claims(session: AsyncSession, project: Project) -> list[ShownClaim]:
+    """The claims whose evidence is shown on video, in story order (EVD-009). Empty unless the
+    newest round has exactly the claims that count now, so a claim whose words moved or changed
+    never gets a shot. The positions are those `evidence_claims.state()` gives (never the brief's,
+    which has none); a claim that is not placed in the story is left out.
+    """
+    current = await evidence_rounds.state(session, project)
+    if not current.wanted or current.round is None or not current.current:
+        return []
+    review = await view(session, project)
+    placed = {claim["id"]: claim for claim in current.claims}
+    found: list[ShownClaim] = []
+    for claim in review.claims:
+        position = placed.get(claim.entry["id"])
+        if position is None or not claim.decision.shown:
+            continue
+        by_key = {item.item_key: item for item in claim.items if item.usable}
+        pieces = tuple(
+            ShownPiece(item_key=key, item_id=by_key[key].id)
+            for key in claim.decision.shown
+            if key in by_key
+        )
+        if pieces:
+            found.append(
+                ShownClaim(
+                    id=claim.entry["id"],
+                    start=position["start"],
+                    end=position["end"],
+                    text=position["text"],
+                    pieces=pieces,
+                )
+            )
+    return sorted(found, key=lambda claim: claim.start)
+
+
 # --- The owner's actions -------------------------------------------------------------------
 
 

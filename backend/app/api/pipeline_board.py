@@ -70,6 +70,9 @@ class BoardStepOut(BaseModel):
     # Why a target failed, cannot go on, or waits for the owner, when there is one. None
     # otherwise.
     blocked_reason: str | None
+    # Things to tell the owner that are not problems, for example a claim that was left without
+    # an evidence shot and why (EVD-009). Empty for most steps.
+    notes: list[str] = []
 
 
 class BoardRunOut(BaseModel):
@@ -169,6 +172,7 @@ async def get_pipeline_board(project_id: int, session: SessionDep) -> PipelineBo
                 not_started=step.counts.not_started,
                 blocked_by=list(step.blocked_by),
                 blocked_reason=step.counts.reason,
+                notes=list(step.notes),
             )
             for step in board.steps
         ],

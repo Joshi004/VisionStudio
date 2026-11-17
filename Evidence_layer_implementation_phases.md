@@ -291,8 +291,8 @@ A failure in checks 1 to 4 makes that piece of evidence unusable, and the review
 - **What it shows.** It opens on the screenshot with some context, zooms in to the quote's rectangles, a highlight sweeps across the quote in the video's accent colour, and it holds there. A source badge names the publisher and the date, and the page for a PDF.
 - **Capture size.** A landscape project is captured at a desktop viewport and a portrait project at a phone viewport, where the text is naturally large. Planning in EVD-004 decides the exact sizes.
 - **Readability.** After the zoom, the quote's text must be at least a minimum height on the output frame: **0.035 of the shorter side of the frame (38 px at 1080), decided in EVD-008**. Below it, the review card shows a warning, and a preview carries a `small_text` warning.
-- **Length.** The clip is as long as its shot. The cut planner gives an evidence shot at least the longer of a floor (3 s, like a graphic shot) and the time needed to read the quote (EVD-009 decides the reading rate).
-- **Captions** keep showing in their zone, and the composition keeps the highlight out of the caption zone (`caption_zone`). What happens to a callout during an evidence shot is decided in EVD-009.
+- **Length.** The clip is as long as its shot. An evidence shot is at least the longer of the shortest length the owner set for shots and 3 s (like a graphic shot; EVD-009). There is **no reading-rate minimum** (the owner's decision): the viewer can pause, and the shot is shown where it makes sense for the script, however long the text is. The graphic shot over the same words is always kept whole; an evidence shot may be shorter than its piece would like, but never under the floor.
+- **Captions** keep showing in their zone, and the composition keeps the highlight out of the caption zone (`caption_zone`). **Callouts are hidden during an evidence shot**, as during a graphic shot (EVD-009): the render's callout track keeps clear of both.
 - **Preview.** From the review screen, the owner can render a preview of a fixed length (EVD-008). The real clip is drawn at the shot's exact length after shot planning (EVD-009).
 
 ### 4.8 What the one migration creates (EVD-001)
@@ -325,7 +325,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Completed |
 | EVD-007 | The review screen | Code | EVD-006 | Completed |
 | EVD-008 | The evidence clip and its preview | Code | EVD-006 | Completed |
-| EVD-009 | Evidence shots in the cut plan and the render | Code | EVD-007, EVD-008 | Not Started |
+| EVD-009 | Evidence shots in the cut plan and the render | Code | EVD-007, EVD-008 | In Progress |
 | EVD-010 | One explainer end to end | Owner | EVD-005, EVD-009, STOR-002 | Not Started |
 | EVD-011 | Evidence card over presenter shots | Code, later | EVD-010 | Deferred |
 | EVD-012 | Source lines without a screenshot | Code, later | EVD-010 | Deferred |
@@ -340,7 +340,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 10 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004, EVD-006, EVD-007 and EVD-008, 2026-11-17), 2 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left). Ready to start: EVD-009.
+**Progress snapshot:** 10 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004, EVD-006, EVD-007 and EVD-008, 2026-11-17), 3 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left; EVD-009: code done and checked on pure parts, one real planning call and a real render are left).
 
 ---
 
@@ -1039,7 +1039,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-009 — Evidence shots in the cut plan and the render
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Objective.** Accepted evidence appears in the video on the words it proves.
 
@@ -1075,12 +1075,34 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Cut planner input, shot type, code checks
-- [ ] `evidence_clips` step, needs of the render steps
-- [ ] Timeline and render
-- [ ] Standard checks
+- [x] Cut planner input, shot type, code checks
+- [x] `evidence_clips` step, needs of the render steps
+- [x] Timeline and render
+- [x] Standard checks (ruff, `npm run lint`, both `typecheck`s)
+- [ ] One real planning call and a render of a real evidence shot (needs the owner's go-ahead for the paid call; see "Not checked")
 
-**Completion notes.** _To be filled in._
+**Completion notes.**
+
+*Decisions (the owner's answers to the planning questions).*
+- **Pieces.** One `evidence` shot per accepted piece, one right after the other in the owner's order. The first piece is required; later ones are planned when there is time. A claim has at most as many shots as it has shown pieces.
+- **Callouts** are hidden during an evidence shot (the callout track keeps clear of graphic and evidence shots alike; the "left out" warning now says "a graphic or evidence shot").
+- **No reading-rate minimum.** The floor is `max(shortest shot, 3.0 s)` (`SHORTEST_EVIDENCE_S`). §4.7 is updated.
+- **Graphic first.** A graphic shot is always kept whole. An evidence shot goes directly before or after the graphic shot that covers the claim's first word, and may be shorter, never under the floor. Otherwise the first evidence shot starts on the claim's first word or at most 3 words before it (`EVIDENCE_LEAD_WORDS`). A claim that spans scenes belongs to the scene with its first word.
+- **Leaving a claim out** takes one of three fixed codes: `scene_too_short`, `too_close_to_other_evidence`, `opening_or_closing_shot` (and `not_in_take`, set by code when the words are not in the take). The board shows them; nothing is left out silently.
+
+*What was built.*
+- **Planner** (`services/cut_planning_writer.py`): the `evidence` type is known only when the scene has claims with words in the take; `EVIDENCE (JSON)` block and `shortest_evidence_seconds` in the request; `check_answer` checks every rule above and stores `shots[].evidence` and `content.evidence`. With evidence off the instructions and the request are **byte for byte** what they were (checked, below).
+- **Plan** (`services/shot_plans.py`, `jobs/plan_shots.py`, `services/evidence_review.shown_claims`): the take of each scene gets its claims (mapped with the graphic-suggestion mapper); `inputs.evidence_sha256` makes the plan out of date when the review or the pieces change; a plan is refused with a sentence while evidence is on and the review is not done.
+- **Downstream skip:** definitions, continuity, references, prompts, generation and music cues treat `evidence` as `graphic` (`scene_timeline.DRAWN_SHOT_TYPES`).
+- **Clips** (`services/evidence_clips.py`): `shot_state`, `queue_shot_clip`; the clip is an `evidence_clip` with `purpose='shot'` drawn by the unchanged `render_evidence_clip` job at the shot's frames plus one spare frame. Which clip a shot plays is worked out on read (newest ready clip for the same piece, look and length).
+- **Step** `evidence_clips` ("Draw the evidence shots", group Graphics, needs `shot_plans`; `scene_render`, `music_placement` and `render` need it), with the skip-as-complete rule, and the board's new `notes` (a claim left out and why, or a claim showing fewer pieces than were chosen), shown above the step panel. The step panel is the shot plan panel, which has a new "Evidence to show" list.
+- **Render** (`story_render_plan.py`, `story_renders.py`, `scene_renders.py`, `jobs/render_story.py`, `api/story_renders.py`): an `evidence` shot is a clip of the timeline with no take and no sound of its own (`evidence: {clip_id}` in the frozen timeline); a full render without its clip is refused with a sentence; a scene render shows a placeholder ("No evidence clip yet", "Evidence clip file missing"); staleness reasons for a clip drawn again or no longer ready. Timeline version unchanged (a new optional key).
+- **API/frontend:** `evidence` in every `ShotType`, `ShotEvidenceOut`, `EvidenceResultOut`, `BoardStepOut.notes`, `RenderTakeOut.evidence`; `schema.d.ts` generated from the local code (additions only); "Evidence" shot badge.
+
+*Checked.* Ruff check and format, `npm run lint` and `npm run typecheck` in `frontend/`, `npm run typecheck` in `motion/` pass. **Byte-identical check:** `instructions()` for all four graphics/suggestions combinations and `build_request()` for two takes with graphics on and off give exactly the text of the version before this phase with evidence off (a one-off script, not kept); with evidence on the instructions differ. **`check_answer`** on a 30 s sample take with two claims: a good plan (a claim with two pieces and one with one) is accepted with the right shots, lengths and `content.evidence`; refused with the right sentence: evidence with no claims, too many shots for a claim, an unknown claim id, a first shot 11 words too early, a claim with neither shot nor reason, a bad left-out code, a 2 s evidence shot; accepted: a claim left out with a fixed code. **Render plan** on a scene with two presenter shots and an evidence shot: the timeline has `evidence: {clip_id}`, no take, no sound; it is read back by the render job's `parse_timeline`; no clip and a missing file are refused with their sentences, a scene render shows the placeholder, and a clip of 20 frames for 72 is refused. **A throwaway backend** (own `DATA_DIR` and files folder, deleted afterwards; the real app and `~/VisioStudioData` were not touched): the board answered with the new step for a project with evidence on (`waiting`, needs `shot_plans`, in the Graphics group, listed in the needs of the three render steps) and `off` for evidence off and for a story project.
+
+*Not checked.* (1) **No real planning call and no real evidence shot was drawn or rendered**: the paid GLM cut-planning call needs the owner's go-ahead, and a whole voiced explainer with an imported, reviewed round was not built on the throwaway backend. So `shot_plans._prepare` and `_evidence_reasons`, `evidence_clips.shot_state` and `queue_shot_clip`, the motion render of a shot clip, the callouts staying clear of a real evidence shot, and the board `notes` with real data were only linted and typed, with the pure parts above run. (2) The browser was not opened: the "Evidence to show" list and the notes were typed and linted, not seen. (3) The real app was not rebuilt. (4) Staleness of the project's "Out of date" page does not list evidence clips (the board's step does). (5) The prompt text for evidence on has not been tried on the model: how well GLM follows it is the first thing to look at in the real call.
+
 
 ### EVD-010 — One explainer end to end (owner)
 
@@ -1211,3 +1233,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-17 | EVD-006 | Completed | `import_evidence` job: reads the newest round's `results/` safely, runs checks 1 to 5 with the tool's quote rules (`pypdfium2` added to the backend), copies the files of usable pieces into `media/` under generated names (identical files are shared), stores `evidence_import` and `evidence_item` rows; Import button and report on the evidence panel. No migration. Checked end to end on a throwaway backend with real captures and six hand-broken cases; the real app is not rebuilt yet (new dependency) and the panel is not seen in the browser. |
 | 2026-11-17 | EVD-007 | Completed | Review of the newest import: `services/evidence_review.py`, `GET .../evidence/review`, `PUT .../review/claims/{claim_id}`, `POST .../review/done`, and the review in the evidence panel (claim cards, highlights drawn over the clean screenshot, context window, accept or reject, shown order, "No proof on screen"). Every change is an `evidence_review` version; "Review done" completes the `evidence` step. No migration. Checked end to end on a throwaway backend with real captures (decisions, reload, re-import, a re-captured piece, claims changed, evidence off). The real app is not rebuilt (EVD-006 is still waiting for it too) and the screen is not seen in the browser. |
 | 2026-11-17 | EVD-008 | Completed | The evidence clip: a `Evidence` composition in the motion service (camera from the whole screenshot to the quote, a highlight sweep in the accent colour, a source badge, the caption zone kept free), a new `POST /evidence-renders` route with a 32 MB body limit that takes the images as base64 (the motion service still has no network, volume or secrets), `services/evidence_clip_layout.py`, the `render_evidence_clip` job (checks the video with `ffprobe`), and on the review screen a readability warning and a "Preview video" button with the video and a caption-area switch. 6 s previews at 24 fps. No migration, no compose change. Checked on a throwaway backend with the motion service run locally, real captures (web and PDF, landscape and portrait), frames looked at, the small-text warning and the refusals. The real app is not rebuilt (the motion image must be rebuilt too) and the screen is not seen in the browser. |
+| 2026-11-17 | EVD-009 | In Progress | Evidence shots: the `evidence` shot type and code checks in cut planning (one shot per accepted piece in the owner's order, graphics kept whole, fixed leave-out codes, no reading rate), `evidence_clips` step, shot clips made by EVD-008's job, evidence clip as a shot of the render (callouts clear), board notes, "Evidence to show" list. No migration. Evidence-off prompts byte-identical (checked). Left: one real GLM planning call (owner's go-ahead) and a real render. |

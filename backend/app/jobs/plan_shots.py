@@ -135,6 +135,31 @@ def _is_take(value: Any) -> bool:
             for span in value["spans"]
         )
         and _is_suggestions(value.get("suggestions"))
+        and _is_evidence(value.get("evidence"))
+    )
+
+
+def _is_evidence(value: Any) -> bool:
+    """Whether `value` is the take's optional list of claims with evidence to show, as
+    `shot_plans` writes it (EVD-009): absent, or `[{id, text, words, pieces}]`, where `words` are
+    positions in the take (none for a claim that has no word in it) and `pieces` the item keys.
+    """
+    return value is None or (
+        isinstance(value, list)
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("text"), str)
+            and isinstance(entry.get("words"), list)
+            and all(
+                isinstance(position, int) and not isinstance(position, bool)
+                for position in entry["words"]
+            )
+            and isinstance(entry.get("pieces"), list)
+            and bool(entry["pieces"])
+            and all(isinstance(key, str) for key in entry["pieces"])
+            for entry in value
+        )
     )
 
 

@@ -45,6 +45,9 @@ from app.services import (
     discovery,
     duration_policy,
     event_extraction_writer,
+    evidence_claims,
+    evidence_review,
+    evidence_rounds,
     graphic_suggestions,
     h3_lengths,
     provenance,
@@ -210,6 +213,16 @@ class _Loaded:
     # The words of the story the owner suggests a graphic for (`project.graphic_suggestions`).
     # Empty unless the project has graphics on.
     suggestions: list[dict[str, Any]]
+    # The claims the owner chose to show evidence for (EVD-009), in story order. Empty unless the
+    # project has evidence on and its newest round is reviewed.
+    evidence: list[evidence_review.ShownClaim]
+    # Why shots cannot be planned before the evidence is gathered (EVD-009), or None.
+    evidence_problem: str | None
+
+
+EVIDENCE_FIRST_MESSAGE: Final = (
+    "Gather the evidence first: the shots are planned with the evidence the owner chose to show."
+)
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -234,6 +247,15 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
     except duration_policy.DurationPolicyError as exc:
         policy_problem = str(exc)
 
+    evidence: list[evidence_review.ShownClaim] = []
+    evidence_problem: str | None = None
+    if evidence_claims.wanted(project):
+        # Shots wait for the evidence step (EV-9): its newest round has to be reviewed.
+        if evidence_rounds.is_done(await evidence_rounds.state(session, project)):
+            evidence = await evidence_review.shown_claims(session, project)
+        else:
+            evidence_problem = EVIDENCE_FIRST_MESSAGE
+
     return _Loaded(
         story=project.script_text,
         bible=await story_bible.latest(session, project.id),
@@ -254,7 +276,46 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
             if project.graphics and isinstance(project.graphic_suggestions, list)
             else []
         ),
+        evidence=evidence,
+        evidence_problem=evidence_problem,
     )
+
+
+def _scene_evidence(
+    loaded: _Loaded, item: dict[str, Any], words: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The claims with evidence to show that belong to this scene (EVD-009): `[{id, text, words,
+    pieces}]`, in story order. A claim belongs to the scene that holds its first word. `words` are
+    the positions (from 0) in the take, and are empty for a claim whose words are not in the
+    take; `pieces` are the item keys in the owner's order. Empty when there are none, or when the
+    story is no longer the one the scenes were found in (the plan says it is out of date then).
+    """
+    story = loaded.story
+    if not loaded.evidence or story is None:
+        return []
+    start, end = item["start"], item["end"]
+    if story[start:end] != item["text"]:
+        return []
+    mine = [claim for claim in loaded.evidence if start <= claim.start < end]
+    if not mine:
+        return []
+    entries = [
+        {"id": claim.id, "start": claim.start, "end": claim.end, "text": claim.text}
+        for claim in mine
+    ]
+    covered = {
+        found["id"]: found["words"]
+        for found in graphic_suggestions.take_suggestions(item["text"], start, words, entries)
+    }
+    return [
+        {
+            "id": claim.id,
+            "text": claim.text,
+            "words": covered.get(claim.id, []),
+            "pieces": [piece.item_key for piece in claim.pieces],
+        }
+        for claim in mine
+    ]
 
 
 def _scene_suggestions(
@@ -319,9 +380,11 @@ def _scene_refusal(
     *,
     continuous: bool = False,
     clock: take_timings.TakeClock | None = None,
+    evidence_problem: str | None = None,
 ) -> str | None:
     """Why this scene's shots cannot be planned now, or None. A continuous explainer is not
-    judged by its units' audio, which it never makes, but by its scene's take (`clock`).
+    judged by its units' audio, which it never makes, but by its scene's take (`clock`). With
+    `evidence_problem` (evidence is on and not reviewed yet, EVD-009) it cannot be planned yet.
     """
     if definition is None or definition.row is None:
         return "Define this scene first: its shots are planned from its definition."
@@ -340,6 +403,8 @@ def _scene_refusal(
         take_reason = _take_refusal(clock)
         if take_reason is not None:
             return take_reason
+        if evidence_problem is not None:
+            return evidence_problem
     else:
         problems = _unit_problems(scene)
         if problems:
@@ -459,7 +524,12 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
     definition_entry = loaded.definitions.get(item["id"])
     clock = loaded.clocks.get(item["id"])
     refusal = _scene_refusal(
-        scene, definition_entry, loaded.current, continuous=loaded.continuous, clock=clock
+        scene,
+        definition_entry,
+        loaded.current,
+        continuous=loaded.continuous,
+        clock=clock,
+        evidence_problem=loaded.evidence_problem,
     )
     if refusal is not None:
         raise ShotPlansError(refusal)
@@ -502,6 +572,10 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         if marked:
             # Only a scene with marked words has the key, so every other job is as it was.
             take["suggestions"] = marked
+        proved = _scene_evidence(loaded, item, take["words"])
+        if proved:
+            # Likewise only a scene with evidence to show has this key (EVD-009).
+            take["evidence"] = proved
         audio_artifacts.append(
             {
                 "kind": SPEECH_TAKE_KIND,
@@ -540,11 +614,16 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
     suggestions_hash = graphic_suggestions.fingerprint(
         take["suggestions"] if take is not None and "suggestions" in take else []
     )
+    evidence_hash = graphic_suggestions.fingerprint(
+        take["evidence"] if take is not None and "evidence" in take else []
+    )
     inputs = {
         "project_id": project.id,
         "scene_id": item["id"],
         "story_sha256": story_bible.story_sha256(story),
         "scene_text_sha256": event_extraction_writer.scene_text_sha256(item["text"]),
+        # Only a scene with evidence to show has this key (EVD-009); see `_evidence_reasons`.
+        **({"evidence_sha256": evidence_hash} if evidence_hash else {}),
         # Only a scene with marked words has this key. A plan without it is current when the
         # scene has none (see `_suggestion_reasons`).
         **({"graphic_suggestions_sha256": suggestions_hash} if suggestions_hash else {}),
@@ -822,6 +901,7 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
             loaded.current,
             continuous=loaded.continuous,
             clock=loaded.clocks.get(item["id"]),
+            evidence_problem=loaded.evidence_problem,
         )
         if refusal is not None:
             skipped.append(Skipped(item["id"], item["title"], refusal))
@@ -933,6 +1013,22 @@ def _suggestion_reasons(
     return ["The graphic suggestions for this scene changed since these shots were planned."]
 
 
+def _evidence_reasons(
+    row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
+) -> list[str]:
+    """Why a cut plan no longer fits the evidence the owner chose to show in its scene (EVD-009):
+    a decision or an import changed which pieces are shown, or where. A plan made before evidence
+    existed records none, which is the same as a scene with none. A take that is not ready has
+    no words to place the claims on, so it gives no reason here.
+    """
+    if not isinstance(row.inputs, dict) or clock is None or not clock.words:
+        return []
+    now = graphic_suggestions.fingerprint(_scene_evidence(loaded, item, clock.words))
+    if row.inputs.get("evidence_sha256") == now:
+        return []
+    return ["The evidence to show in this scene changed since these shots were planned."]
+
+
 def _out_of_date_reasons(
     row: ShotPlan,
     loaded: _Loaded,
@@ -990,6 +1086,7 @@ def _out_of_date_reasons(
         clock = loaded.clocks.get(scene.scene.item["id"])
         reasons.extend(_take_reasons(row, clock))
         reasons.extend(_suggestion_reasons(row, loaded, scene.scene.item, clock))
+        reasons.extend(_evidence_reasons(row, loaded, scene.scene.item, clock))
     else:
         now = {item.unit["id"]: item for item in scene.units}
         reasons.extend(_audio_reasons(row, loaded.policy, now))
@@ -1238,6 +1335,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             loaded.current,
             continuous=loaded.continuous,
             clock=loaded.clocks.get(item["id"]),
+            evidence_problem=loaded.evidence_problem,
         )
         if blocked_reason is None and active:
             blocked_reason = "The shots are already being planned."

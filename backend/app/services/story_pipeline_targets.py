@@ -38,11 +38,13 @@ from app.services import (
     character_images,
     character_links,
     character_relations,
+    cut_planning_writer,
     discovery,
     environment_definitions,
     environment_links,
     environment_views,
     evidence_claims,
+    evidence_clips,
     evidence_rounds,
     explainer,
     generation_requests,
@@ -2070,6 +2072,78 @@ async def _start_graphics(
     return await _start_each(session, targets, deadline, make)
 
 
+# --- Evidence clips (EVD-009) -----------------------------------------------------------------
+
+
+def _evidence_notes(plans: shot_plans.ShotPlansState) -> list[str]:
+    """What the planner did with each claim that has evidence to show, when it did less than
+    show every chosen piece: "Scene 2: 'revenue rose 40%' has no evidence shot: <reason>". Not a
+    problem, so it is a note, not a failure. Pure.
+    """
+    notes: list[str] = []
+    for entry in plans.entries:
+        content = entry.content
+        results = content.get(cut_planning_writer.EVIDENCE_KEY) if content is not None else None
+        for result in results if isinstance(results, list) else []:
+            if not isinstance(result, dict):
+                continue
+            label = _scene_label(entry.item)
+            words = f"'{result.get('text')}'"
+            if result.get("left_out") is not None:
+                reason = result.get("reason") or "no reason was given"
+                notes.append(f"{label}: {words} has no evidence shot: {reason}")
+            elif isinstance(result.get("shown"), int) and result["shown"] < result.get("pieces", 0):
+                notes.append(
+                    f"{label}: {words} shows {result['shown']} of {result['pieces']} pieces "
+                    "of evidence."
+                )
+    return notes
+
+
+async def _evaluate_evidence_clips(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with evidence on has evidence clips. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not evidence_claims.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await evidence_clips.shot_state(session, project)
+    targets: list[Target] = []
+    for scene in state.entries:
+        scene_id = scene.item["id"]
+        for shot in scene.shots:
+            shot_id = shot.shot["id"]
+            active = shot.status == "working"
+            targets.append(
+                Target(
+                    _shot_key(scene_id, shot_id),
+                    _shot_label(scene.item, shot.shot),
+                    shot.done,
+                    active=active,
+                    block=None if shot.done or active else shot.blocked_reason,
+                    last_error=None if shot.done else shot.last_error,
+                    ref=(scene_id, shot_id),
+                    stale=shot.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
+    return StepView(targets, warnings=_evidence_notes(await shot_plans.state(session, project)))
+
+
+async def _start_evidence_clips(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        job = await evidence_clips.queue_shot_clip(session, project, target.ref[0], target.ref[1])
+        return (job.id,)
+
+    return await _start_each(session, targets, deadline, make)
+
+
 # --- Shot definitions -----------------------------------------------------------------------
 
 
@@ -2671,6 +2745,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),
     "graphics": Adapter(_evaluate_graphics, _start_graphics),
+    "evidence_clips": Adapter(_evaluate_evidence_clips, _start_evidence_clips),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),
     "references": Adapter(_evaluate_references, _start_references),

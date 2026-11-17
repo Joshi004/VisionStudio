@@ -204,6 +204,12 @@ STEPS: Final[tuple[Step, ...]] = (
     # any project that is not a continuous explainer with graphics on. The music placement and
     # the render wait for it (EXG-007): a graphic shot is a clip of the timeline.
     Step("graphics", "Make the graphics", ("graphic_briefs", "graphic_theme"), kind=SCENE),
+    # EVD-009: the clip of each evidence shot the cut planner chose, drawn at the shot's exact
+    # length from the piece of evidence the owner accepted. Skipped as complete for any project
+    # that is not a continuous explainer with evidence on. A project with evidence on but no
+    # evidence shot has no targets. The renders wait for it: an evidence shot is a clip of the
+    # timeline, like a graphic shot.
+    Step("evidence_clips", "Draw the evidence shots", ("shot_plans",), kind=SCENE),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.
     Step("music_plan", "Plan the music", ("shot_plans", "music_bible")),
@@ -246,23 +252,31 @@ STEPS: Final[tuple[Step, ...]] = (
     Step(
         "scene_render",
         "Render the scenes",
-        ("shot_generation", "graphics", "callout_plan", "callout_graphics", "shot_plans"),
+        (
+            "shot_generation",
+            "graphics",
+            "evidence_clips",
+            "callout_plan",
+            "callout_graphics",
+            "shot_plans",
+        ),
         kind=SCENE,
         whole=("shot_plans",),
     ),
     # MUSIC-011: the exact place of every selected music take on the render's own timeline. It
     # needs the takes of the music and of the shots. Skipped as complete when music is off.
     # The render waits for it (MUSIC-012): it mixes the placed music in.
-    # EXG-007: both also wait for the graphics, whose videos are shots of the timeline.
+    # EXG-007: both also wait for the graphics, whose videos are shots of the timeline, and
+    # (EVD-009) for the evidence clips, which are too.
     Step(
         "music_placement",
         "Place the music",
-        ("music_generation", "shot_generation", "graphics"),
+        ("music_generation", "shot_generation", "graphics", "evidence_clips"),
     ),
     Step(
         "render",
         "Render the video",
-        ("shot_generation", "music_placement", "graphics", "callout_graphics"),
+        ("shot_generation", "music_placement", "graphics", "evidence_clips", "callout_graphics"),
     ),
 )
 

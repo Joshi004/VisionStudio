@@ -54,6 +54,7 @@ from app.services import (
     callout_render,
     caption_plan,
     cut_planning_writer,
+    evidence_clips,
     graphic_theme,
     projects,
     provenance,
@@ -391,6 +392,33 @@ async def graphic_videos(
     }
 
 
+async def evidence_clips_now(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], evidence_clips.ShotClipEntry]:
+    """Every evidence shot of the newest plans, by `(scene id, shot id)` (EVD-009), with where its
+    clip stands. Empty for a project without evidence, which reads nothing of it.
+    """
+    state = await evidence_clips.shot_state(session, project)
+    return {
+        (scene.item["id"], shot.shot["id"]): shot for scene in state.entries for shot in scene.shots
+    }
+
+
+def _evidence_source(
+    entry: evidence_clips.ShotClipEntry | None,
+) -> story_render_plan.EvidenceSource | None:
+    """The clip an evidence shot plays: its newest clip, once it is ready and is the current one."""
+    clip = entry.clip if entry is not None and entry.done else None
+    if clip is None or clip.media_path is None:
+        return None
+    return story_render_plan.EvidenceSource(
+        clip_id=clip.id,
+        path=clip.media_path,
+        frame_count=clip.frame_count,
+        file_exists=file_exists(clip.media_path),
+    )
+
+
 def _graphic_source(used: shot_graphics.UsedVideo | None) -> story_render_plan.GraphicSource | None:
     row = used.attempt.row if used is not None else None
     if used is None or row is None or row.media_path is None:
@@ -421,6 +449,7 @@ async def scene_sources(
     switched = await shot_voice_sources.clip_shots(session, project)
     continuous = word_timings.times_takes(project)
     graphics = await graphic_videos(session, project)
+    evidence = await evidence_clips_now(session, project)
     scenes: list[story_render_plan.SceneSource] = []
     for entry in plans.entries:
         scene_id = entry.item["id"]
@@ -434,6 +463,7 @@ async def scene_sources(
         if blocked is None and entry.timeline is not None:
             presenter_ids: set[str] = set()
             graphic_ids: set[str] = set()
+            evidence_ids: set[str] = set()
             descriptions = _shot_descriptions(entry)
             if continuous and entry.row is not None:
                 presenter_ids = {
@@ -446,6 +476,11 @@ async def scene_sources(
                     for shot in entry.row.content["shots"]
                     if shot.get("type") == scene_timeline.GRAPHIC_SHOT_TYPE
                 }
+                evidence_ids = {
+                    str(shot["id"])
+                    for shot in entry.row.content["shots"]
+                    if shot.get("type") == scene_timeline.EVIDENCE_SHOT_TYPE
+                }
             for span in entry.timeline.shots:
                 if span.shot_id in graphic_ids:
                     # No take (EXG-007): the video is the one the graphic rule picks.
@@ -457,6 +492,20 @@ async def scene_sources(
                             take=None,
                             is_graphic=True,
                             graphic=_graphic_source(graphics.get((scene_id, span.shot_id))),
+                            description=descriptions.get(span.shot_id),
+                        )
+                    )
+                    continue
+                if span.shot_id in evidence_ids:
+                    # No take either (EVD-009): the clip is the newest one drawn for the shot.
+                    shots.append(
+                        story_render_plan.ShotSource(
+                            shot_id=span.shot_id,
+                            start_s=span.start_s,
+                            end_s=span.end_s,
+                            take=None,
+                            is_evidence=True,
+                            evidence=_evidence_source(evidence.get((scene_id, span.shot_id))),
                             description=descriptions.get(span.shot_id),
                         )
                     )
@@ -749,11 +798,13 @@ def _render_reasons(
     callouts: CalloutGate,
     switched: set[tuple[str, str]],
     graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None] | None = None,
+    evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry] | None = None,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
     `switched` is every presenter shot now on its clip's own voice (`shot_voice_sources`).
-    `graphics` is the video each graphic shot uses now (`graphic_videos`).
+    `graphics` is the video each graphic shot uses now (`graphic_videos`), and `evidence` the
+    clip of each evidence shot now (`evidence_clips_now`).
     """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
@@ -780,6 +831,9 @@ def _render_reasons(
             continue
         if isinstance(shot.get("graphic"), dict):
             reasons.extend(graphic_reasons(shot, graphics or {}))
+            continue
+        if isinstance(shot.get("evidence"), dict):
+            reasons.extend(evidence_reasons(shot, evidence or {}))
             continue
         now = shots.get((shot.get("scene_id"), shot.get("shot_id")))
         selected = now.selected if now is not None else None
@@ -866,6 +920,21 @@ def graphic_reasons(
         f"{_version_text(used.engine, used.attempt.row.attempt)}; this video used "
         f"{_version_text(then.get('engine'), then.get('attempt'))})."
     ]
+
+
+def evidence_reasons(
+    shot: dict[str, Any], evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry]
+) -> list[str]:
+    """Why the evidence clip a render used for a shot is not the one it plays now (EVD-009)."""
+    now = evidence.get((str(shot.get("scene_id")), str(shot.get("shot_id"))))
+    if now is None:
+        return []  # the scenes' own reason says so
+    label = f"The evidence clip of shot {shot.get('shot_id')} of scene {shot.get('scene_index')}"
+    if not now.done or now.clip is None:
+        return [f"{label} is not ready now."]
+    if now.clip.id == shot["evidence"].get("clip_id"):
+        return []
+    return [f"{label} was drawn again since this video was made."]
 
 
 _LOOK_AGAIN: Final = "The callout look was written again since this video was made."
@@ -1002,6 +1071,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     callouts = await callout_gate(session, project)
     switched = await shot_voice_sources.clip_shots(session, project)
     graphics = await graphic_videos(session, project)
+    evidence = await evidence_clips_now(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -1032,6 +1102,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             callouts,
             switched,
             graphics,
+            evidence,
         )
         entries.append(
             RenderEntry(

@@ -6746,6 +6746,11 @@ export interface components {
             blocked_by: string[];
             /** Blocked Reason */
             blocked_reason: string | null;
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
         };
         /** BoundaryDecisionIn */
         BoundaryDecisionIn: {
@@ -9279,6 +9284,25 @@ export interface components {
             hint: string;
             /** Kind Hint */
             kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
+        };
+        /**
+         * EvidenceResultOut
+         * @description What became of one claim with evidence to show in a scene (EVD-009): how many pieces were
+         *     chosen, how many got a shot, and why it got none (`left_out` is a code, `reason` a sentence).
+         */
+        EvidenceResultOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Text */
+            text: string;
+            /** Pieces */
+            pieces: number;
+            /** Shown */
+            shown: number;
+            /** Left Out */
+            left_out?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * EvidenceReviewOut
@@ -14238,7 +14262,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -14523,6 +14547,14 @@ export interface components {
             created_at: string;
         };
         /**
+         * RenderEvidenceOut
+         * @description The clip a render used for an evidence shot (EVD-009).
+         */
+        RenderEvidenceOut: {
+            /** Clip Id */
+            clip_id: number;
+        };
+        /**
          * RenderGraphicOut
          * @description The graphic a render used for a graphic shot (EXG-007): which attempt of which version.
          */
@@ -14607,8 +14639,8 @@ export interface components {
         };
         /**
          * RenderTakeOut
-         * @description The take a render used for one shot, or the graphic it used for a graphic shot (which has
-         *     no take).
+         * @description The take a render used for one shot, or the graphic it used for a graphic shot, or the
+         *     clip it used for an evidence shot (which have no take).
          */
         RenderTakeOut: {
             /** Scene Id */
@@ -14622,6 +14654,7 @@ export interface components {
             /** Take Number */
             take_number: number | null;
             graphic: components["schemas"]["RenderGraphicOut"] | null;
+            evidence?: components["schemas"]["RenderEvidenceOut"] | null;
             /** Placeholder */
             placeholder: boolean;
             /** Frames */
@@ -14756,7 +14789,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -16405,7 +16438,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Target Duration */
             target_duration: number;
             /**
@@ -16422,6 +16455,13 @@ export interface components {
             place?: string | null;
             /** Description */
             description: string;
+        };
+        /** ShotEvidenceOut */
+        ShotEvidenceOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Piece */
+            piece: number;
         };
         /** ShotGraphicAskRun */
         ShotGraphicAskRun: {
@@ -16638,7 +16678,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Target Duration */
             target_duration: number;
             /**
@@ -16665,6 +16705,7 @@ export interface components {
             end_s?: number | null;
             /** Spoken Text */
             spoken_text?: string | null;
+            evidence?: components["schemas"]["ShotEvidenceOut"] | null;
         };
         /** ShotPlacementOut */
         ShotPlacementOut: {
@@ -16692,6 +16733,11 @@ export interface components {
              * @default []
              */
             graphic_suggestions: components["schemas"]["GraphicSuggestionResultOut"][];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceResultOut"][];
         };
         /** ShotPlanEditIn */
         ShotPlanEditIn: {
@@ -17032,7 +17078,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -17108,7 +17154,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Source Event Ids */
@@ -18578,7 +18624,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
