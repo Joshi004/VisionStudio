@@ -178,6 +178,11 @@ SAVING_EVIDENCE_CLAIMS: Final = "saving the evidence claims"
 # `write_evidence_brief` is a local job: it writes the round's folder and files, then the row.
 WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"
 
+# --- Running: the import of a research round's results (EVD-006) -------------------------
+# `import_evidence` is a local job: it reads and checks the round's results, copies the files,
+# then saves the rows.
+IMPORTING_EVIDENCE: Final = "checking and copying the evidence"
+
 # --- Running: the callout look of a motion explainer (CMO-002) ---------------------------
 # `write_callout_look` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_LOOK: Final = "saving the callout look"

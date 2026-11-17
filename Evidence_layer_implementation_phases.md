@@ -284,7 +284,7 @@ The import (EVD-006) checks every piece of evidence in this order. The capture t
 5. **Numbers.** A number the claim says (`numbers_in`) that the quote does not say gives a **warning**, never a refusal.
 6. **The owner.** Accepts or rejects (EVD-007).
 
-A failure in checks 1 to 4 makes that piece of evidence unusable, and the review screen shows why. The checks prove that the quote is really in the captured source. They do not prove that the source is right: the owner's review does that.
+A failure in checks 1 to 4 makes that piece of evidence unusable, and the review screen shows why. (As built in EVD-006, the import is a little stricter than this list and than `validate`: an image must be a PNG, the addresses must be http or https, text values have the tool's length limits, and a link in a claim folder makes every piece of that claim unusable.) The checks prove that the quote is really in the captured source. They do not prove that the source is right: the owner's review does that.
 
 ### 4.7 The evidence shot on video
 
@@ -322,7 +322,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Completed |
 | EVD-004 | The capture tool | Code (Mac) | — | Completed |
 | EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | In Progress |
-| EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Not Started |
+| EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Completed |
 | EVD-007 | The review screen | Code | EVD-006 | Not Started |
 | EVD-008 | The evidence clip and its preview | Code | EVD-006 | Not Started |
 | EVD-009 | Evidence shots in the cut plan and the render | Code | EVD-007, EVD-008 | Not Started |
@@ -340,7 +340,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 7 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003 and EVD-004, 2026-11-17), 2 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left). Ready to start: EVD-006.
+**Progress snapshot:** 8 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004 and EVD-006, 2026-11-17), 2 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left). Ready to start: EVD-007 and EVD-008.
 
 ---
 
@@ -845,7 +845,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-006 — Importing and checking the evidence
 
-**Status:** Not Started
+**Status:** Completed (2026-11-17); the real app has not been rebuilt yet
 
 **Objective.** Bring a round's results into the app safely, check every piece of evidence (§4.6), and store it for review.
 
@@ -882,12 +882,29 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Import job and checks
-- [ ] Storage copy, limits, report
-- [ ] Re-import behaviour
-- [ ] Standard checks
+- [x] Import job and checks
+- [x] Storage copy, limits, report
+- [x] Re-import behaviour
+- [x] Standard checks
+- [x] Checked end to end on a throwaway backend (own `DATA_DIR` and files folder, a throwaway project, real captures made by the tool)
+- [ ] Real app rebuilt (a dependency, `pypdfium2`, was added to the backend, so the image must be rebuilt: `docker compose up -d --build backend frontend`, with no job running, never `down` or `-v`). The agent did not rebuild it.
+- [ ] Owner: the Import button and the import report seen in the browser (the agent did not open them)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-17).
+- **Where.** `services/evidence_text.py` (the tool's quote rules, repeated), `services/evidence_checks.py` (pure checks 1 to 5 and `item_key`), `services/evidence_import.py` (reading the round folder, refusal, queueing, copying, saving), `jobs/import_evidence.py` (job type `import_evidence`, `provider='local'`, `start_again`, phase `IMPORTING_EVIDENCE`), `api/evidence.py`, `EvidencePanel.tsx` and `api/evidence.ts`. New backend dependency `pypdfium2` (5.15.2, the version the tool locks; Apache-2.0/BSD-3). No migration, no setting, no compose change. `DATABASE_STRUCTURE.md` has an Update entry, the `item_key` definition, the `results`, `report`, `capture` and `checks` shapes, and the job's `input` and `output`.
+- **Decisions ("Planning decides").**
+  - *Limits:* the capture tool's: `result.json` 1 MB; an image 20 MB and 40 million pixels; a text copy 5 MB; a PDF 50 MB; 12 rectangles; `max_evidence_per_claim` pieces per claim (the rest are left out and the claim says so). Added: **1 GB for the files of the whole round**; a file that would pass it is reported as "left out because the round's files are too large in all". File types are checked from content.
+  - *`item_key`:* SHA-256 of the claim id, kind, relation, normalised quote, page, rectangles (6 places) and the real hashes of the four files. The agent's piece id is not in it; a piece that is not usable has it, so its key never equals a usable piece's. A second usable piece with the same key in one claim is refused as "the same evidence as eN" (check `duplicate`).
+  - *A file that fails a check is copied at all:* **no** (the owner's choice). The item row is stored with `usable` false, its reasons in `checks` and NULL file columns.
+  - *Importing again* (the owner's choice: allowed also after "Review done"): adds the next `evidence_import.version` with every item. After "Review done" the round reads `imported` again on its own (the newest review is for an older import), so the `evidence` step is not done until the owner reviews again. Checked.
+- **Safety (EV-7).** Only the claim ids of the **stored** brief are looked at (never the folder names or the brief on disk); a round folder, `results/` or a claim folder that is a link is refused; every file is opened with `O_NOFOLLOW` and `O_NONBLOCK`, must be a regular file (`fstat`) and is read with a size limit; only plain file names are read (`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`); the round folder is never written. Stored names are made by `Storage` (`media/<project_id>/<32 hex>.png|txt|pdf`). The agent's text is stored as text and never used as a path or as HTML. Sentences sent to the browser carry agent values only cut short (`shown`). **A limit to know about:** a hostile PDF is parsed by pdfium inside the backend process (the same library as the tool, with the 50 MB limit); there is no separate sandbox.
+- **Stricter than `validate`, on purpose** (the review screen shows these values): an image must be a PNG; `url`, `final_url` and `archive_url` must be http or https; text values have the tool's length limits (the quote 3 to 600 characters); a link anywhere in a claim folder makes every piece of that claim unusable. The rules of checks 1 to 4 are otherwise those of `validate` in the same order with the same wording, and on the hand-broken round both gave the same refusals. Check 5 (a number of the claim, by `numbers_in`, that the quote does not say) is a warning `number_not_in_quote` on every piece, usable or not.
+- **What an import stores** (details in `DATABASE_STRUCTURE.md`): `evidence_import.results[claim_id]` is `{status, summary, attempts, problems, warnings}` for every claim of the brief (status null with no problems: no `result.json`; with problems: one that cannot be used), `report` has `by_status` including `no_result` and `invalid`. `evidence_item.capture` is tidied and has **no file names and no hashes** (the columns have the paths and hashes); `source` is tidied; `evidence_id` is `?<position>` when the agent's id was not valid or was used twice. A claim whose `result.json` is not valid (wrong schema, round or claim, no status, no summary) gets no item rows at all.
+- **Files are shared.** A file whose SHA-256 equals one an earlier import of the round stored, or one stored earlier in the same import, is used again (after the stored file is checked to still have that hash). So two items or two imports may point at one stored file (seen: two claims quoting one PDF share it). **EVD-007 and later must never delete a stored file because one item is rejected or an import is replaced.**
+- **API.** `POST /api/projects/{id}/evidence/import` (202 `{job_id}`, 422 with the reason: no evidence, no round, the claims changed since the brief, a brief is being written, files folder problem, no `result.json` written yet). `GET .../evidence` gained `can_import`, `import_blocked_reason` (cheap: it does not look at the folder, so "no result yet" is only found when asked), `import_job` and `latest_import` (`version`, `report`, and per claim `status`, `result_state` `ok|no_result|invalid`, `problems`, `warnings` and `items` with `usable`, `reasons`, `warnings`). The agent's summary, quote and notes are **not** in this answer: **EVD-007 needs its own endpoint for them**, and must refuse to accept an item that is not usable and ignore a decision whose `item_key` is not in the newest import.
+- **UI.** The evidence panel has "Import evidence" (or "Import again"), the import job's badge and error, and the report: counts by status and a list of claims with problems, refused pieces and warnings in plain text.
+- **Checked** (2026-11-17, on a throwaway backend started on its own `DATA_DIR` and files folder, a throwaway project, all deleted afterwards; the real app and `~/VisioStudioData` were not touched). Ten claims; the good ones were captured **by the capture tool** from real sources (a Wikipedia sentence of two lines, and a two-line quote of the arXiv "Attention Is All You Need" PDF with a line-end hyphen in "English-to-German", plus one `not_found` report) and `validate` passed them. Then six hand-broken copies. One import: **c1 to c3 usable, c4 `not_found` imported, and each of these refused with its reason while the rest imported**: a link in the claim folder, an oversized file (22.5 MB), a text file named `e1.png` (hash and type), a file name `../c1/e1.png`, a quote not in the text copy, a rectangle outside the image. A claim saying "41" with a quote saying 28.4 gave the warning. The stored files are in `media/<project>/` under generated names; a `shasum` listing of the round folder (links included) before and after is **identical**. Importing again gave version 2 with the same `item_key` for every item and **no new media file**; after a review row marked done, the round read `reviewed` and the new import made it `imported` again; re-capturing one item with another relation changed only that item's key. A claim edit after the brief gave 422 "The claims changed since round r1" and `can_import` false; a brief with no `results` gave 422 "No result has been written". Reader edge cases run on a scratch folder: a link as a claim folder, a link as `result.json`, bad JSON, a 100,000-deep JSON, a claim id with `..`, and the round size limit. **Quote-rule parity**: the backend's `evidence_text` and the tool's `text.py` and `pdf.find_in_text` gave the same normalised text and map for 3,011 sample strings in all three hyphen modes, and the same answer for 900 random quotes of the real PDF's first pages. Ruff check and format, `npm run lint` and `npm run typecheck` pass; `schema.d.ts` was generated from the local code (additions only).
+- **Not checked.** (1) The real app was not rebuilt (see the checklist), so nothing was imported on it and no real Docker run of the new dependency was made (the lock resolves a manylinux wheel for `python:3.13-slim`, not tried). (2) The panel and its import report were not opened in a browser. (3) The failure paths that delete copied files (the job cancelled during an import, the files folder going away, the database refusing the rows) were read, not run. (4) A PDF with a rotated or odd page and a scanned PDF are only refused by the tool; the import reads PDFs through the same `pypdfium2` text, but a PDF the tool never made was not tried. (5) A round of many large files near the 1 GB limit was not tried (the limit was run with a 10-byte budget).
 
 ### EVD-007 — The review screen
 
@@ -1146,3 +1163,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-17 | EVD-003 | Completed | `evidence` step (needs `story_bible` and `evidence_claims`; `shot_plans` needs it), `write_evidence_brief` job and round folder in the files folder, `waiting_for` run pause that goes on by itself, board status `owner`, evidence API and panel. No migration. Real app rebuilt and checked with throwaway projects; a waiting run end to end and the UI in the browser are left to the owner. |
 | 2026-11-17 | EVD-004 | Completed | `tools/evidence-capture/` (Python, Playwright, pypdfium2): `web`, `pdf`, `report`, `remove`, `validate`, `draw`. Checked on real public pages and PDFs, in both orientations, with refusals (private address, scan, missing quote) and a hand-broken round. No backend change. A public-to-private redirect makes one blind GET before it is refused (see the notes). The owner's Appendix A set is still to be run. |
 | 2026-11-17 | EVD-005 | In Progress | `tools/evidence-skill/` (`visio-evidence` skill, reference, `install.sh`, installed to `~/.claude/skills/` for Cursor and Claude Code), the README prompt in `evidence_rounds.py` replaced, README section added. No migration. Not yet run by an agent: the owner's runs in Cursor and Claude Code on the test round are left, and the real app is not rebuilt. |
+| 2026-11-17 | EVD-006 | Completed | `import_evidence` job: reads the newest round's `results/` safely, runs checks 1 to 5 with the tool's quote rules (`pypdfium2` added to the backend), copies the files of usable pieces into `media/` under generated names (identical files are shared), stores `evidence_import` and `evidence_item` rows; Import button and report on the evidence panel. No migration. Checked end to end on a throwaway backend with real captures and six hand-broken cases; the real app is not rebuilt yet (new dependency) and the panel is not seen in the browser. |

@@ -23,11 +23,11 @@
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), the research brief of the evidence layer
-  (`write_evidence_brief.py`), the generated component, the block scene and the preview of a
-  motion callout (`write_callout_component.py`, `write_callout_scene.py`,
-  `render_callout_preview.py`), and the Audio video lab of a character
-  (`time_lab_speech_words.py`, `render_av_test.py`), and the brief and the word timing
-  of a Graphics lab run
+  (`write_evidence_brief.py`), the import of a round's results (`import_evidence.py`), the
+  generated component, the block scene and the preview of a motion callout
+  (`write_callout_component.py`, `write_callout_scene.py`, `render_callout_preview.py`), and the
+  Audio video lab of a character (`time_lab_speech_words.py`, `render_av_test.py`), and the
+  brief and the word timing of a Graphics lab run
   (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`), the template spec of a Graphics lab
   run (`write_lab_graphic_template_spec.py`), the block scene of a Graphics lab run
   (`write_lab_graphic_block_scene.py`), the generated component of a Graphics lab run
@@ -75,6 +75,7 @@ def register_handlers() -> None:
     from app.jobs.generate_lab_music import GenerateLabMusicHandler
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.generate_shot import GenerateShotHandler
+    from app.jobs.import_evidence import ImportEvidenceHandler
     from app.jobs.lab_voice import LabVoiceHandler
     from app.jobs.place_music import PlaceMusicHandler
     from app.jobs.plan_environment_views import PlanEnvironmentViewsHandler
@@ -196,6 +197,7 @@ def register_handlers() -> None:
     handlers.register(RenderShotGraphicHandler())
     handlers.register(SuggestEvidenceClaimsHandler())
     handlers.register(WriteEvidenceBriefHandler())
+    handlers.register(ImportEvidenceHandler())
     handlers.register(WriteThumbnailConceptsHandler())
     handlers.register(WriteYouTubeDraftHandler())
     handlers.register(PublishYouTubeHandler())

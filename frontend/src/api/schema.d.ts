@@ -725,6 +725,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Evidence
+         * @description Starts the job that imports the newest round's results. If one is already waiting or
+         *     running for the project, its id is returned and no second job is made.
+         */
+        post: operations["import_evidence_api_projects__project_id__evidence_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -9214,6 +9235,12 @@ export interface components {
             prompt: string;
             /** Skill */
             skill: string;
+            /** Can Import */
+            can_import: boolean;
+            /** Import Blocked Reason */
+            import_blocked_reason: string | null;
+            import_job: components["schemas"]["EvidenceBriefJobOut"] | null;
+            latest_import: components["schemas"]["ImportOut"] | null;
         };
         /** FactsOut */
         FactsOut: {
@@ -10498,6 +10525,67 @@ export interface components {
             name: string;
             /** Reason */
             reason: string;
+        };
+        /** ImportClaimOut */
+        ImportClaimOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Status */
+            status: ("found" | "partial" | "not_found" | "contradicted" | "blocked") | null;
+            /**
+             * Result State
+             * @enum {string}
+             */
+            result_state: "ok" | "no_result" | "invalid";
+            /** Problems */
+            problems: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["ImportItemOut"][];
+        };
+        /**
+         * ImportItemOut
+         * @description One piece of evidence of the newest import.
+         */
+        ImportItemOut: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Usable */
+            usable: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * ImportOut
+         * @description The newest import of the newest round.
+         */
+        ImportOut: {
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            report: components["schemas"]["ImportReportOut"];
+            /** Claims */
+            claims: components["schemas"]["ImportClaimOut"][];
+        };
+        /** ImportReportOut */
+        ImportReportOut: {
+            /** Claims */
+            claims: number;
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            /** Items */
+            items: number;
+            /** Usable Items */
+            usable_items: number;
         };
         /** InnerPlaceIn */
         InnerPlaceIn: {
@@ -21240,6 +21328,46 @@ export interface operations {
                 };
             };
             /** @description A brief cannot be written now: the project has no evidence, the claims are not ready, nothing changed, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_evidence_api_projects__project_id__evidence_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results cannot be imported now: the project has no evidence, there is no round, the claims changed since the round's brief, nothing was written in results yet, or the files folder is not available. */
             422: {
                 headers: {
                     [name: string]: unknown;
