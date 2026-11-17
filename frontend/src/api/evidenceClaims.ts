@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { evidenceKey } from "./evidence";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY, isValidProjectId } from "./projects";
@@ -74,7 +75,11 @@ export function useMarkEvidenceClaim(projectId: number) {
       }
       return data;
     },
-    onSuccess: (data) => queryClient.setQueryData(evidenceClaimsKey(projectId), data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(evidenceClaimsKey(projectId), data);
+      // The round of the evidence step may no longer have the claims that count.
+      void queryClient.invalidateQueries({ queryKey: evidenceKey(projectId) });
+    },
   });
 }
 
@@ -98,7 +103,11 @@ export function useEditEvidenceClaim(projectId: number) {
       }
       return data;
     },
-    onSuccess: (data) => queryClient.setQueryData(evidenceClaimsKey(projectId), data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(evidenceClaimsKey(projectId), data);
+      // The round of the evidence step may no longer have the claims that count.
+      void queryClient.invalidateQueries({ queryKey: evidenceKey(projectId) });
+    },
   });
 }
 
@@ -119,7 +128,11 @@ export function useRemoveEvidenceClaim(projectId: number) {
       }
       return data;
     },
-    onSuccess: (data) => queryClient.setQueryData(evidenceClaimsKey(projectId), data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(evidenceClaimsKey(projectId), data);
+      // The round of the evidence step may no longer have the claims that count.
+      void queryClient.invalidateQueries({ queryKey: evidenceKey(projectId) });
+    },
   });
 }
 
@@ -143,6 +156,7 @@ export function useSuggestEvidenceClaims(projectId: number) {
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: evidenceClaimsKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: evidenceKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
   });

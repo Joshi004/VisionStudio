@@ -687,6 +687,44 @@ export interface paths {
         patch: operations["edit_evidence_claim_api_projects__project_id__evidence_claims__claim_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence */
+        get: operations["get_evidence_api_projects__project_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Evidence Brief
+         * @description Starts the job that writes the next round's brief. If one is already waiting or running
+         *     for the project, its id is returned and no second job is made.
+         */
+        post: operations["write_evidence_brief_api_projects__project_id__evidence_brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -6569,6 +6607,8 @@ export interface components {
             paused_at: string | null;
             /** Review At */
             review_at: string | null;
+            /** Waiting For */
+            waiting_for: string | null;
             /** Scenes */
             scenes: string[];
         };
@@ -6586,7 +6626,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "off" | "running" | "attention" | "out_of_date" | "done" | "waiting" | "ready";
+            status: "off" | "running" | "attention" | "owner" | "out_of_date" | "done" | "waiting" | "ready";
             /** Done */
             done: number;
             /** Total */
@@ -6597,6 +6637,8 @@ export interface components {
             stale: number;
             /** Failed */
             failed: number;
+            /** Awaiting */
+            awaiting: number;
             /** Not Started */
             not_started: number;
             /** Blocked By */
@@ -9013,6 +9055,28 @@ export interface components {
             /** Units */
             units?: string[] | null;
         };
+        /**
+         * EvidenceBriefJobOut
+         * @description The newest `write_evidence_brief` job of the project, whatever its status.
+         */
+        EvidenceBriefJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** EvidenceBriefRun */
+        EvidenceBriefRun: {
+            /** Job Id */
+            job_id: number;
+        };
         /** EvidenceClaimEditIn */
         EvidenceClaimEditIn: {
             /** Hint */
@@ -9102,6 +9166,54 @@ export interface components {
             hint: string;
             /** Kind Hint */
             kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
+        };
+        /** EvidenceRoundOut */
+        EvidenceRoundOut: {
+            /** Round Id */
+            round_id: string;
+            /** Round No */
+            round_no: number;
+            /** Host Folder */
+            host_folder: string | null;
+            /** Folder */
+            folder: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "brief_written" | "imported" | "reviewed";
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Claims */
+            claims: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** EvidenceStateOut */
+        EvidenceStateOut: {
+            /** Wanted */
+            wanted: boolean;
+            /** Claims Count */
+            claims_count: number;
+            /** Pending */
+            pending: string[];
+            /** Awaiting */
+            awaiting: string | null;
+            /** Done */
+            done: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Can Write Brief */
+            can_write_brief: boolean;
+            round: components["schemas"]["EvidenceRoundOut"] | null;
+            job: components["schemas"]["EvidenceBriefJobOut"] | null;
+            /** Prompt */
+            prompt: string;
+            /** Skill */
+            skill: string;
         };
         /** FactsOut */
         FactsOut: {
@@ -12943,7 +13055,7 @@ export interface components {
              * Mode
              * @enum {string}
              */
-            mode: "pipeline_review" | "pipeline_paused" | "pipeline_running" | "manual_running" | "idle";
+            mode: "pipeline_review" | "pipeline_paused" | "pipeline_waiting" | "pipeline_running" | "manual_running" | "idle";
             run: components["schemas"]["BoardRunOut"] | null;
             /** Queued */
             queued: number;
@@ -13070,6 +13182,8 @@ export interface components {
             review_points: string[];
             /** Review At */
             review_at: string | null;
+            /** Waiting For */
+            waiting_for: string | null;
             /**
              * Scope
              * @enum {string}
@@ -21046,6 +21160,86 @@ export interface operations {
                 };
             };
             /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_evidence_api_projects__project_id__evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_evidence_brief_api_projects__project_id__evidence_brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A brief cannot be written now: the project has no evidence, the claims are not ready, nothing changed, or the files folder is not available. */
             422: {
                 headers: {
                     [name: string]: unknown;

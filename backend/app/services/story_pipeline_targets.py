@@ -43,6 +43,7 @@ from app.services import (
     environment_links,
     environment_views,
     evidence_claims,
+    evidence_rounds,
     explainer,
     generation_requests,
     graphic_theme,
@@ -1775,6 +1776,50 @@ async def _call_evidence_claims(
     return await evidence_claims.start_suggest(session, project)
 
 
+# --- The evidence (EVD-003) -------------------------------------------------------------------
+
+
+async def _evaluate_evidence(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with evidence on has evidence. For any other project the step
+    # has one target that is already done, so a run reports it as skipped. Turning evidence off
+    # later keeps the rows and ignores them.
+    if not evidence_claims.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await evidence_rounds.state(session, project)
+    # Done: no claim to prove, or the newest round has the claims that count now and is reviewed.
+    done = evidence_rounds.is_done(state)
+    active = _active(state.job)
+    # What the owner has to do outside the run: decide on GLM's proposals, run the research,
+    # import, review. It is a wait, not a failure.
+    awaiting = None if done or active else evidence_rounds.awaiting_text(state)
+    # Otherwise a brief has to be written. It cannot be when the story or the files folder is
+    # not there: that is reported.
+    block = None
+    if not done and not active and awaiting is None:
+        block = evidence_rounds.refusal(state, project)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=block,
+                awaiting=awaiting,
+                last_error=None if done or awaiting is not None else _failure(state.job),
+                # A round exists, but it does not have the claims that count now.
+                stale=state.round is not None and not done and not state.current,
+            )
+        ]
+    )
+
+
+async def _call_evidence(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await evidence_rounds.start_brief(session, project)
+
+
 # --- The callout graphics (CMO-006) -----------------------------------------------------------
 
 # The target of the callout look. Every callout target waits for it.
@@ -2621,6 +2666,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
     "evidence_claims": Adapter(_evaluate_evidence_claims, _project_start(_call_evidence_claims)),
+    "evidence": Adapter(_evaluate_evidence, _project_start(_call_evidence)),
     "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),

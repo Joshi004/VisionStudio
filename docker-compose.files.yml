@@ -9,6 +9,8 @@ services:
   backend:
     environment:
       FILES_DIR: /files
+      # Where the same folder is on the Mac, so the app can show the owner a path (EVD-003).
+      FILES_HOST_DIR: ${VISIO_FILES_DIR}
     volumes:
       - type: bind
         source: ${VISIO_FILES_DIR:?Set VISIO_FILES_DIR in .env}

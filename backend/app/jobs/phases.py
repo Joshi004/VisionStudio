@@ -174,6 +174,10 @@ SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
 # `suggest_evidence_claims` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_EVIDENCE_CLAIMS: Final = "saving the evidence claims"
 
+# --- Running: the research brief of the evidence layer (EVD-003) -------------------------
+# `write_evidence_brief` is a local job: it writes the round's folder and files, then the row.
+WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"
+
 # --- Running: the callout look of a motion explainer (CMO-002) ---------------------------
 # `write_callout_look` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_LOOK: Final = "saving the callout look"
@@ -398,6 +402,14 @@ def pipeline_review(label: str) -> str:
     "After shot planning".
     """
     return f"Waiting for your review ({label[:1].lower()}{label[1:]}): press Continue to go on"
+
+
+def pipeline_waiting(label: str, message: str) -> str:
+    """The phase of a run that has nothing else to make and waits for the owner's own work
+    outside the run (EVD-003). `label` is the step's, as "Gather the evidence"; `message` says
+    what the owner has to do. The run goes on by itself once the step no longer waits.
+    """
+    return f"Waiting for you ({label.lower()}): {message}"
 
 
 # --- Running: the dialogue check of a take (PHASE-031) ----------------------------------------

@@ -144,10 +144,10 @@ create project (explainer, continuous voice, evidence on)
 
 Changes to `services/story_pipeline.STEPS` (step keys and labels are suggestions; planning decides the final names):
 
-- **`evidence_claims`**, "Propose the evidence claims" (story-wide, no needs; added by EVD-002). It asks GLM once for more claims when GLM has never answered for the project (done once an `ai` claim list version exists), and is skipped as complete when evidence does not apply (EV-1, EV-2). Asking again is the owner's click. EVD-003's `evidence` step should need it.
+- **`evidence_claims`**, "Propose the evidence claims" (story-wide, no needs; added by EVD-002). It asks GLM once for more claims when GLM has never answered for the project (done once an `ai` claim list version exists), and is skipped as complete when evidence does not apply (EV-1, EV-2). Asking again is the owner's click. EVD-003's `evidence` step needs it.
 
-- **`evidence`**, "Gather the evidence" (story-wide, EVD-003). It needs no model step: it works from the saved script and the claim list. It is complete when the newest round has been imported and reviewed, and the claim list has not changed since that round's brief. It is skipped as complete when evidence does not apply (EV-1, EV-2) and, **planning decides** in EVD-003, when the claim list is empty.
-- **`shot_plans`** gains `evidence` in its needs (EVD-003).
+- **`evidence`**, "Gather the evidence" (story-wide, EVD-003; group `story`, needs `story_bible` and `evidence_claims`). It needs no model step: it works from the saved script and the claim list. It is complete when the newest round has been imported and reviewed, and the claim list has not changed since that round's brief. It is skipped as complete when evidence does not apply (EV-1, EV-2) and when no claim counts. It **waits for the owner** (a target with `awaiting`, board status `owner`, a run pause `waiting_for`), it is not a job.
+- **`shot_plans`** gains `evidence` in its needs (EVD-003, done).
 - **`evidence_clips`**, "Draw the evidence shots" (per scene, EVD-009). It needs `shot_plans` and makes one clip per evidence shot at the shot's exact length. It is skipped as complete when evidence does not apply.
 - **`scene_render`**, **`music_placement`** and **`render`** gain `evidence_clips` in their needs (EVD-009), as they already need `graphics`.
 
@@ -312,7 +312,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | STOR-004 | Database snapshots in the files folder | Code, optional | STOR-001 | Completed |
 | EVD-001 | Evidence switch, tables and job types | Code | — | Completed |
 | EVD-002 | Marking claims and GLM's proposals | Code | EVD-001 | Completed |
-| EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Not Started |
+| EVD-003 | The research brief and the waiting step | Code | EVD-002, STOR-001 | Completed |
 | EVD-004 | The capture tool | Code (Mac) | — | Not Started |
 | EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | Not Started |
 | EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Not Started |
@@ -333,7 +333,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 5 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001 and EVD-002, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-003, EVD-004.
+**Progress snapshot:** 6 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002 and EVD-003, 2026-11-17), 1 in progress (STOR-002: copied, verified and switched; the new-file smoke test is left). Ready to start: EVD-004.
 
 ---
 
@@ -552,7 +552,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **The owner's decisions are their own table**, `evidence_review`, not versions inside the item table. A decision names an item by `item_key`, not by row id, so a re-import keeps decisions for unchanged items without copying. EVD-006 decides what `item_key` is made of.
 - **Job types.** `suggest_evidence_claims` (`llm`, `never_rerun`), `write_evidence_brief`, `import_evidence` and `render_evidence_clip` (`local`, `start_again`). They are in the `job.type` CHECK, `api/jobs.py` `JobType` and the labels of `jobFormat.ts`. No handler, no routes, no job phases yet: the phase that adds each handler registers it and documents its `job.input` and `job.output`.
 - **Turning `evidence` off later keeps everything and ignores it.** Later phases must treat `evidence = false` as "does not apply" and read nothing from these tables. The settings form says that switching it off deletes nothing.
-- **Cleanup on delete.** All `project_id` keys cascade, so deleting a project removes its evidence rows, and `media/<project_id>/` already goes with it. **Not decided here:** whether deleting a project also removes its `evidence/<project_id>/` round folder (left to EVD-003, which creates that folder).
+- **Cleanup on delete.** All `project_id` keys cascade, so deleting a project removes its evidence rows, and `media/<project_id>/` already goes with it. Deleting a project also removes its `evidence/<project_id>/` round folder (decided and done in EVD-003, `project_deletion.delete_project`; a failure is logged and does not undo the delete, as with the media folder).
 - **UI.** `CreateProjectModal.tsx` has an "Evidence" switch, on, shown only when the voice is continuous. `ProjectSettingsForm.tsx` has an editable switch in the continuous-voice block, and `settingsDraft.ts` carries the field.
 - **Docs.** `DATABASE_STRUCTURE.md`: an Update entry, the `project.evidence` row, the job type note, Sections 4.93 to 4.98 and a Section 5 block with the JSON shapes. §4.8 of this document needed no change.
 - **Checked.** On a throwaway `DATA_DIR`: `0098` up, down to `0097` and up again, and `alembic check` shows only the `FLOAT` against `REAL` notes on older tables, none for the new ones; a job of a new type inserts and the new tables exist. On the real app, rebuilt with `docker compose up -d --build backend frontend` (the newest database snapshot was about 20 minutes old, none was taken first): `/api/health` is `ok` at revision `0098`, and with four throwaway projects (deleted afterwards; no library item was deleted):
@@ -624,7 +624,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-003 — The research brief and the waiting step
 
-**Status:** Not Started
+**Status:** Completed (2026-11-17)
 
 **Objective.** Add the `evidence` step (§4.2). It writes the brief into a round folder (§4.3, §4.4) and then waits until the owner has imported and reviewed the results. Only the consumers wait (EV-9).
 
@@ -663,13 +663,32 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Step, adapter, needs, board state
-- [ ] Brief job, round folder, README
-- [ ] Run behaviour while waiting, resume
-- [ ] Standard checks
+- [x] Step, adapter, needs, board state
+- [x] Brief job, round folder, README
+- [x] Run behaviour while waiting, resume (written and reasoned through; not run end to end, see "Not checked")
+- [x] Standard checks
+- [x] Real app rebuilt (2026-11-17, no job running, no `down`, no `-v`, no migration) and checked with a throwaway project, which was deleted afterwards (no library item deleted)
+- [ ] Owner: the "Evidence" step panel, the board and the run panel seen in the browser (the agent did not open them)
+- [ ] Owner: a real run on an explainer with evidence on, to see it stop with the waiting message (paid steps, so not started by the agent)
 
-**Completion notes.** _To be filled in._
-
+**Completion notes** (2026-11-17).
+- **Decisions ("Planning decides").**
+  - *How the waiting is modelled:* **a new kind of pause, `waiting_for`** (the owner's choice), not a reported block and not a review point. A step's target can carry `awaiting` (what the owner must do outside the app); it is not a problem and not a failure. A run keeps making every step it can. When nothing is going on and every step still to do is blocked only on such a wait, the run keeps `running`, sets `job.output.waiting_for` to the step and writes the phase "Waiting for you (gather the evidence): ...". Steps are evaluated again on every poll, so the run **goes on by itself** once the step is done, and **Continue** is accepted too (it only makes the run look again at once). No timeout.
+  - *Does the step need `story_bible`:* **yes** (the brief's topic line), and `evidence_claims`. `shot_plans` needs `evidence`.
+  - *Does a later round carry only new claims:* **no (the owner's choice): every round carries every claim that counts and stands alone.** The newest round is the evidence; earlier rounds stay as records and are not looked at. So EVD-006 imports one round and never has to merge.
+  - *Does an empty claim list complete the step:* **yes.** With no claim that counts, the step is done and a brief is refused ("There are no claims to prove").
+- **When a round is current.** The round's `brief.claims` must equal the claims that count now in id, origin, words, sentence, note and kind (`claim_keys`). The sentences around a claim (`context`) do not count, so an edit elsewhere in the story does not force a new round; an edit of the claim's own sentence does. Claims are read through `evidence_claims.state()`, so a claim with `words_changed` does not count.
+- **What stops a brief.** A proposal of GLM nobody decided on (the step then says "Keep or drop the N claims GLM proposed", the owner's task), no claim, nothing changed since the newest round, no saved story, evidence off, or the files folder not being a separate marked folder (the evidence files are written only to the folder on the Mac, never into the Docker volume). Each has a plain message.
+- **Where a round stands** is worked out on read from the rows (`evidence_rounds.round_status`): `brief_written`, `imported` (an `evidence_import` exists), `reviewed` (the newest `evidence_review` is `done` and was made for the newest import). EVD-006 and EVD-007 write those rows, so the step cannot complete until they exist.
+- **Job `write_evidence_brief`** (`jobs/write_evidence_brief.py`, `provider='local'`, `start_again`, no model, no cost; `job.input` and `job.output` in `DATABASE_STRUCTURE.md` Section 5). It reads the claims and the story as they are when it runs, writes the round folder (`brief/claims.json`, `brief/README.md`, empty `results/`, each file by a partial name then moved) and the `evidence_round` row, and marks the job succeeded in one transaction. A folder written for a row that was never saved (or for a job cancelled meanwhile) is removed.
+- **The brief** is §4.4 exactly: topic from the Story Bible (the project's name when there is none), the whole sentence and the sentence before and after each claim (cut at sentence ends, one line each), `max_evidence_per_claim` 3, empty domain lists, language `en`.
+- **README.** It carries the round's folder on the Mac (from the new setting `FILES_HOST_DIR`, set by `docker-compose.files.yml` from `VISIO_FILES_DIR`; null when it is not known), the skill's name `visio-evidence` and a prompt. **The prompt is provisional: EVD-005 writes the skill and replaces `README_PROMPT`** (and `SKILL_NAME` if the skill is named differently).
+- **Board.** New step status `owner` ("Waiting for you", orange), only when the steps it needs are done (so it does not claim the owner's attention before the Story Bible exists), with the reason under the step. New board mode `pipeline_waiting` with "Open step", Continue and Stop. The run panel shows an orange alert with Continue. `waiting_for` is in the run and board APIs.
+- **API** (`api/evidence.py`, tag `evidence`): `GET /api/projects/{id}/evidence` (`wanted`, `claims_count`, `pending`, `awaiting`, `done`, `blocked_reason`, `can_write_brief`, `round` {`round_id`, `host_folder`, `folder`, `status`, `out_of_date`, `claims`, `created_at`}, `job`, `prompt`, `skill`) and `POST .../evidence/brief` (202 with the job, 422 with the reason). The claims' text is never in the answer; the brief file holds it. Deleting a project removes `evidence/<project_id>/`.
+- **UI.** `components/story/EvidencePanel.tsx` (the panel of the `evidence` step: "Write the brief", the round's state, copy buttons for the folder and the prompt, the job badge and its error), `api/evidence.ts` (key under the project's key; the claim mutations refresh it), `BoardHeader.tsx`, `BoardStepList.tsx`, `boardSteps.ts`, `StoryPipelinePanel.tsx`. `schema.d.ts` regenerated from the local code (additions only).
+- **Deviation from the plan as first thought.** While a run waits, it evaluates **all** steps as usual rather than only the evidence step: the finished steps are skipped as complete anyway, so only the evidence step and what is blocked behind it remain, with the same result and less code.
+- **Checked on the rebuilt real app** (one throwaway explainer, deleted afterwards, and one throwaway story project): with no claim the step was done and a brief was refused; one owner mark made `can_write_brief` true; the job wrote `~/VisioStudioData/evidence/<id>/r1/` with `brief/claims.json` (exactly one claim with its sentence, context, note and kind), `brief/README.md` (the Mac path and the prompt) and an empty `results/`; the state read `brief_written` with the "Run the research in ..." message; a second brief was refused ("already has these claims"); editing the claim's note made the round out of date and a new brief possible; the board step read `out_of_date`; the story project read `wanted` false, the step `off`, and a brief 422; deleting the explainer removed its evidence folder and left the library character alone. The pure parts were run on sample input and not kept: `plan_step` with an awaiting target (waiting, no problem, nothing created), the board status (`owner` only when the needs are done), sentence and context cutting (also for words across a sentence end), the round comparison (an edit elsewhere keeps the round current, a changed note does not), and `_check_graph`. Ruff check and format, `npm run lint` and `npm run typecheck` pass; the labs, the project list and the frontend answer.
+- **Not checked.** (1) **A pipeline run that waits and goes on** was not made: a run on an explainer starts paid and GPU steps, so it needs your go-ahead. The code path (`_apply` in `jobs/story_pipeline.py`, `waiting_phase`, `continue_run`) was reasoned through and its parts checked as above. (2) The step panel, the board header and the run panel were not opened in a browser. (3) The "undecided GLM proposals" wait was checked on the pure logic only, not with a real GLM answer. (4) Importing and reviewing (EVD-006, EVD-007) do not exist yet, so a round cannot go past `brief_written` in the app.
 ### EVD-004 — The capture tool
 
 **Status:** Not Started
@@ -1078,3 +1097,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-16 | STOR-004 | Completed | Daily and on-demand snapshots (one kept) in `db-snapshots/`, Settings Backups tab, header warning, README restore steps. Real app rebuilt: a snapshot took 25 s (643 MB), integrity check ok, app stayed responsive. Restore commands not run. |
 | 2026-11-17 | EVD-001 | Completed | Migration `0098`: `project.evidence`, six evidence tables, four job types. Real app rebuilt and the API rules checked with throwaway projects; owner to look at the create and settings forms. |
 | 2026-11-17 | EVD-002 | Completed | Claim marks, GLM's proposals (one real call checked) and keep or drop, as `evidence_claim_list` versions; marks follow the story on read; new pipeline step `evidence_claims` (a run asks GLM once). No migration. Real app rebuilt and checked with throwaway projects; owner to look at the panel in the browser. |
+| 2026-11-17 | EVD-003 | Completed | `evidence` step (needs `story_bible` and `evidence_claims`; `shot_plans` needs it), `write_evidence_brief` job and round folder in the files folder, `waiting_for` run pause that goes on by itself, board status `owner`, evidence API and panel. No migration. Real app rebuilt and checked with throwaway projects; a waiting run end to end and the UI in the browser are left to the owner. |

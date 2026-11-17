@@ -99,6 +99,28 @@ export function BoardHeader({ projectId, board, onOpenStep }: BoardHeaderProps) 
       );
       break;
     }
+    case "pipeline_waiting": {
+      const waitingKey = run?.waiting_for ?? null;
+      headline = `Waiting for you${waitingKey !== null ? ` (${labelOf(waitingKey)})` : ""}`;
+      // The run goes on by itself once the step is done; Continue is for when you want it now.
+      detail = run?.phase ?? "The run goes on by itself once the work is done.";
+      actions = (
+        <Group gap="xs">
+          {waitingKey !== null && <Button onClick={() => onOpenStep(waitingKey)}>Open step</Button>}
+          <Button
+            variant="light"
+            onClick={() => resume.mutate([], { onSettled: refreshBoard })}
+            loading={resume.isPending}
+          >
+            Continue
+          </Button>
+          <Button color="red" variant="light" onClick={stopRun} loading={stop.isPending}>
+            Stop
+          </Button>
+        </Group>
+      );
+      break;
+    }
     case "pipeline_review": {
       headline = "Waiting for your review";
       actions = (

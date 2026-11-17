@@ -22,7 +22,8 @@
   (`rewrite_music_prompt.py`), the placement of the music on the timeline (`place_music.py`)
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
-  (`write_callout_plan.py`), the generated component, the block scene and the preview of a
+  (`write_callout_plan.py`), the research brief of the evidence layer
+  (`write_evidence_brief.py`), the generated component, the block scene and the preview of a
   motion callout (`write_callout_component.py`, `write_callout_scene.py`,
   `render_callout_preview.py`), and the Audio video lab of a character
   (`time_lab_speech_words.py`, `render_av_test.py`), and the brief and the word timing
@@ -109,6 +110,7 @@ def register_handlers() -> None:
     from app.jobs.write_chat_reply import WriteChatReplyHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
+    from app.jobs.write_evidence_brief import WriteEvidenceBriefHandler
     from app.jobs.write_graphic_theme import WriteGraphicThemeHandler
     from app.jobs.write_lab_graphic_block_scene import WriteLabGraphicBlockSceneHandler
     from app.jobs.write_lab_graphic_brief import WriteLabGraphicBriefHandler
@@ -193,6 +195,7 @@ def register_handlers() -> None:
     handlers.register(WriteShotGraphicSceneHandler())
     handlers.register(RenderShotGraphicHandler())
     handlers.register(SuggestEvidenceClaimsHandler())
+    handlers.register(WriteEvidenceBriefHandler())
     handlers.register(WriteThumbnailConceptsHandler())
     handlers.register(WriteYouTubeDraftHandler())
     handlers.register(PublishYouTubeHandler())

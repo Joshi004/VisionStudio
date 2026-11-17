@@ -135,6 +135,9 @@ The database is always on the named volume `visio-studio_data`:
 By default the volume also holds the files:
 
 - `/data/media/` — uploaded and generated media files.
+- `/data/evidence/` — the research rounds of the evidence layer, only when the files are in a
+  folder on the Mac (see below): `evidence/<project id>/r<n>/` has the brief the app writes and the
+  `results/` folder for the research. It is removed with the project.
 - `/data/tmp/` — working files, cleared when the backend starts.
 
 ### Keeping the files in a folder on the Mac

@@ -95,6 +95,7 @@ function runSignature(run: PipelineRun | null | undefined): string | null {
     run.phase ?? "",
     run.paused_at ?? "",
     run.review_at ?? "",
+    run.waiting_for ?? "",
     run.scenes.map((scene) => scene.id).join(","),
     ...run.steps.map(
       (step) => `${step.status}:${step.done}/${step.total}/${step.left_alone}`,

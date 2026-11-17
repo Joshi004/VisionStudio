@@ -89,7 +89,8 @@ export function BoardStepList({ projectId, board, selectedKey }: BoardStepListPr
           {steps.map((step) => {
             const status = STATUS_DISPLAY[step.status];
             const parts = detailParts(step, labelOf);
-            const reason = step.status === "attention" ? step.blocked_reason : null;
+            const reason =
+              step.status === "attention" || step.status === "owner" ? step.blocked_reason : null;
             return (
               <Tooltip
                 key={step.key}
@@ -118,7 +119,11 @@ export function BoardStepList({ projectId, board, selectedKey }: BoardStepListPr
                           </Text>
                         )}
                         {reason !== null && (
-                          <Text size="xs" c="red.8" lineClamp={1}>
+                          <Text
+                            size="xs"
+                            c={step.status === "owner" ? "orange.8" : "red.8"}
+                            lineClamp={1}
+                          >
                             {reason}
                           </Text>
                         )}

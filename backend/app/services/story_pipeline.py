@@ -171,9 +171,15 @@ STEPS: Final[tuple[Step, ...]] = (
     Step("graphic_theme", "Design the graphics look", ("story_bible",)),
     # EVD-002: GLM proposes more words of the story that need proof, once, when it has never
     # been asked for the project. It reads the saved story alone. Skipped as complete for any
-    # project that is not a continuous explainer with evidence on. Nothing after it waits for it
-    # yet; the evidence step will (EVD-003).
+    # project that is not a continuous explainer with evidence on. The evidence step waits for it.
     Step("evidence_claims", "Propose the evidence claims"),
+    # EVD-003: the research brief written for the claims, and the owner's own work outside the
+    # app (the research, the import, the review). The step waits on the owner (`Target.awaiting`):
+    # the run goes on with every step that does not need it, then waits (`waiting_for`) instead of
+    # failing. It needs the Story Bible for the brief's topic line. Skipped as complete for any
+    # project that is not a continuous explainer with evidence on, and for one with no claims.
+    # Shot planning waits for it: only the consumers wait (EV-9).
+    Step("evidence", "Gather the evidence", ("story_bible", "evidence_claims")),
     # CMO-006: the callout look and both versions of every callout of a motion project. It needs
     # the callout plan and the graphics look. Skipped as complete for any project whose callouts
     # are not drawn as motion graphics. The renders wait for it: a render is refused while a
@@ -183,7 +189,12 @@ STEPS: Final[tuple[Step, ...]] = (
         "Make the callout graphics",
         ("callout_plan", "graphic_theme"),
     ),
-    Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging"), kind=SCENE),
+    Step(
+        "shot_plans",
+        "Plan the shots",
+        ("speech_synthesis", "scene_staging", "evidence"),
+        kind=SCENE,
+    ),
     # EXG-004: the brief of each graphic shot the cut planner chose, written from the shot's words
     # and the sentences around them. Skipped as complete for any project that is not a continuous
     # explainer with graphics on. A project with graphics on but no graphic shot has no targets.
@@ -432,6 +443,10 @@ class Target:
     active: bool = False
     # Why nothing can be made for it now. Another try would not help.
     block: str | None = None
+    # What the owner has to do outside the run before it can go on (EVD-003). Unlike `block` it
+    # is not a failure: the run keeps making everything else, and waits (`waiting_for`) when
+    # nothing else can go on.
+    awaiting: str | None = None
     # The stage's own follow-on work for it has not shown up yet (a re-plan, the repairs of a
     # check). The run waits a little instead of reporting it.
     settling: bool = False
@@ -569,6 +584,8 @@ class StepPlan:
     waiting: int
     creates: list[Target]
     problems: list[Problem]
+    # Targets that wait for the owner's work outside the run (EVD-003). Not problems.
+    awaiting: list[Problem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     # Targets the `out_of_date` scope leaves as they are. They are not in `done` or `total`.
     left_alone: int = 0
@@ -666,8 +683,10 @@ def plan_step(
     For each target that is not done, in this order: leave it alone when the scope says so; wait
     when work is in progress for it; wait when its scene is still open upstream (`upstream`,
     SCN-010); wait when a target it waits for is not done yet; wait while the stage's own
-    follow-on work settles; report it when it needs consent that was not given, when nothing can
-    be made for it, or when it has had `MAX_TRIES`; otherwise create the next job.
+    follow-on work settles; list it as awaiting the owner when it waits for the owner's work
+    outside the run (`Target.awaiting`, EVD-003: neither made nor reported); report it when it
+    needs consent that was not given, when nothing can be made for it, or when it has had
+    `MAX_TRIES`; otherwise create the next job.
 
     `upstream` is what is still open in the lane steps this step comes after, and the scenes held
     back by a review. A target whose scene is open there is neither made nor reported: it is
@@ -708,6 +727,7 @@ def plan_step(
     waiting = 0
     creates: list[Target] = []
     problems: list[Problem] = []
+    owner: list[Problem] = []
     progressing: set[str] = set()
     following: list[Target] = []
     upstream_waiting = 0
@@ -725,6 +745,10 @@ def plan_step(
         elif target.settling:
             waiting += 1
             progressing.add(target.key)
+        elif target.awaiting is not None:
+            owner.append(
+                Problem(step.key, target.key, target.label, tried, target.awaiting, scenes)
+            )
         elif target.block is not None:
             problems.append(
                 Problem(step.key, target.key, target.label, tried, target.block, scenes)
@@ -766,6 +790,7 @@ def plan_step(
         waiting=waiting,
         creates=creates,
         problems=problems,
+        awaiting=owner,
         warnings=list(view.warnings),
         left_alone=len(left_alone),
         unfinished=Open(
@@ -793,6 +818,15 @@ def failure_message(done: int, total: int, problems: Sequence[Problem]) -> str:
     more = len(problems) - len(shown)
     tail = f" And {more} more." if more > 0 else ""
     return f"Stopped with {done} of {total} steps done. {parts}{tail}"
+
+
+def waiting_phase(awaiting: Sequence[Problem]) -> str:
+    """The phase of a run that waits for the owner's work outside it (EVD-003): the first step
+    that waits, and what the owner has to do there. Pure.
+    """
+    first = awaiting[0]
+    texts = [problem.text() for problem in awaiting if problem.step_key == first.step_key]
+    return phases.pipeline_waiting(STEP_LABELS.get(first.step_key, first.step_key), " ".join(texts))
 
 
 def idle_message(done: int, total: int, incomplete: Sequence[Step]) -> str:
@@ -834,6 +868,9 @@ def new_output() -> dict[str, Any]:
         "continued": [],
         # The review point the run waits at (PHASE-041), or None.
         "review_at": None,
+        # The step the run waits on the owner for (EVD-003), or None. Unlike `paused_at` and
+        # `review_at` the run keeps looking at that step and goes on by itself.
+        "waiting_for": None,
         # The review points the user has already passed (approved, or nothing was made in them).
         "reviewed": [],
         # step key -> the targets the user rejected, to be made again.
@@ -876,9 +913,11 @@ def read_output(value: object) -> dict[str, Any]:
     for name in ("job_ids", "problems", "warnings", "continued", "reviewed"):
         if not isinstance(output.get(name), list):
             output[name] = []
-    for name in ("paused_at", "review_at"):
+    for name in ("paused_at", "review_at", "waiting_for"):
         if not isinstance(output.get(name), str):
             output[name] = None
+    if output["waiting_for"] not in STEP_KEYS:
+        output["waiting_for"] = None
     rejected = output.get("rejected")
     output["rejected"] = (
         {
@@ -1124,6 +1163,10 @@ async def continue_run(
     made again, and the run waits at the same review point once more. With nothing rejected the
     review point counts as passed.
 
+    A run that waits for the owner's work outside it (`waiting_for`, EVD-003) goes on by itself
+    once that is done; Continue makes it look again at once, and it waits again when nothing
+    changed.
+
     Every Continue makes the run read the steps that were complete again, so what the user
     edited while it waited is seen.
     """
@@ -1133,11 +1176,15 @@ async def continue_run(
     output = read_output(run.output)
     paused = output["paused_at"]
     review = output["review_at"]
-    if paused is None and review is None:
+    waiting_for = output["waiting_for"]
+    if paused is None and review is None and waiting_for is None:
         raise StoryPipelineError("The run is not paused.")
     wanted = {step: list(dict.fromkeys(keys)) for step, keys in (rejected or {}).items() if keys}
     if wanted and review is None:
         raise StoryPipelineError("The run is paused, not at a review point: nothing to reject.")
+    if waiting_for is not None:
+        # The run looks at the step again at once. It waits again if nothing changed.
+        output["waiting_for"] = None
     if paused is not None:
         if paused not in output["continued"]:
             output["continued"].append(paused)

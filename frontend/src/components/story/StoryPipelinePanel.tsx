@@ -128,6 +128,11 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
       ? (data?.steps.find((step) => step.key === run.paused_at)?.label ??
         run.paused_at)
       : null;
+  const waitingLabel =
+    run?.waiting_for != null
+      ? (data?.steps.find((step) => step.key === run.waiting_for)?.label ??
+        run.waiting_for)
+      : null;
 
   function startRun() {
     start.mutate(
@@ -509,6 +514,24 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                   <Text size="sm">
                     Look at what the run has made, then press Continue. Nothing
                     new is started while it waits.
+                  </Text>
+                  <Button
+                    size="xs"
+                    onClick={() => resume.mutate([])}
+                    loading={resume.isPending}
+                  >
+                    Continue
+                  </Button>
+                </Stack>
+              </Alert>
+            )}
+
+            {waitingLabel !== null && (
+              <Alert color="orange" title={`Waiting for you: ${waitingLabel.toLowerCase()}`}>
+                <Stack gap="xs" align="flex-start">
+                  <Text size="sm">
+                    {run.phase ?? "The run is waiting for your work outside the app."} It goes
+                    on by itself once the work is done. Press Continue to go on now.
                   </Text>
                   <Button
                     size="xs"

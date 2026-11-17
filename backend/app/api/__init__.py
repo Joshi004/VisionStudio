@@ -22,6 +22,7 @@ from app.api import (
     environment_lab,
     environment_links,
     environment_views,
+    evidence,
     evidence_claims,
     generation_requests,
     gpu,
@@ -83,6 +84,7 @@ api_router.include_router(callout_plan.router, tags=["callout-plan"])
 api_router.include_router(callout_look.router, tags=["callout-look"])
 api_router.include_router(callout_graphics.router, tags=["callout-graphics"])
 api_router.include_router(evidence_claims.router, tags=["evidence-claims"])
+api_router.include_router(evidence.router, tags=["evidence"])
 api_router.include_router(graphic_theme.router, tags=["graphic-theme"])
 api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
 api_router.include_router(thumbnails.router, tags=["thumbnails"])
