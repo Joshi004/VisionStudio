@@ -24,6 +24,8 @@ import {
 import type { ProjectDetail } from "../../api/projects";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
+import { EvidenceReview } from "./EvidenceReview";
 
 type EvidencePanelProps = {
   project: ProjectDetail;
@@ -33,26 +35,6 @@ const ROUND_STATUS_LABEL: Record<EvidenceRound["status"], string> = {
   brief_written: "Brief written, waiting for the research",
   imported: "Results imported, waiting for your review",
   reviewed: "Reviewed",
-};
-
-const CLAIM_STATUS_LABEL: Record<string, string> = {
-  found: "Found",
-  partial: "Partly found",
-  not_found: "Not found",
-  contradicted: "Contradicted",
-  blocked: "Blocked",
-  no_result: "No result",
-  invalid: "Unusable result",
-};
-
-const CLAIM_STATUS_COLOR: Record<string, string> = {
-  found: "green",
-  partial: "yellow",
-  not_found: "gray",
-  contradicted: "red",
-  blocked: "orange",
-  no_result: "gray",
-  invalid: "red",
 };
 
 function claimStatusKey(claim: EvidenceImportClaim): string {
@@ -165,8 +147,7 @@ function CopyLine({ label, value }: { label: string; value: string }) {
 /**
  * The research step of the evidence layer: write the brief of the claims into the files folder,
  * then do the research outside the app (a skill in Cursor or Claude). The results are then
- * imported and checked here; the review comes in a later step, and the pipeline waits until it
- * is done.
+ * imported and checked here, and reviewed claim by claim; the pipeline waits until "Review done".
  */
 export function EvidencePanel({ project }: EvidencePanelProps) {
   const { data, isLoading, isError, error } = useEvidence(project.id);
@@ -184,7 +165,7 @@ export function EvidencePanel({ project }: EvidencePanelProps) {
     <Paper withBorder p="md" radius="md">
       <Stack gap="sm">
         <Group justify="space-between" align="center">
-          <Title order={4}>Evidence: research and import</Title>
+          <Title order={4}>Evidence: research, import and review</Title>
           <Button
             onClick={() => write.mutate()}
             loading={write.isPending}
@@ -279,6 +260,7 @@ export function EvidencePanel({ project }: EvidencePanelProps) {
               </Stack>
             )}
             {latestImport !== null && <ImportReport report={latestImport} />}
+            {latestImport !== null && <EvidenceReview projectId={project.id} />}
           </>
         )}
 

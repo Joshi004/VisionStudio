@@ -12,8 +12,15 @@
   a piece of evidence was refused. Those sentences are the app's own (a few carry a cut-short
   value of the agent's); the agent's summary and quotes are not sent here.
 
-The rows and the files are made by `app/services/evidence_rounds.py`. The answers never return
-ORM objects, and never the text of the claims (the brief file holds it).
+- `GET .../review`, `PUT .../review/claims/{claim_id}` and `POST .../review/done` are the owner's
+  review of the newest import (EVD-007, `app/services/evidence_review.py`): accept or reject each
+  usable piece, choose which accepted pieces are shown and in what order, or say a claim has no
+  proof on screen. Each change is a new `evidence_review` version, and "Review done" ends the
+  review. The review answer is the one place the claims' words and the agent's text (summary,
+  quote, notes) are sent; the browser shows them as plain text only.
+
+The rows and the files are made by `app/services/evidence_rounds.py`. The other answers never
+return ORM objects, and never the text of the claims (the brief file holds it).
 """
 
 from __future__ import annotations
@@ -22,16 +29,17 @@ from datetime import datetime
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Project
+from app.db.models import EvidenceItem, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
-from app.services import evidence_import, evidence_rounds
+from app.services import evidence_import, evidence_review, evidence_rounds
+from app.services.storage import media_url
 
 router = APIRouter()
 
@@ -342,3 +350,289 @@ async def import_evidence(project_id: int, session: SessionDep) -> EvidenceBrief
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return EvidenceBriefRun(job_id=job.id)
+
+
+# --- The owner's review (EVD-007) ------------------------------------------------------------
+
+Verdict = Literal["accepted", "rejected"]
+
+_REVIEW_REFUSED: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorResponse, "description": "No such project, or no such claim in the round."},
+    409: {"model": ErrorResponse, "description": "The results are being imported."},
+    422: {
+        "model": ErrorResponse,
+        "description": "The decision is not allowed, there is nothing to review, the claims "
+        "changed since the round's brief, or (Review done) a claim is not decided yet.",
+    },
+}
+
+
+class ReviewSourceOut(BaseModel):
+    """Where a piece of evidence comes from, as the import tidied it. The addresses start with
+    http:// or https:// (checked on import)."""
+
+    url: str | None
+    final_url: str | None
+    publisher: str | None
+    title: str | None
+    author: str | None
+    published: str | None
+    retrieved_at: str | None
+    archive_url: str | None
+
+
+class ReviewItemOut(BaseModel):
+    item_key: str
+    evidence_id: str
+    usable: bool
+    # Why a piece is not usable, one sentence per failed check. Empty for a usable piece.
+    reasons: list[str]
+    warnings: list[str]
+    kind: Literal["web", "pdf"] | None
+    relation: Literal["supports", "partly_supports", "contradicts", "context"] | None
+    source_tier: Literal["primary", "secondary", "other"] | None
+    source: ReviewSourceOut | None
+    quote: str | None
+    what_it_says: str | None
+    agent_notes: str | None
+    # The clean screenshot and the taller context image (the highlights are drawn by the browser
+    # from `rects`). Null for a piece that is not usable.
+    image_url: str | None
+    context_url: str | None
+    image_px: list[int] | None
+    # `[x, y, width, height]` as fractions of the image, one per line of the quote.
+    rects: list[list[float]]
+    # Where the image sits inside the context image, as fractions of the context image.
+    context_box: list[float] | None
+    page: int | None
+    # The owner's verdict, or null while undecided. Always null for a piece that is not usable.
+    verdict: Verdict | None
+
+
+class ReviewAttemptOut(BaseModel):
+    what: str
+    outcome: str
+
+
+class ReviewClaimOut(BaseModel):
+    claim_id: str
+    origin: Literal["owner", "glm"]
+    # The script words, the sentence they are in, and the owner's note, from the round's brief.
+    text: str
+    sentence: str
+    hint: str
+    status: ClaimStatus | None
+    result_state: ResultState
+    summary: str
+    attempts: list[ReviewAttemptOut]
+    problems: list[str]
+    warnings: list[str]
+    items: list[ReviewItemOut]
+    # The item keys shown on video, in the owner's order.
+    shown: list[str]
+    no_proof_on_screen: bool
+    # Every usable piece has a verdict and something is shown or "no proof on screen" is set (or
+    # there is no usable piece and "no proof on screen" is set).
+    decided: bool
+
+
+class EvidenceReviewOut(BaseModel):
+    """The owner's review of the newest import. `claims` is empty when there is nothing to
+    review: `blocked_reason` says why."""
+
+    round_id: str | None
+    import_version: int | None
+    # The newest review version of the round, or null when nothing was decided yet.
+    version: int | None
+    # "Review done" was pressed for the newest import and nothing changed since.
+    done: bool
+    editable: bool
+    blocked_reason: str | None
+    # The claims that are not decided yet, in the round's order.
+    undecided: list[str]
+    claims: list[ReviewClaimOut]
+
+
+class ItemVerdictIn(BaseModel):
+    item_key: str = Field(max_length=64)
+    verdict: Verdict
+
+
+class ClaimDecisionIn(BaseModel):
+    """The whole decision on one claim. It replaces the claim's earlier decision."""
+
+    items: list[ItemVerdictIn] = Field(max_length=20)
+    # The accepted pieces to show, in order.
+    shown: list[str] = Field(max_length=20)
+    no_proof_on_screen: bool
+
+
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _source_out(source: Any) -> ReviewSourceOut | None:
+    if not isinstance(source, dict):
+        return None
+    return ReviewSourceOut(
+        **{
+            key: _text(source.get(key))
+            for key in (
+                "url",
+                "final_url",
+                "publisher",
+                "title",
+                "author",
+                "published",
+                "retrieved_at",
+                "archive_url",
+            )
+        }
+    )
+
+
+def _numbers(value: Any, length: int) -> list[float] | None:
+    if (
+        isinstance(value, list)
+        and len(value) == length
+        and all(isinstance(n, int | float) and not isinstance(n, bool) for n in value)
+    ):
+        return [float(n) for n in value]
+    return None
+
+
+def _item_out(item: EvidenceItem, verdict: str | None) -> ReviewItemOut:
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    raw_rects = capture.get("rects")
+    parsed = [_numbers(entry, 4) for entry in (raw_rects if isinstance(raw_rects, list) else [])]
+    rects = [rect for rect in parsed if rect is not None]
+    size = _numbers(capture.get("image_px"), 2)
+    page = capture.get("page")
+    return ReviewItemOut(
+        item_key=item.item_key,
+        evidence_id=item.evidence_id,
+        usable=item.usable,
+        reasons=[] if item.usable else _reasons(item.checks),
+        warnings=_messages(item.warnings),
+        kind=cast(Any, item.kind),
+        relation=cast(Any, item.relation),
+        source_tier=cast(Any, item.source_tier),
+        source=_source_out(item.source),
+        quote=item.quote,
+        what_it_says=item.what_it_says,
+        agent_notes=item.agent_notes,
+        image_url=media_url(item.image_path) if item.usable and item.image_path else None,
+        context_url=media_url(item.context_path) if item.usable and item.context_path else None,
+        image_px=[int(n) for n in size] if size is not None else None,
+        rects=rects,
+        context_box=_numbers(capture.get("context_box"), 4),
+        page=page if isinstance(page, int) and not isinstance(page, bool) else None,
+        verdict=cast(Any, verdict) if item.usable else None,
+    )
+
+
+def _claim_out(claim: evidence_review.ReviewClaim) -> ReviewClaimOut:
+    entry, result = claim.entry, claim.result
+    problems = [text for text in result.get("problems", []) if isinstance(text, str)]
+    claim_status = result.get("status")
+    attempts = [
+        ReviewAttemptOut(what=attempt["what"], outcome=attempt["outcome"])
+        for attempt in result.get("attempts", [])
+        if isinstance(attempt, dict)
+        and isinstance(attempt.get("what"), str)
+        and isinstance(attempt.get("outcome"), str)
+    ]
+    origin = entry.get("origin")
+    return ReviewClaimOut(
+        claim_id=entry["id"],
+        origin="glm" if origin == "glm" else "owner",
+        text=_text(entry.get("text")) or "",
+        sentence=_text(entry.get("sentence")) or "",
+        hint=_text(entry.get("hint")) or "",
+        status=cast(ClaimStatus | None, claim_status),
+        result_state="ok" if claim_status is not None else ("invalid" if problems else "no_result"),
+        summary=_text(result.get("summary")) or "",
+        attempts=attempts,
+        problems=problems,
+        warnings=[text for text in result.get("warnings", []) if isinstance(text, str)],
+        items=[_item_out(item, claim.decision.verdicts.get(item.item_key)) for item in claim.items],
+        shown=list(claim.decision.shown),
+        no_proof_on_screen=claim.decision.no_proof_on_screen,
+        decided=claim.decided,
+    )
+
+
+def _review_out(view: evidence_review.ReviewView) -> EvidenceReviewOut:
+    return EvidenceReviewOut(
+        round_id=view.round_id,
+        import_version=view.import_version,
+        version=view.version,
+        done=view.done,
+        editable=view.editable,
+        blocked_reason=view.blocked_reason,
+        undecided=view.undecided,
+        claims=[_claim_out(claim) for claim in view.claims],
+    )
+
+
+def _review_refusal(exc: evidence_review.EvidenceReviewError) -> HTTPException:
+    if isinstance(exc, evidence_review.ClaimNotInRoundError):
+        return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, evidence_review.ImportRunningError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
+
+
+@router.get(
+    "/projects/{project_id}/evidence/review",
+    response_model=EvidenceReviewOut,
+    responses=_NOT_FOUND,
+)
+async def get_evidence_review(project_id: int, session: SessionDep) -> EvidenceReviewOut:
+    project = await load_project(session, project_id)
+    return _review_out(await evidence_review.view(session, project))
+
+
+@router.put(
+    "/projects/{project_id}/evidence/review/claims/{claim_id}",
+    response_model=EvidenceReviewOut,
+    responses=_REVIEW_REFUSED,
+)
+async def put_evidence_claim_decision(
+    project_id: int, claim_id: str, body: ClaimDecisionIn, session: SessionDep
+) -> EvidenceReviewOut:
+    """Replaces the owner's decision on one claim. It is stored as a new version of the review
+    (with "Review done" taken back), unless it changes nothing.
+    """
+    project = await load_project(session, project_id)
+    verdicts: dict[str, str] = {}
+    for entry in body.items:
+        if entry.item_key in verdicts:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A piece of evidence has two verdicts.",
+            )
+        verdicts[entry.item_key] = entry.verdict
+    decision = evidence_review.Decision(
+        verdicts=verdicts, shown=list(body.shown), no_proof_on_screen=body.no_proof_on_screen
+    )
+    try:
+        result = await evidence_review.save_claim_decision(session, project, claim_id, decision)
+    except evidence_review.EvidenceReviewError as exc:
+        raise _review_refusal(exc) from exc
+    return _review_out(result)
+
+
+@router.post(
+    "/projects/{project_id}/evidence/review/done",
+    response_model=EvidenceReviewOut,
+    responses=_REVIEW_REFUSED,
+)
+async def finish_evidence_review(project_id: int, session: SessionDep) -> EvidenceReviewOut:
+    """Ends the review: every claim must be decided. The `evidence` step is then complete."""
+    project = await load_project(session, project_id)
+    try:
+        result = await evidence_review.finish_review(session, project)
+    except evidence_review.EvidenceReviewError as exc:
+        raise _review_refusal(exc) from exc
+    return _review_out(result)

@@ -323,7 +323,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 | EVD-004 | The capture tool | Code (Mac) | — | Completed |
 | EVD-005 | The research skill for Cursor and Claude | Code (Mac) | EVD-004 | In Progress |
 | EVD-006 | Importing and checking the evidence | Code | EVD-003, EVD-004 | Completed |
-| EVD-007 | The review screen | Code | EVD-006 | Not Started |
+| EVD-007 | The review screen | Code | EVD-006 | Completed |
 | EVD-008 | The evidence clip and its preview | Code | EVD-006 | Not Started |
 | EVD-009 | Evidence shots in the cut plan and the render | Code | EVD-007, EVD-008 | Not Started |
 | EVD-010 | One explainer end to end | Owner | EVD-005, EVD-009, STOR-002 | Not Started |
@@ -340,7 +340,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - **Mac tools:** EVD-004 → EVD-005 can start at once. They depend only on the contracts in §4.3 to §4.5.
 - EVD-003 can be built before STOR-002, but the owner can only use the round folder from the Mac once STOR-002 is done.
 
-**Progress snapshot:** 8 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004 and EVD-006, 2026-11-17), 2 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left). Ready to start: EVD-007 and EVD-008.
+**Progress snapshot:** 9 completed (STOR-001, STOR-003 and STOR-004, 2026-11-16; EVD-001, EVD-002, EVD-003, EVD-004, EVD-006 and EVD-007, 2026-11-17), 2 in progress (STOR-002: copied, verified and switched, the new-file smoke test is left; EVD-005: skill written and installed, the owner's runs in Cursor and Claude Code are left). Ready to start: EVD-008.
 
 ---
 
@@ -908,7 +908,7 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 
 ### EVD-007 — The review screen
 
-**Status:** Not Started
+**Status:** Completed (2026-11-17); the real app has not been rebuilt yet
 
 **Objective.** The owner reviews every claim and every piece of evidence, and decides what reaches the video (EV-8).
 
@@ -939,11 +939,34 @@ Planning in EVD-001 decides the names and the exact split. The layer needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Claim cards, evidence view with highlights
-- [ ] Decisions, versions, "Review done"
-- [ ] Standard checks
+- [x] Claim cards, evidence view with highlights
+- [x] Decisions, versions, "Review done"
+- [x] Standard checks
+- [x] Checked end to end on a throwaway backend (own `DATA_DIR` and files folder, a throwaway project, real captures made by the tool)
+- [ ] Real app rebuilt (`docker compose up -d --build backend frontend`, with no job running, never `down` or `-v`). The agent did not rebuild it. EVD-006's rebuild (a new dependency) is still open too, so one rebuild covers both.
+- [ ] Owner: the review seen in the browser (claim cards, the highlights over the screenshot, the context window, "Review done"). The agent did not open it.
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-17).
+- **Where.** `services/evidence_review.py` (decisions, rules, `view`, `save_claim_decision`, `finish_review`), `api/evidence.py` (three new routes on the same router), `api/evidence.ts` (`useEvidenceReview`, `useSaveEvidenceClaimDecision`, `useFinishEvidenceReview`), `components/story/EvidenceReview.tsx` (mounted in `EvidencePanel.tsx` under the import report), and `components/story/evidenceLabels.ts` (the claim status words and colours, moved out of `EvidencePanel.tsx` so both files use them). **No migration, no job, no setting, no compose change, no new dependency.** `schema.d.ts` was generated from the running throwaway backend (additions only). `DATABASE_STRUCTURE.md` has an Update entry and the Section 5 note.
+- **Decisions ("Planning decides").**
+  - *Must every claim have a decision before "Review done":* **yes** (the owner's choice). A claim with usable pieces needs a verdict for every usable piece and either something shown or "No proof on screen". A claim with nothing usable (`not_found`, `blocked`, `no_result`, `invalid`, or every piece refused) needs "No proof on screen" ticked: nothing passes silently. "Review done" names the claims still undecided when it is refused (422).
+  - *How many pieces one claim may show:* any number of its accepted pieces, at least one, otherwise "No proof on screen". A claim has at most `max_evidence_per_claim` (3) pieces, so that is the most. Whether they fit the claim's words is EVD-009's job.
+  - *A piece that contradicts the claim* (`relation` `contradicts`): **the owner decides on the card** (the owner's choice). It can be accepted and shown; its card has a red note that the source says otherwise. A claim whose status is `contradicted` has a note that the script may be wrong here. Nothing is blocked in code.
+- **API** (`api/evidence.py`): `GET /api/projects/{id}/evidence/review` (`round_id`, `import_version`, `version`, `done`, `editable`, `blocked_reason`, `undecided`, `claims`; each claim has its words, sentence, origin, note, status, summary, attempts, problems, warnings, `items`, `shown`, `no_proof_on_screen`, `decided`; each item has the key, the checks and warnings, the source, quote, `what_it_says`, notes, `image_url`, `context_url`, `image_px`, `rects`, `context_box`, `page` and `verdict`). `PUT .../review/claims/{claim_id}` (body `{items: [{item_key, verdict}], shown, no_proof_on_screen}`) replaces one claim's decision and returns the review. `POST .../review/done` returns the review. 404 for an unknown claim, 409 while an import runs, 422 for everything else that is refused (evidence off, no round, no import, claims changed since the brief, a key that is not a usable piece of that claim, two verdicts for one piece, a shown piece that is not accepted or shown twice, shown together with "no proof"). The `GET` of a project without evidence answers 200 with no claims and a `blocked_reason`. **This answer is the one place the claims' words and the agent's summary, quote, `what_it_says` and notes are sent to the browser**; the screen shows them as plain text, and shows a source address as a link only when it starts with `http://` or `https://` (`rel="noopener noreferrer"`).
+- **Versions.** Every owner action is a new `evidence_review` row (`done` 0), written at once, so decisions survive a reload; a change that changes nothing stores nothing. "Review done" writes a row with `done` 1 and the same content (nothing is stored when the newest row is already that). **A change after "Review done" takes it back:** the round reads `imported` again (`round_status` needs a `done` row for the newest import) and the `evidence` step waits until "Review done" is pressed again. The same holds after a re-import of the same round, even when no piece changed: `inputs.import_id` is the old import, so the owner presses "Review done" once more, with every decision kept.
+- **Re-import.** Decisions are read through `effective_decision`: only usable pieces of the claim in the newest import keep a verdict, and `shown` keeps only accepted pieces, in the owner's order. A re-captured piece with another relation or quote has a new `item_key`, so it drops out and its claim is undecided again, while the other claims and pieces keep their decisions. No stored file is deleted by a decision or a re-import.
+- **Screen.** One card per claim (words, sentence, origin, note, status, "Decided" or "Undecided", summary, what was tried for `not_found` and `blocked`, problems and warnings), one card per piece (the screenshot with the quote's rectangles drawn over it as boxes at `x, y, width, height` in per cent of the image, so they follow the displayed size; "Show context" opens a window with the context image and an outline at `context_box`; the quote, the source with publisher, title, date and page, an archive link, relation and tier, warnings, the agent's notes; Accept, Reject and a "Show on video" box), an order list (Up, Down) when a claim shows more than one piece, the "No proof on screen" switch, and the "Review done" button with the undecided claims named. An unusable piece shows its reasons and has no buttons. **Accepting a piece shows it by default** (the owner can untick it); "No proof on screen" clears what is shown, and showing a piece clears "No proof on screen". These two behaviours are the screen's own and are not rules of the server.
+- **Checked** (2026-11-17, on a throwaway backend started on its own `DATA_DIR` and files folder with a throwaway explainer, all removed afterwards; the real app and `~/VisioStudioData` were not touched). Three claims captured **by the capture tool** from real sources (the "Attention Is All You Need" PDF and its arXiv page for c1, Wikipedia for c2, a `not_found` report with two attempts for c3), imported by the real job:
+  - the review read all three as undecided; "Review done" was refused naming c1, c2 and c3;
+  - refused with the right status and sentence: an unknown claim (404), a key that is not a piece of the claim, two verdicts for one piece, a shown piece that is rejected, a piece shown twice, shown with "no proof", an unknown verdict (422);
+  - a default decision stored nothing; each real decision stored one version (1 to 4), with the right `inputs`; the same decision again stored nothing; "Review done" stored version 5 with `done` true and `GET .../evidence` read `reviewed`, `done` true and no `awaiting`, and the board step `evidence` read `done`; pressing it again stored nothing; a reload gave the same decisions and the same order of the two shown pieces;
+  - a change after "Review done" stored version 6, `done` false, and the round read `imported` again;
+  - importing the same files again (version 2): every decision kept and every claim still decided, the round `imported`; re-capturing one piece with another relation and importing again: only c1 was undecided, its other piece kept its verdict and its place;
+  - changing a claim's note after the round: the review read `editable` false with "The claims changed since round r1. Write a new round.", both writes got 422, the step read `out_of_date`; changing it back made the review editable again;
+  - a project with evidence off: 200 with no claims and the reason, a write 422;
+  - for the web and the PDF capture the `rects`, `context_box` and image size in the answer equal the capture tool's `result.json`, and the image files exist (the highlight is the same rectangle the tool's `draw` was checked against in EVD-004).
+  Ruff check and format, `npm run lint` and `npm run typecheck` pass.
+- **Not checked.** (1) The review screen was **not opened in a browser**: the boxes over the screenshot, the context window, the order buttons and the layout were not seen (the maths is the same fractions the tool's `draw` uses, but how it looks was not looked at). (2) The 409 while an import runs was written and reasoned through, not run. (3) The real app was not rebuilt, so nothing was reviewed on it. (4) A piece with a refused check and a `contradicts` piece were only read in the code; the throwaway round had no refused piece and no contradicting one. (5) The screen was not tried with a portrait capture.
 
 ### EVD-008 — The evidence clip and its preview
 
@@ -1164,3 +1187,4 @@ Inputs for the capture tool alone (EVD-004): a page with a cookie banner, an add
 | 2026-11-17 | EVD-004 | Completed | `tools/evidence-capture/` (Python, Playwright, pypdfium2): `web`, `pdf`, `report`, `remove`, `validate`, `draw`. Checked on real public pages and PDFs, in both orientations, with refusals (private address, scan, missing quote) and a hand-broken round. No backend change. A public-to-private redirect makes one blind GET before it is refused (see the notes). The owner's Appendix A set is still to be run. |
 | 2026-11-17 | EVD-005 | In Progress | `tools/evidence-skill/` (`visio-evidence` skill, reference, `install.sh`, installed to `~/.claude/skills/` for Cursor and Claude Code), the README prompt in `evidence_rounds.py` replaced, README section added. No migration. Not yet run by an agent: the owner's runs in Cursor and Claude Code on the test round are left, and the real app is not rebuilt. |
 | 2026-11-17 | EVD-006 | Completed | `import_evidence` job: reads the newest round's `results/` safely, runs checks 1 to 5 with the tool's quote rules (`pypdfium2` added to the backend), copies the files of usable pieces into `media/` under generated names (identical files are shared), stores `evidence_import` and `evidence_item` rows; Import button and report on the evidence panel. No migration. Checked end to end on a throwaway backend with real captures and six hand-broken cases; the real app is not rebuilt yet (new dependency) and the panel is not seen in the browser. |
+| 2026-11-17 | EVD-007 | Completed | Review of the newest import: `services/evidence_review.py`, `GET .../evidence/review`, `PUT .../review/claims/{claim_id}`, `POST .../review/done`, and the review in the evidence panel (claim cards, highlights drawn over the clean screenshot, context window, accept or reject, shown order, "No proof on screen"). Every change is an `evidence_review` version; "Review done" completes the `evidence` step. No migration. Checked end to end on a throwaway backend with real captures (decisions, reload, re-import, a re-captured piece, claims changed, evidence off). The real app is not rebuilt (EVD-006 is still waiting for it too) and the screen is not seen in the browser. |

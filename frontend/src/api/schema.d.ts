@@ -746,6 +746,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence Review */
+        get: operations["get_evidence_review_api_projects__project_id__evidence_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/review/claims/{claim_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Evidence Claim Decision
+         * @description Replaces the owner's decision on one claim. It is stored as a new version of the review
+         *     (with "Review done" taken back), unless it changes nothing.
+         */
+        put: operations["put_evidence_claim_decision_api_projects__project_id__evidence_review_claims__claim_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/review/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish Evidence Review
+         * @description Ends the review: every claim must be decided. The `evidence` step is then complete.
+         */
+        post: operations["finish_evidence_review_api_projects__project_id__evidence_review_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -7801,6 +7859,18 @@ export interface components {
             candidate_id: number;
         };
         /**
+         * ClaimDecisionIn
+         * @description The whole decision on one claim. It replaces the claim's earlier decision.
+         */
+        ClaimDecisionIn: {
+            /** Items */
+            items: components["schemas"]["ItemVerdictIn"][];
+            /** Shown */
+            shown: string[];
+            /** No Proof On Screen */
+            no_proof_on_screen: boolean;
+        };
+        /**
          * ConceptIn
          * @description One concept as the owner saves it. The service checks it again with the model's rules.
          */
@@ -9187,6 +9257,29 @@ export interface components {
             hint: string;
             /** Kind Hint */
             kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
+        };
+        /**
+         * EvidenceReviewOut
+         * @description The owner's review of the newest import. `claims` is empty when there is nothing to
+         *     review: `blocked_reason` says why.
+         */
+        EvidenceReviewOut: {
+            /** Round Id */
+            round_id: string | null;
+            /** Import Version */
+            import_version: number | null;
+            /** Version */
+            version: number | null;
+            /** Done */
+            done: boolean;
+            /** Editable */
+            editable: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Undecided */
+            undecided: string[];
+            /** Claims */
+            claims: components["schemas"]["ReviewClaimOut"][];
         };
         /** EvidenceRoundOut */
         EvidenceRoundOut: {
@@ -10640,6 +10733,16 @@ export interface components {
             description: string | null;
             /** Wordings */
             wordings: components["schemas"]["WordingOut"][];
+        };
+        /** ItemVerdictIn */
+        ItemVerdictIn: {
+            /** Item Key */
+            item_key: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "accepted" | "rejected";
         };
         /** JobCapacity */
         JobCapacity: {
@@ -14672,6 +14775,92 @@ export interface components {
             /** Job Id */
             job_id: number;
         };
+        /** ReviewAttemptOut */
+        ReviewAttemptOut: {
+            /** What */
+            what: string;
+            /** Outcome */
+            outcome: string;
+        };
+        /** ReviewClaimOut */
+        ReviewClaimOut: {
+            /** Claim Id */
+            claim_id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "owner" | "glm";
+            /** Text */
+            text: string;
+            /** Sentence */
+            sentence: string;
+            /** Hint */
+            hint: string;
+            /** Status */
+            status: ("found" | "partial" | "not_found" | "contradicted" | "blocked") | null;
+            /**
+             * Result State
+             * @enum {string}
+             */
+            result_state: "ok" | "no_result" | "invalid";
+            /** Summary */
+            summary: string;
+            /** Attempts */
+            attempts: components["schemas"]["ReviewAttemptOut"][];
+            /** Problems */
+            problems: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["ReviewItemOut"][];
+            /** Shown */
+            shown: string[];
+            /** No Proof On Screen */
+            no_proof_on_screen: boolean;
+            /** Decided */
+            decided: boolean;
+        };
+        /** ReviewItemOut */
+        ReviewItemOut: {
+            /** Item Key */
+            item_key: string;
+            /** Evidence Id */
+            evidence_id: string;
+            /** Usable */
+            usable: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Kind */
+            kind: ("web" | "pdf") | null;
+            /** Relation */
+            relation: ("supports" | "partly_supports" | "contradicts" | "context") | null;
+            /** Source Tier */
+            source_tier: ("primary" | "secondary" | "other") | null;
+            source: components["schemas"]["ReviewSourceOut"] | null;
+            /** Quote */
+            quote: string | null;
+            /** What It Says */
+            what_it_says: string | null;
+            /** Agent Notes */
+            agent_notes: string | null;
+            /** Image Url */
+            image_url: string | null;
+            /** Context Url */
+            context_url: string | null;
+            /** Image Px */
+            image_px: number[] | null;
+            /** Rects */
+            rects: number[][];
+            /** Context Box */
+            context_box: number[] | null;
+            /** Page */
+            page: number | null;
+            /** Verdict */
+            verdict: ("accepted" | "rejected") | null;
+        };
         /**
          * ReviewOut
          * @description What the user can review while the run waits at a review point.
@@ -14701,6 +14890,29 @@ export interface components {
             label: string;
             /** Steps */
             steps: string[];
+        };
+        /**
+         * ReviewSourceOut
+         * @description Where a piece of evidence comes from, as the import tidied it. The addresses start with
+         *     http:// or https:// (checked on import).
+         */
+        ReviewSourceOut: {
+            /** Url */
+            url: string | null;
+            /** Final Url */
+            final_url: string | null;
+            /** Publisher */
+            publisher: string | null;
+            /** Title */
+            title: string | null;
+            /** Author */
+            author: string | null;
+            /** Published */
+            published: string | null;
+            /** Retrieved At */
+            retrieved_at: string | null;
+            /** Archive Url */
+            archive_url: string | null;
         };
         /** ReviewStepOut */
         ReviewStepOut: {
@@ -21368,6 +21580,149 @@ export interface operations {
                 };
             };
             /** @description The results cannot be imported now: the project has no evidence, there is no round, the claims changed since the round's brief, nothing was written in results yet, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_evidence_review_api_projects__project_id__evidence_review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_evidence_claim_decision_api_projects__project_id__evidence_review_claims__claim_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                claim_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    finish_evidence_review_api_projects__project_id__evidence_review_done_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
             422: {
                 headers: {
                     [name: string]: unknown;
