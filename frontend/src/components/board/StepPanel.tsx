@@ -109,6 +109,8 @@ const GraphicThemePanel = lazyNamed(
   () => import("../story/GraphicThemePanel"),
   "GraphicThemePanel",
 );
+const EvidenceClaims = lazyNamed(() => import("../story/EvidenceClaims"), "EvidenceClaims");
+const EvidencePanel = lazyNamed(() => import("../story/EvidencePanel"), "EvidencePanel");
 const GraphicBriefsPanel = lazyNamed(
   () => import("../story/GraphicBriefsPanel"),
   "GraphicBriefsPanel",
@@ -215,6 +217,11 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <CalloutPlanPanel projectId={projectId} />;
       case "graphic_theme":
         return <GraphicThemePanel projectId={projectId} />;
+      case "evidence_claims":
+        // The story box is on the Story text page, so no unsaved change is held here.
+        return <EvidenceClaims project={project} hasUnsavedStory={false} />;
+      case "evidence":
+        return <EvidencePanel project={project} />;
       case "callout_graphics":
         return (
           <Stack gap="md">
@@ -239,6 +246,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
       case "music_placement":
         return <MusicPlacementPanel projectId={projectId} />;
       case "shot_plans":
+      case "evidence_clips":
+        // The evidence shots are chosen in the shot plan, which also lists the evidence it left out.
         return <ShotPlansPanel projectId={projectId} />;
       case "shot_definitions":
       case "shot_continuity":

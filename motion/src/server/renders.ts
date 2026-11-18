@@ -27,6 +27,7 @@ const COMPOSITION_OF: Record<Engine, string> = {
   generated_component: "Generated",
   callout_component: "Callout",
   callout_blocks: "Callout",
+  evidence_clip: "Evidence",
 };
 
 export type RenderState = "queued" | "rendering" | "done" | "failed";

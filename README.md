@@ -124,14 +124,155 @@ This writes `frontend/src/api/schema.d.ts`, which is committed to the repo.
 ```bash
 cd backend && uv run ruff check . && uv run ruff format --check .
 cd frontend && npm run lint && npm run typecheck
+cd tools/evidence-capture && uv run ruff check . && uv run ruff format --check .
 ```
+
+## The evidence capture tool
+
+`tools/evidence-capture/` is a command-line tool that runs on the Mac, outside Docker. A research agent (Cursor or Claude) uses it inside a round folder to capture web pages and PDFs as evidence. It finds the exact quote in the source first, and only then makes the screenshot and the highlight rectangles. It writes the whole `result.json` of a claim itself.
+
+Install it once (this also downloads Chromium, about 100 MB, into `~/Library/Caches/ms-playwright`):
+
+```bash
+cd tools/evidence-capture
+uv sync
+uv run playwright install chromium
+```
+
+Run it from the round folder (`~/VisioStudioData/evidence/<project_id>/<round_id>/`), so that `--round` can be left out. Replace `TOOL` with `uv run --project <repository>/tools/evidence-capture visio-evidence-capture`.
+
+```bash
+TOOL web --claim c1 --evidence e1 --url https://example.com/report \
+  --quote "the exact words" --relation supports --tier primary \
+  --publisher "Example Corp" --what-it-says "A plain sentence." --published 2026-10-03
+TOOL pdf --claim c2 --evidence e1 --url https://example.com/annual.pdf --quote "the exact words" \
+  --relation supports --tier primary --publisher "Example Corp" --what-it-says "..."
+TOOL report --claim c1 --status found --summary "What the sources say."
+TOOL report --claim c3 --status not_found --summary "Nothing usable." \
+  --attempt "search: the words" "only blogs, no primary source"
+TOOL remove --claim c1 --evidence e1      # removes one piece of evidence and its files
+TOOL validate                             # checks every claim's result; run it before finishing
+TOOL draw --claim c1 --evidence e1        # a picture of the rectangles in the system temp folder
+```
+
+It only opens public `http` and `https` addresses (never local or private ones), uses no logins or stored cookies, and writes only inside `results/<claim_id>/` of the round. A PDF needs a text layer (there is no OCR). Run `TOOL <command> --help` for every option.
+
+## The evidence research skill
+
+`tools/evidence-skill/visio-evidence/` is the skill that makes a Cursor or Claude Code agent research the claims of a round: it reads `brief/claims.json`, finds a source for each claim, captures the exact quote with the capture tool, reports a status for every claim (`not_found` is an accepted answer) and runs `validate` at the end. "Claude" here means Claude Code (the CLI, or the Code tab of the desktop app); the claude.ai chat cannot run local commands.
+
+Install it once, after the capture tool and its browser (see above):
+
+```bash
+tools/evidence-skill/install.sh
+```
+
+The script runs `uv sync` for the capture tool, then copies the skill to `~/.claude/skills/visio-evidence/` and writes the capture tool's full command into the copy. Cursor and Claude Code both read that folder, so one copy is enough. It is a copy, not a link (Cursor does not follow links to skills reliably): **run the script again after you edit the skill**, and restart an open Cursor or Claude Code session. It refuses a repository path with spaces or other unusual characters, and it replaces only that one folder.
+
+To run a round: in Visio Studio write the brief (the Evidence step), open the round folder (`~/VisioStudioData/evidence/<project_id>/r<n>/`) in Cursor or Claude Code, not the repository, and paste the prompt from the round's `README.md` (the panel has a copy button). When the agent has finished, it starts the import itself (`POST /api/projects/<id>/evidence/import`, allowed in the skill); if it could not, press Import in Visio Studio. Then review the evidence in the app.
+
+How far the rules can be enforced differs:
+
+- **Claude Code:** the skill's `allowed-tools` lets only the capture tool, `ls`, reading, searching and the web tools run without asking. Anything else asks you first. Say no to anything else.
+- **Cursor:** a skill cannot limit commands, so the rule is only written in the skill. Keep the run mode on asking, not on running everything, and allow the capture tool when it asks (it needs the internet, so outside the sandbox).
+
+The agent should never write a file itself: only the capture tool writes, and only inside `results/`.
 
 ## Where the data lives
 
-Everything is stored on the named volume `visio-studio_data`:
+The database is always on the named volume `visio-studio_data`:
 
 - `/data/app.db` (plus its `-wal` and `-shm` files) — the SQLite database.
+
+By default the volume also holds the files:
+
 - `/data/media/` — uploaded and generated media files.
+- `/data/evidence/` — the research rounds of the evidence layer, only when the files are in a
+  folder on the Mac (see below): `evidence/<project id>/r<n>/` has the brief the app writes and the
+  `results/` folder for the research. It is removed with the project.
+- `/data/tmp/` — working files, cleared when the backend starts.
+
+### Keeping the files in a folder on the Mac
+
+Media and working files can live in a folder you can open in Finder, while the
+database stays in the volume. Create the folder once, with its `media/` folder
+and an empty marker file (the app never creates the marker itself, so a mistyped path or an
+unplugged disk is not mistaken for the right folder):
+
+```bash
+mkdir -p ~/VisioStudioData/media && touch ~/VisioStudioData/.visio-studio-files
+```
+
+Then add two lines to `.env` (an absolute path, not `~`) and restart:
+
+```text
+COMPOSE_FILE=docker-compose.yml:docker-compose.files.yml
+VISIO_FILES_DIR=/Users/<you>/VisioStudioData
+```
+
+```bash
+docker compose up -d
+```
+
+New files then go to
+`<folder>/media/` and `<folder>/tmp/`. The `frontend` container sees only
+`media/`, read-only. If the folder is missing, Docker refuses to start the
+backend. If the marker is missing or the folder cannot be written, the backend
+health check reports "files folder" as degraded and nothing is stored.
+
+This does not copy the media already in the volume: until that is done on
+purpose (STOR-002), set it up only on a fresh install or to try it. To switch
+back, remove the two lines and restart.
+
+**Do not rename, move or delete files in that folder from Finder.** The
+database stores each file's exact name, so the app breaks when a file changes.
+Opening, playing and copying files is fine. The warning about
+`docker compose down -v` still applies, because the database is in the volume.
+
+### Database snapshots
+
+With the files folder set, the app keeps a copy of the database in
+`<folder>/db-snapshots/`, named like `app-2026-11-16_1530Z.db` (UTC). A snapshot
+is made by SQLite's `VACUUM INTO`, never by copying the live file, and is
+checked with `PRAGMA integrity_check` before it replaces the old one. The app
+keeps working while it is made.
+
+- When: automatically once the newest snapshot is a day old (checked hourly,
+  the first check five minutes after the backend starts), and with **Make a
+  snapshot now** in Settings, Backups.
+- How many: **one**. A snapshot is about 1.5 GB, and room for two at once is
+  needed while a new one is made. Because only the newest is kept, a mistake in
+  the live data is carried into the snapshot within a day. Copy the file
+  elsewhere first if you want to keep a particular state.
+- Age: Settings, Backups shows the last snapshot, and the header warns when it
+  is over three days old or none exists. A failed snapshot never replaces a good
+  one. Files ending in `.partial` are unfinished and are removed at the next start.
+- Without the files folder, snapshots are off: a copy inside the volume would not
+  survive losing the volume.
+
+**Restoring** is a manual step, not a button. Stop the app, move the live
+database aside (do not delete it), then copy the snapshot in:
+
+```bash
+docker compose stop backend frontend    # never `down -v`
+docker run --rm --network none --user root --entrypoint sh \
+  -v visio-studio_data:/data \
+  -v "$HOME/VisioStudioData/db-snapshots":/snap:ro \
+  visio-studio-backend -c '
+    set -e
+    stamp=$(date +%Y%m%d-%H%M%S)
+    for f in app.db app.db-wal app.db-shm; do
+      [ -e /data/$f ] && mv /data/$f /data/$f.before-restore-$stamp
+    done
+    cp /snap/app-YYYY-MM-DD_HHMMZ.db /data/app.db   # the snapshot file to restore
+    chown 10001:10001 /data/app.db
+  '
+docker compose up -d
+```
+
+Then check `/api/health`. Moving the `-wal` and `-shm` files aside matters: a
+leftover `-wal` from the old database would be applied to the restored one.
+The `*.before-restore-*` files stay in the volume until you remove them yourself.
 
 ## Secrets
 

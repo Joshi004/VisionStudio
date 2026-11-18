@@ -215,6 +215,22 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (REC-006 patches, 2026-11-06):** migration `0094`. **A tight boundary can be fixed by recording a short passage again; the app splices the accepted passages into a new version of the full recording.** (1) **`job.type` gains `splice_voice_recording`**: the CHECK is rebuilt in batch mode as in `0093` and no row changes; the downgrade deletes jobs of that type. It is `provider='local'`, restart rule `start_again`, deduped by `input.voice_recording_id` (the version being patched) (Section 5). (2) **A patch is a `voice_recording` row with `scope = 'patch'`** (Section 4.85): `base_recording_id` is the full version it patches, `version` is NULL, `text` is the region's words, and `inputs.region` holds `{first_word, last_word, join_start_s, join_end_s, lead_s, trail_s, boundaries: [{after_scene_id, before_scene_id, local_index}]}`. `first_word` and `last_word` are positions (from 0) in the base version's timed words; `join_start_s` and `join_end_s` are the stretch of the base that the patch replaces, from the middle of the pause before the region to the middle of the pause after it (the start or the end of the file at its edges). The patch is timed by `time_voice_recording` and its `voice_recording_timing` row is stored; whether it is `transcribing`, `transcription_failed`, `refused` or `accepted` is worked out on every read, not stored. `POST /api/projects/{id}/voice-recordings/full/{recording_id}/patches?origin=&first_word=&last_word=` stores one (the region is named by its words and refused with 409 when it is no longer one of the recording's regions), `POST .../patches/splice` queues the splice and `POST .../patches/{patch_id}/retry` queues a failed transcription again. (3) **A spliced version is a `voice_recording` row with `scope = 'full'` and `origin = 'splice'`:** the next `version`, `base_recording_id` the version it was made from, `patch_id` the first patch used (lowest id), `text`, `inputs.scenes` and `inputs.artifacts` copied from the base, and `inputs.patches`: for each patch `{patch_id, patch_sha256, first_word, last_word, join_start_s, join_end_s, base_start_sample, base_end_sample, patch_start_sample, patch_end_sample, gain_db, delta_samples, boundaries}`, where `delta_samples` is the change of length the patch makes, including the 360 samples (15 ms) each of its joins takes off for the crossfade. Nothing stored is overwritten: the base version, its file and every patch stay. (4) **The decisions are carried when the new version is timed:** the decisions of the base on boundaries outside every spliced region, and tight in the new version, are copied to `recording_boundary_decision` rows of the new version; a `cut_at` cut point moves by the change of length of the stretches before it, and is dropped when it is no longer inside its window. The timing job now queues the split when no tight boundary is left undecided (it was: when none was tight). (5) **A new global setting** (Section 6, group `Speech`): `recording_patch_pause_ms` (300). No new table or column.
 
+**Update (EVD-011 evidence cards, EVD-012 source lines, EVD-016 split evidence shots, 2026-11-17):** migration `0099`. (1) **`evidence_clip.purpose` gains `card`** (the head revision is now `0099`): the CHECK `ck_evidence_clip_purpose_valid` is rebuilt in batch mode as `purpose IN ('preview', 'shot', 'card')`; the downgrade deletes the `card` rows first. (2) **A card clip is an `evidence_clip` with `purpose='card'`**: `item_id` the piece, `scene_id` set, `shot_id` the first shot the card covers, `shot_plan_id` the plan it was placed from; `inputs` as for a shot plus `card_id` (`{claim_id}.{piece}`), `box` (`[x, y, width, height]` of the card on the frame) and `frame` (`[width, height]` of the output); `width`, `height` and `frames` are the card's own. The file is a transparent ProRes 4444 `.mov`. Its `render_evidence_clip` job has `input` `{"evidence_clip_id": 5, "card_clip_ref": "scene_2/c3.1"}`. **Which cards exist, and where, is worked out on read** from the newest plan and the words of the scene's take (`shot_plans.SceneEntry.cards`), and so are the source lines; nothing is stored for them. (3) **`evidence_clip.inputs` of a shot clip may have `layout: "split"`, `panel: [x, y, width, height]` and `callouts: [...]`** when a callout lands in the shot (EVD-016); a clip with no `layout` is a full-frame clip. They are compared as part of the clip's look: a clip is out of date when its shot is split now and the clip is not, or the other way round. (4) **The frozen render timeline** (`story_render.inputs`, `scene_render.inputs`) gets the optional keys `evidence_cards` (`id`, `scene_id`, `claim_id`, `item_key`, `start_ms`, `end_ms`, `start_frame`, `frames`, `clip_id`, `path`, `clip_frames`, `x`, `y`, `width`, `height`) and `source_lines` (`scene_id`, `claim_id`, `item_key`, `start_ms`, `end_ms`, `text`), and an evidence shot's `evidence` entry may have `layout: "split"`; a render of a project without evidence has none of them. The timeline version is unchanged. (5) Render warnings gain the codes `card_without_clip` and `evidence_split_empty`.
+
+**Update (EVD-009 evidence shots in the cut plan and the render, 2026-11-17):** no migration, no new column, no new table, no new job type. **Accepted, shown evidence becomes `evidence` shots of the cut plan, drawn at their exact length.** (1) **`shot_plan.content.shots[]`** of a continuous explainer with evidence on may have `type: "evidence"` (also in the `ShotType` of every shot API). Such a shot has no take and no definition, like a `graphic` shot; it has an `evidence` key `{"claim_id": "c3", "item_key": "<item_key>", "piece": 1}` (code writes it from the model's `evidence_claim` and the owner's order of pieces). A project without evidence has no such type and no such key. (2) **`shot_plan.content.evidence`** (a list, written only when the scene had claims with evidence) is what became of each claim whose first word is in the scene: `{"claim_id", "text", "pieces", "shown", "left_out", "reason"}`; `left_out` is `null` or one of `scene_too_short`, `too_close_to_other_evidence`, `opening_or_closing_shot`, `not_in_take`, and `reason` is the sentence that goes with it. (3) **`shot_plan.inputs.evidence_sha256`** (written only when the scene had claims with evidence) is the fingerprint of those claims and their pieces; the plan reads out of date when it changes. (4) **A shot clip is an `evidence_clip` with `purpose='shot'`**: `item_id` the piece, `scene_id`, `shot_id` and `shot_plan_id` set, `attempt` counted per shot, and `inputs` as for a preview plus `item_key`, `claim_id` and `piece` (its `length_s` and `frames` are the shot's, one spare frame included, as for a graphic). Its `render_evidence_clip` job has `input` `{"evidence_clip_id": 5, "shot_clip_ref": "scene_2/shot_4"}` (the dedupe key). **Which clip a shot plays is worked out on read**: the newest clip of the shot that is ready, made for the piece the shot names, with the look and length of now. Nothing else is stored. (5) The pipeline gains the step `evidence_clips` (after `shot_plans`, in the "Graphics" group; the music placement, the scene render and the full render need it). The frozen render timeline (`story_render.inputs.shots[]`, `scene_render.inputs.shots[]`) gets, for an evidence shot, `evidence: {"clip_id": 5}` in place of `take_id`/`graphic` (no take, no sound of its own); a render of a project without evidence has no such key.
+
+**Update (EVD-008 the evidence clip and its preview, 2026-11-17):** no migration, no new column, no new table, no new job type. **The first writer of `evidence_clip` and of the `render_evidence_clip` job** (Section 4.98). (1) Pressing **Preview video** on an accepted piece (`POST /api/projects/{id}/evidence/review/items/{item_key}/preview`) makes one `evidence_clip` row with `purpose` `preview`, `item_id` the piece, `scene_id`, `shot_id` and `shot_plan_id` NULL, `attempt` 1, and `inputs` as in Section 5, together with a `render_evidence_clip` job, in one transaction; `render_job_id` is the job and `job.input` holds the clip's id. A press while a preview of that piece is waiting or running makes nothing and answers with that job; a press after it finished makes a new row (the older rows stay and the newest one is the preview). The job fills `media_path`, `sha256`, `frame_count`, `metrics` and `warnings` and finishes in **one transaction**; a failed job leaves the media columns NULL and puts its sentence in `last_error` (the row's `metrics` is kept when the video did not match). (2) The video is stored under `media/<project_id>/` and is **never deleted** by the app. (3) **Whether a preview is out of date is worked out on read**, not stored: it differs from what a preview made now would have in `inputs.width`, `height`, `fps`, `frames`, `accent` or `clip_version`. (4) The quote's readability on the frame (`text_height_px` against 0.035 of the shorter side) is worked out on read from `evidence_item.capture`; only a video's own `metrics` and `warnings` are stored. (5) The motion service gets the screenshot inside the request (`POST /evidence-renders`, base64, 32 MB limit), and the request is not stored: `metrics.picture_bytes` and `metrics.context_sent` record what was sent.
+
+**Update (EVD-007 the review screen, 2026-11-17):** no migration, no new column, no new table, no new job type. **The first writer of `evidence_review`** (Section 4.97). (1) Every change the owner makes is **a new row** with the next `version` of the project (`MAX(version) + 1`), written for the newest import of the newest round (`inputs = {"import_id": <evidence_import.id>}`) and with `done` 0, unless it changes nothing (then nothing is stored). `PUT /api/projects/{id}/evidence/review/claims/{claim_id}` replaces the decision on one claim and writes the whole `content` (every claim of the round's brief, in the brief's order, with the other claims' decisions as they stand); `POST .../review/done` writes a row with `done` 1 and the same content, and is refused while a claim is not decided. (2) **A round reads `reviewed`** (`evidence_rounds.round_status`) when the newest review row of the round is `done` and its `inputs.import_id` is the round's newest `evidence_import`; any later change, or a new import, makes it read `imported` again, so the `evidence` step is done only after "Review done" is pressed again. (3) **A decision names a piece by `item_key`.** Decisions are read through `services/evidence_review.effective_decision`: a verdict for a key that is not a usable piece of that claim in the newest import is dropped, and so is a place in `shown` of a piece that is not accepted. An unchanged piece keeps its decision across a re-import; a changed piece (a new `item_key`) is undecided. Nothing is deleted from `evidence_item` or `media/` by a decision or a re-import. (4) **A claim is decided** when it has no usable piece and `no_proof_on_screen` is true, or when every usable piece has a verdict and `shown` is not empty or `no_proof_on_screen` is true. `shown` and `no_proof_on_screen` are never both set. (5) Writes are refused with 422 when the project does not have evidence, there is no round or no import, or the claims changed since the round's brief, with 404 for a claim that is not in the round, and with 409 while an `import_evidence` job is queued or running. `evidence_review.content` is stored as in Section 5.
+
+**Update (EVD-006 importing and checking the evidence, 2026-11-17):** no migration, no new column, no new table. **The first writer of `evidence_import` and `evidence_item` and of the `import_evidence` job.** (1) `POST /api/projects/{id}/evidence/import` queues an `import_evidence` job for the **newest round** (Section 5). The job reads that round's `results/<claim_id>/` folders (only the claim ids of the stored brief are looked at; the round folder is never written), checks every piece of evidence (checks 1 to 5 of `Evidence_layer_implementation_phases.md` §4.6, with the capture tool's quote rules repeated in `services/evidence_text.py` and PDFs read with `pypdfium2`), copies the files of the **usable** pieces into `media/<project_id>/` under names `Storage` makes, and saves one `evidence_import` row (the next `version` of the round) and one `evidence_item` row per piece in the same transaction that finishes the job. (2) **A piece that fails a check of 1 to 4 is stored with `usable` 0, its reasons in `checks`, and none of its files copied** (its file columns are NULL; `capture` is NULL). (3) **`item_key`** is the SHA-256 of `{claim, kind, relation, the normalised quote, page, the rectangles rounded to 6 places, the real hashes of the image, context image, text copy and PDF}`; the piece's own id (`e1`) is left out, so renumbering keeps the owner's decisions, and a piece that is not usable also has its id in the key, so its key never equals a usable piece's. Importing again adds the next `version` with every item again; items whose key is unchanged keep it, so `evidence_review` decisions still match. (4) **Files are shared:** a file whose SHA-256 equals one stored by an earlier import of this round (or by another piece of this import) is not copied again, so **two items, or two imports, may point at one stored file. A later phase must never delete a file because one item is rejected.** (5) The import makes a round `imported` again after "Review done" (the newest review is for an older import), so the `evidence` step is not done until the owner reviews again. (6) `evidence_item.capture` is the tidied block (`tool`, `tool_version`, `image_px`, `context_box`, `page`, `viewport`, `render_scale`, `rects`) **without file names and hashes**; the stored paths and hashes are the item's columns. `source` is tidied too (known keys only; `url`, `final_url` and `archive_url` are http or https). (7) New dependency in the backend: `pypdfium2` (Apache-2.0/BSD-3).
+
+**Update (EVD-003 the research brief and the waiting step, 2026-11-17):** no migration, no new column, no new table. **The first writer of `evidence_round` and of the `write_evidence_brief` job.** (1) `evidence_round` (Section 4.94) now gets rows: one per brief, made by the `write_evidence_brief` job in the same transaction that finishes the job. The round's number is the next free one for the project (`MAX(round_no) + 1`); the round's folder `evidence/<project_id>/r<round_no>/` is written in the files folder first (`brief/claims.json`, `brief/README.md`, an empty `results/`), and the row's `brief` and `brief_sha256` are exactly that `claims.json`. **Every round carries every claim that counts then** (not dropped, words still in the story, none undecided from GLM), so a round stands alone and earlier rounds stay as records. The row is never changed; whether it is imported or reviewed is worked out on read from `evidence_import` and `evidence_review` (still empty until EVD-006 and EVD-007), and whether it is out of date is worked out by comparing its `brief.claims` with the claims that count now (id, origin, words, sentence, note and kind; an edit elsewhere in the story does not make it out of date). (2) A new pipeline step, **`evidence`** ("Gather the evidence", group `story`, needs `story_bible` and `evidence_claims`; `shot_plans` now needs it): done when no claim counts, or when the newest round has exactly the claims that count now and is reviewed; off (skipped as complete) for a project without evidence. It is not a job: it **waits for the owner** (a new board status `owner`, and a pause of the story pipeline run, `job.output.waiting_for` in Section 5, that goes on by itself once the step is done). (3) `FILES_HOST_DIR` is a new backend setting (set by `docker-compose.files.yml` from `VISIO_FILES_DIR`) so the app can show the round folder's path on the Mac. (4) Deleting a project removes `evidence/<project_id>/` in the files folder together with its media folder.
+
+**Update (EVD-002 evidence claims, 2026-11-17):** no migration, no new column, no new table. **The first writer of `evidence_claim_list` and of the `suggest_evidence_claims` job.** (1) `evidence_claim_list` (Section 4.93) now gets rows: the owner's marks, keep and drop choices, notes and kinds are `manual` versions, and GLM's proposals are an `ai` version made by the `suggest_evidence_claims` job (registered, `provider='llm'`, restart rule `never_rerun`, on the story model; Section 5). (2) **Marks follow the story on read, not on save.** Saving the story does not touch the claims. Whenever they are read, each claim is checked against `project.script_text`: it stays, or moves to the nearest place its words are, or reads `words_changed` (the words are gone, no longer whole words, or now overlap a claim that counts). `words_changed` is worked out on every read and never stored; the next version stores the positions as found. (3) **A claim whose `kept` is false stays in the list** (a dropped proposal), so it is not proposed again; only the owner's own marks are removed. A mark the owner makes over a proposal drops that proposal in the same version. (4) **A new pipeline step, `evidence_claims`** ("Propose the evidence claims", group `story`, no needs): done once an `ai` version exists, so a run asks GLM once when it has never answered; asking again is the owner's click. Skipped as complete (board `off`) for a project that is not a continuous explainer with `evidence` on. Nothing waits for it yet. (5) New routes under `/api/projects/{id}/evidence-claims` (state, marks, edit, remove, suggest). A project with `evidence` off reads nothing from the evidence tables (EVD-001).
+
+**Update (EVD-001 evidence layer foundation, 2026-11-16):** migration `0098`. **Everything the evidence layer stores (`Evidence_layer_implementation_phases.md`), so the later evidence phases add no migration.** (1) `project.evidence` (BOOLEAN, NOT NULL, default 0): on by default for a new continuous explainer, off for every other project and every project made before. It can be changed at any time with `PATCH /api/projects/{id}`, but only on a continuous explainer (`validate_project`); `POST` refuses it on any other project. Switching it off deletes nothing: the evidence is kept and ignored. (2) Six tables, all written as new rows and never changed, so what is out of date or imported or reviewed is worked out on read (Section 2.1): `evidence_claim_list` (Section 4.93), `evidence_round` (4.94), `evidence_import` (4.95), `evidence_item` (4.96), `evidence_review` (4.97) and `evidence_clip` (4.98). (3) `job.type` gains `suggest_evidence_claims`, `write_evidence_brief`, `import_evidence` and `render_evidence_clip`: the CHECK is rebuilt in batch mode as in `0096` and no row changes; the downgrade deletes the jobs of these types and every evidence row. Nothing queues these jobs and nothing writes these tables yet in this phase. Section 5 documents the JSON shapes and the providers and restart rules of the four job types.
+
 **Update (YTF-004 the draft starts when Render is pressed, 2026-11-12):** migration `0097`; no new table, no new job type, no new route. (1) **`youtube_draft.render_id` is now nullable.** A draft started with a render that is not finished has no `story_render` row to point at, so it stores NULL there and the render job's id in `inputs.render_job_id` (Section 5). A draft is for render R when `render_id` is R's id or `inputs.render_job_id` is R's `job_id`; whether that render was made, is still being made or was not made (its job failed or was cancelled) is worked out on read. The downgrade refuses to run while a row has a NULL `render_id` (it deletes nothing). (2) **`story_renders.start_render` starts the draft** for a render job it has just queued (`youtube_draft.start_for_render_job`; best effort, any error is logged and the render is unaffected). The `write_youtube_draft` job input has `render_job_id` instead of `render_id`, and its `saved_inputs` also has `started_at_render: true`; the draft's context takes `duration_s`, the shape and `is_short` from the render job's frozen timeline. The thumbnail work is the existing `_start_thumbnail` rule (nothing when the chosen thumbnail is current). (3) **A new global setting** (Section 6, group `YouTube`): `youtube_auto_draft` (`on`). (4) `POST .../youtube/uploads` refuses while a `render_story` job is waiting or running ("The video is still rendering."). The panel answer gains `rendering` and, on the draft, `render_state` and `started_at_render`; `render_number` of the draft routes may be null for the render being made. Nothing is stored for any of these.
 
 **Update (YTF-003 four thumbnails, Upload only when ready, 2026-11-12):** no migration, no new column, no new job type, no new route. (1) The YouTube draft's thumbnail follow-up now makes the picture of **every idea of the newest ideas version that has no picture** (none stored and none being made; a failed picture counts as none), not only idea 1: `thumbnails.indexes_without_picture`, used by `youtube_draft._start_thumbnail` and `thumbnails.start_follow_up_picture`. (2) The marker keys are unchanged (`write_thumbnail_concepts.input.then_picture`, `lab_image.input.choose_when_ready`, both `{"chosen_before": id | null}`), but the same `choose_when_ready` is now written on up to four `lab_image` jobs: the first picture stored is chosen, and the others are not, because the chosen thumbnail is then no longer `chosen_before`. (3) `POST .../youtube/uploads` also refuses while a `write_youtube_draft` job is waiting or running ("The draft is still being written.") and while a picture of the newest ideas version is being made, even when a thumbnail is already chosen ("The thumbnails are still being made."); a failed picture does not block. Both are computed on read from the jobs, nothing is stored. (Section 5 marker text updated.)
@@ -700,6 +716,7 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `presenter_outfit` | TEXT | NULL | — | Migration `0082`. The owner's text for what an explainer's presenter wears (for example "a navy blazer over a white shirt"), at most 300 characters (the longest named-look description), trimmed; a blank text is stored as NULL. NULL means the presenter's default outfit. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. The look resolution uses it as the presenter's look request in every scene, in place of what the scene definitions asked for, so it resolves to one named look (with its own pictures) shared by every scene. The resolution records its SHA-256 in `inputs.presenter_outfit.sha256` and is out of date when the text changes |
 | `presenter_named_look_id` | INTEGER, FK → `character_named_look.id` | NULL | — | Migration `0083`. The saved outfit (a named look of the presenter) an explainer's presenter wears in every scene, picked from the presenter's outfits in the Character Lab. NULL means the typed `presenter_outfit` or the default outfit. Never set together with `presenter_outfit` (422), and only on an explainer. `ON DELETE SET NULL` (the outfit's deletion in the lab only hides it, so this normally stays set). The look resolution uses it as the presenter's look in every scene, with no model matching, and records its id in `inputs.presenter_named_look`; the resolution is out of date when the pick changes |
 | `graphics` | BOOLEAN | NOT NULL | `0` | EXG-001. Whether a continuous explainer gets graphic shots (charts, diagrams and text cards drawn by code). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. Only an explainer with `voice_track = continuous` can have it on (`validate_project`). A new continuous explainer defaults to on; every other project, and every project made before this column, is off. Off, the project gets exactly the instructions, jobs and FFmpeg commands it got before |
+| `evidence` | BOOLEAN | NOT NULL | `0` | Migration `0098` (EVD-001). Whether a continuous explainer has the evidence layer (proof shown on screen for claims that can be checked). A new continuous explainer defaults to on (the create form shows the switch, on); every other project, and every project made before this column, is off. Only an explainer with `voice_track = continuous` can have it on (`validate_project`; `POST` and `PATCH` refuse it elsewhere). `PATCH /api/projects/{id}` may change it at any time; switching it off deletes nothing, the evidence is kept and ignored, and counts again when it is switched back on. Nothing reads it yet in this phase |
 | `take_source` | TEXT | NOT NULL | `'generated'` | Migration `0092` (REC-002). Where a continuous explainer's takes come from, `CHECK (take_source IN ('generated', 'recorded'))`: `generated` (the speech model, as before) or `recorded` (a person records the script). `recorded` is allowed only for an explainer with `voice_track = continuous` (`validate_project`). `PATCH /api/projects/{id}` may change it at any time for such a project; switching deletes nothing, and the other kind's takes stop counting until it is switched back. Every project made before this column is `generated` |
 | `pushed_scene_id` | TEXT | NULL | — | Migration `0084` (SCN-002). The id, in the scene discovery, of the scene the owner pushed to the front of the GPU server's queue. Its clips are sent with priority 1 and the ones already waiting on the server are moved up. NULL means none is pushed. Set by the push and by "Generate scene", cleared by "Stop pushing" or by pushing another scene |
 
@@ -796,7 +813,7 @@ Every unit of background work. This is where running-job information lives, so a
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` \| `define_shot` \| `check_shot_continuity` \| `repair_shot_cut` \| `compile_shot_prompt` \| `generate_shot` \| `render_story` \| `check_shot_takes` \| `story_pipeline` \| `check_take_dialogue` \| `write_music_bible` (`write_music_plan`: MUSIC-008, the language model's music plan for the whole story, the four critics' notes and the revisions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0067`) \| `write_music_cue` (`write_music_cue`: MUSIC-009, the language model's detail and prompt wordings for one cue of the music plan, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `cue_id`, so the cues run side by side; migration `0068`) \| `audit_music_cues` (`audit_music_cues`: MUSIC-009, the language model's check of every cue's prompts against the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0068`) \| `rewrite_music_prompt` (`rewrite_music_prompt`: MUSIC-010, the language model's new prompt for a music take the owner rejected, from the owner's note, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `item_key`, so an item is rewritten once at a time; migration `0069`) \| `write_music_bible` (`write_music_bible`: MUSIC-006, the language model's four score directions, its choice and the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; the CHECK in migration `0065` lists every type) \| `write_music_theme_prompt` (`write_music_theme_prompt`: MUSIC-007, the language model's ACE-Step fields for one music theme's recording, or the captions of the missing emotional versions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `theme_id`, so a theme is written once at a time and themes run side by side; migration `0066`) \| `select_shot_references` (`select_shot_references`: PHASE-033, the language model's choice of one shot's reference pictures, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `shot_key`, so a shot is chosen once at a time and shots run side by side; `check_take_dialogue`: PHASE-031, the speech-recognition check of one take whose shot carries dialogue, a job of the project, `provider='gpu'`, restart rule `resume`, deduped by `take_id`, so a take is checked once at a time; `story_pipeline`: PHASE-030, one run of the whole story pipeline from the story's text to the rendered video, a job of the project, `provider='local'`, restart rule `resume`; it writes no story rows of its own and queues the stages' own jobs, its progress being its `output`; `check_shot_takes`: PHASE-029, the technical check of the takes that have none, a job of the project, `provider='local'`; `render_scene`: SCN-003, one scene's own video made by FFmpeg from its selected clips (a placeholder for a shot with none) and its narration, a job of the project, `provider='local'`, restart rule `start_again`, deduped by `scene_id`; `render_story`: PHASE-028, the story's finished video made by FFmpeg from the selected clips and the narration, a job of the project, `provider='local'`; `generate_shot`: PHASE-027, one take of one shot's clip made by MiniMax H3, a job of the project, `provider='gpu'`; `compile_shot_prompt`: PHASE-026, the compiled H3 prompt of one shot, a job of the project, `provider='llm'`; `repair_shot_cut`: PHASE-023 (cut repair), the repair of one cut between two shots of a story scene, a job of the project, `provider='llm'`; `check_shot_continuity`: PHASE-023, the continuity check of one story scene's shots, a job of the project, `provider='llm'`; `define_shot`: PHASE-022, the definition of one planned shot, a job of the project, `provider='llm'`; `plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` \| `define_shot` \| `check_shot_continuity` \| `repair_shot_cut` \| `compile_shot_prompt` \| `generate_shot` \| `render_story` \| `check_shot_takes` \| `story_pipeline` \| `check_take_dialogue` \| `write_music_bible` (`write_music_plan`: MUSIC-008, the language model's music plan for the whole story, the four critics' notes and the revisions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0067`) \| `write_music_cue` (`write_music_cue`: MUSIC-009, the language model's detail and prompt wordings for one cue of the music plan, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `cue_id`, so the cues run side by side; migration `0068`) \| `audit_music_cues` (`audit_music_cues`: MUSIC-009, the language model's check of every cue's prompts against the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0068`) \| `rewrite_music_prompt` (`rewrite_music_prompt`: MUSIC-010, the language model's new prompt for a music take the owner rejected, from the owner's note, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `item_key`, so an item is rewritten once at a time; migration `0069`) \| `write_music_bible` (`write_music_bible`: MUSIC-006, the language model's four score directions, its choice and the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; the CHECK in migration `0065` lists every type) \| `write_music_theme_prompt` (`write_music_theme_prompt`: MUSIC-007, the language model's ACE-Step fields for one music theme's recording, or the captions of the missing emotional versions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `theme_id`, so a theme is written once at a time and themes run side by side; migration `0066`) \| `select_shot_references` (`select_shot_references`: PHASE-033, the language model's choice of one shot's reference pictures, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `shot_key`, so a shot is chosen once at a time and shots run side by side; `check_take_dialogue`: PHASE-031, the speech-recognition check of one take whose shot carries dialogue, a job of the project, `provider='gpu'`, restart rule `resume`, deduped by `take_id`, so a take is checked once at a time; `story_pipeline`: PHASE-030, one run of the whole story pipeline from the story's text to the rendered video, a job of the project, `provider='local'`, restart rule `resume`; it writes no story rows of its own and queues the stages' own jobs, its progress being its `output`; `check_shot_takes`: PHASE-029, the technical check of the takes that have none, a job of the project, `provider='local'`; `render_scene`: SCN-003, one scene's own video made by FFmpeg from its selected clips (a placeholder for a shot with none) and its narration, a job of the project, `provider='local'`, restart rule `start_again`, deduped by `scene_id`; `render_story`: PHASE-028, the story's finished video made by FFmpeg from the selected clips and the narration, a job of the project, `provider='local'`; `generate_shot`: PHASE-027, one take of one shot's clip made by MiniMax H3, a job of the project, `provider='gpu'`; `compile_shot_prompt`: PHASE-026, the compiled H3 prompt of one shot, a job of the project, `provider='llm'`; `repair_shot_cut`: PHASE-023 (cut repair), the repair of one cut between two shots of a story scene, a job of the project, `provider='llm'`; `check_shot_continuity`: PHASE-023, the continuity check of one story scene's shots, a job of the project, `provider='llm'`; `define_shot`: PHASE-022, the definition of one planned shot, a job of the project, `provider='llm'`; `plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows Migration `0098` (EVD-001) added `suggest_evidence_claims`, `write_evidence_brief`, `import_evidence` and `render_evidence_clip` (Sections 4.93 to 4.98 and 5). |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -4306,6 +4323,286 @@ CREATE INDEX idx_youtube_upload_project ON youtube_upload (project_id);
 
 ---
 
+### 4.93 `evidence_claim_list`
+
+*Added for the evidence layer (migration `0098`; written from EVD-002).* One version of a project's evidence claims: the owner's marks, GLM's proposals and the owner's keep or drop choices. It follows the provenance convention of Section 2.1: every change is a new row with the next `version`, and a stored row is never changed. `source` is `manual` for the owner's marks and choices and `ai` for GLM's proposals. Out of date is worked out on read from `inputs`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per project. `UNIQUE (project_id, version)` |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `suggest_evidence_claims` job that wrote it. NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | `{script_sha256, based_on_version}` (Section 5) |
+| `content` | JSON | NOT NULL | — | `{next_id, claims}` (Section 5) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE evidence_claim_list (
+    id         INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    version    INTEGER NOT NULL,
+    source     TEXT NOT NULL,
+    job_id     INTEGER,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_evidence_claim_list PRIMARY KEY (id),
+    CONSTRAINT ck_evidence_claim_list_source_valid CHECK (source IN ('ai', 'manual')),
+    CONSTRAINT fk_evidence_claim_list_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_claim_list_job_id_job
+        FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_evidence_claim_list_project_id UNIQUE (project_id, version)
+);
+CREATE INDEX idx_evidence_claim_list_project ON evidence_claim_list (project_id);
+```
+
+### 4.94 `evidence_round`
+
+*Added for the evidence layer (migration `0098`; written from EVD-003 by the `write_evidence_brief` job, Section 5).* One research brief written for one claim list version. The round's id in the brief is `r<round_no>`. Whether the round is imported or reviewed is worked out from the import and review rows, never stored here.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `round_no` | INTEGER | NOT NULL | — | From 1 per project. `UNIQUE (project_id, round_no)` |
+| `claim_list_id` | INTEGER, FK → `evidence_claim_list.id` | NOT NULL | — | The claim list version the brief was written from. `ON DELETE CASCADE` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_evidence_brief` job. `ON DELETE SET NULL` |
+| `folder` | TEXT | NOT NULL | — | The round folder, relative to the files folder (`evidence/<project_id>/r<round_no>`) |
+| `brief` | JSON | NOT NULL | — | Exactly the `brief/claims.json` that was written (`Evidence_layer_implementation_phases.md` §4.4) |
+| `brief_sha256` | TEXT | NOT NULL | — | The hash of that file |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE evidence_round (
+    id            INTEGER NOT NULL,
+    project_id    INTEGER NOT NULL,
+    round_no      INTEGER NOT NULL,
+    claim_list_id INTEGER NOT NULL,
+    job_id        INTEGER,
+    folder        TEXT NOT NULL,
+    brief         JSON NOT NULL,
+    brief_sha256  TEXT NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_evidence_round PRIMARY KEY (id),
+    CONSTRAINT fk_evidence_round_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_round_claim_list_id_evidence_claim_list
+        FOREIGN KEY (claim_list_id) REFERENCES evidence_claim_list (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_round_job_id_job
+        FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_evidence_round_project_id UNIQUE (project_id, round_no)
+);
+CREATE INDEX idx_evidence_round_project ON evidence_round (project_id);
+```
+
+### 4.95 `evidence_import`
+
+*Added for the evidence layer (migration `0098`; written from EVD-006).* One import of one round's results. A stored row is never changed; importing again adds the next version.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `round_id` | INTEGER, FK → `evidence_round.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per round. `UNIQUE (round_id, version)` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `import_evidence` job. `ON DELETE SET NULL` |
+| `results` | JSON | NOT NULL | — | Each claim's status, summary, attempts and problems (Section 5) |
+| `report` | JSON | NOT NULL | — | The counts by status (Section 5) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE evidence_import (
+    id         INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    round_id   INTEGER NOT NULL,
+    version    INTEGER NOT NULL,
+    job_id     INTEGER,
+    results    JSON NOT NULL,
+    report     JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_evidence_import PRIMARY KEY (id),
+    CONSTRAINT fk_evidence_import_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_import_round_id_evidence_round
+        FOREIGN KEY (round_id) REFERENCES evidence_round (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_import_job_id_job
+        FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_evidence_import_round_id UNIQUE (round_id, version)
+);
+CREATE INDEX idx_evidence_import_project ON evidence_import (project_id);
+```
+
+### 4.96 `evidence_item`
+
+*Added for the evidence layer (migration `0098`; written from EVD-006).* One piece of evidence of one import. `item_key` tells an item that is unchanged from one import to the next; the owner's decisions (`evidence_review`) name an item by it, so a new import keeps them. `kind`, `relation` and `source_tier` are NULL when the agent wrote a value the contract does not allow: the item is then stored with `usable` 0 and its reasons in `checks`, so the review screen can show why. A file column is NULL for a file that was not copied. Paths are relative to the media folder and generated by `Storage`; the agent's file names are never stored as paths (EV-7).
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `import_id` | INTEGER, FK → `evidence_import.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `claim_id` | TEXT | NOT NULL | — | The claim's id in the brief (`c1`) |
+| `evidence_id` | TEXT | NOT NULL | — | The piece's id in the result (`e1`). `UNIQUE (import_id, claim_id, evidence_id)` |
+| `item_key` | TEXT | NOT NULL | — | The key that tells an unchanged item across imports: a SHA-256 of the claim, kind, relation, normalised quote, page, rectangles and the real file hashes (see the EVD-006 Update entry). A piece that is not usable has its `evidence_id` in the key too |
+| `kind` | TEXT | NULL | — | `web` or `pdf` (`CHECK`) |
+| `relation` | TEXT | NULL | — | `supports`, `partly_supports`, `contradicts` or `context` (`CHECK`) |
+| `source_tier` | TEXT | NULL | — | `primary`, `secondary` or `other` (`CHECK`) |
+| `source` | JSON | NULL | — | The `source` object of the result |
+| `quote` | TEXT | NULL | — | The exact words in the source |
+| `what_it_says` | TEXT | NULL | — | The agent's plain sentence |
+| `agent_notes` | TEXT | NULL | — | The agent's notes. Shown as text, never as HTML |
+| `capture` | JSON | NULL | — | The `capture` object of the result (rectangles, image size, viewport, page, tool and version) |
+| `image_path`, `image_sha256` | TEXT | NULL | — | The screenshot in `media/`, and its hash |
+| `context_path`, `context_sha256` | TEXT | NULL | — | The context image, and its hash |
+| `text_path`, `text_sha256` | TEXT | NULL | — | The text copy, and its hash |
+| `pdf_path`, `pdf_sha256` | TEXT | NULL | — | The copied PDF, and its hash |
+| `usable` | BOOLEAN | NOT NULL | `0` | Whether checks 1 to 4 of §4.6 passed |
+| `checks` | JSON | NULL | — | The result of each check, with the reason of a failure |
+| `warnings` | JSON | NULL | — | Warnings that do not refuse the item (for example a number the quote does not say) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE evidence_item (
+    id             INTEGER NOT NULL,
+    project_id     INTEGER NOT NULL,
+    import_id      INTEGER NOT NULL,
+    claim_id       TEXT NOT NULL,
+    evidence_id    TEXT NOT NULL,
+    item_key       TEXT NOT NULL,
+    kind           TEXT,
+    relation       TEXT,
+    source_tier    TEXT,
+    source         JSON,
+    quote          TEXT,
+    what_it_says   TEXT,
+    agent_notes    TEXT,
+    capture        JSON,
+    image_path     TEXT,
+    image_sha256   TEXT,
+    context_path   TEXT,
+    context_sha256 TEXT,
+    text_path      TEXT,
+    text_sha256    TEXT,
+    pdf_path       TEXT,
+    pdf_sha256     TEXT,
+    usable         BOOLEAN NOT NULL DEFAULT 0,
+    checks         JSON,
+    warnings       JSON,
+    created_at     DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_evidence_item PRIMARY KEY (id),
+    CONSTRAINT ck_evidence_item_kind_valid CHECK (kind IS NULL OR kind IN ('web', 'pdf')),
+    CONSTRAINT ck_evidence_item_relation_valid
+        CHECK (relation IS NULL OR relation IN ('supports', 'partly_supports', 'contradicts', 'context')),
+    CONSTRAINT ck_evidence_item_source_tier_valid
+        CHECK (source_tier IS NULL OR source_tier IN ('primary', 'secondary', 'other')),
+    CONSTRAINT fk_evidence_item_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_item_import_id_evidence_import
+        FOREIGN KEY (import_id) REFERENCES evidence_import (id) ON DELETE CASCADE,
+    CONSTRAINT uq_evidence_item_import_id UNIQUE (import_id, claim_id, evidence_id)
+);
+CREATE INDEX idx_evidence_item_import ON evidence_item (import_id);
+CREATE INDEX idx_evidence_item_project_key ON evidence_item (project_id, item_key);
+```
+
+### 4.97 `evidence_review`
+
+*Added for the evidence layer (migration `0098`; written from EVD-007).* One version of the owner's decisions on one round's evidence. Every change is a new row, and a stored row is never changed. Every version is the owner's, so there is no `source`. A decision names an item by `item_key`, not by row id, so a new import keeps the decisions for the items that did not change. `done` is true on the version written by "Review done".
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `round_id` | INTEGER, FK → `evidence_round.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per project. `UNIQUE (project_id, version)` |
+| `inputs` | JSON | NOT NULL | — | `{import_id}`: the import the decisions were made on |
+| `content` | JSON | NOT NULL | — | The decisions (Section 5) |
+| `done` | BOOLEAN | NOT NULL | `0` | Whether the owner ended the review with this version |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE evidence_review (
+    id         INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    round_id   INTEGER NOT NULL,
+    version    INTEGER NOT NULL,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    done       BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_evidence_review PRIMARY KEY (id),
+    CONSTRAINT fk_evidence_review_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_review_round_id_evidence_round
+        FOREIGN KEY (round_id) REFERENCES evidence_round (id) ON DELETE CASCADE,
+    CONSTRAINT uq_evidence_review_project_id UNIQUE (project_id, version)
+);
+CREATE INDEX idx_evidence_review_round ON evidence_review (round_id);
+```
+
+### 4.98 `evidence_clip`
+
+*Added for the evidence layer (migration `0098`; written from EVD-008).* One rendered evidence video: a preview from the review screen, or the clip of an evidence shot at its exact length. The row is made when the render is queued, so the video columns are NULL until the `render_evidence_clip` job has written them, like `shot_graphic`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `purpose` | TEXT | NOT NULL | — | `preview`, `shot` or `card` (`CHECK`; `card` since migration `0099`: a transparent clip laid over a presenter or B-roll shot, EVD-011) |
+| `item_id` | INTEGER, FK → `evidence_item.id` | NULL | — | Set when the clip shows exactly one piece (always for a preview). `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NULL | — | The scene's slug id. NULL for a preview |
+| `shot_id` | TEXT | NULL | — | The shot's id in the scene's shot plan. NULL for a preview |
+| `shot_plan_id` | INTEGER, FK → `shot_plan.id` | NULL | — | The plan the clip was made for. `ON DELETE SET NULL` |
+| `attempt` | INTEGER | NOT NULL | `1` | Counts the attempts for the same shot or item |
+| `render_job_id` | INTEGER, FK → `job.id` | NULL | — | The `render_evidence_clip` job. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the clip was made from; `inputs.items` is the ordered list of the pieces it shows (Section 5) |
+| `media_path` | TEXT | NULL | — | The video in `media/`, relative path |
+| `sha256` | TEXT | NULL | — | The video's hash |
+| `frame_count` | INTEGER | NULL | — | Measured from the video |
+| `metrics` | JSON | NULL | — | Measured facts, such as the quote's text height on the frame |
+| `warnings` | JSON | NULL | — | For example the readability warning |
+| `last_error` | TEXT | NULL | — | The sentence the render failed with |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE evidence_clip (
+    id            INTEGER NOT NULL,
+    project_id    INTEGER NOT NULL,
+    purpose       TEXT NOT NULL,
+    item_id       INTEGER,
+    scene_id      TEXT,
+    shot_id       TEXT,
+    shot_plan_id  INTEGER,
+    attempt       INTEGER NOT NULL DEFAULT 1,
+    render_job_id INTEGER,
+    inputs        JSON NOT NULL,
+    media_path    TEXT,
+    sha256        TEXT,
+    frame_count   INTEGER,
+    metrics       JSON,
+    warnings      JSON,
+    last_error    TEXT,
+    created_at    DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_evidence_clip PRIMARY KEY (id),
+    CONSTRAINT ck_evidence_clip_purpose_valid CHECK (purpose IN ('preview', 'shot', 'card')),
+    CONSTRAINT fk_evidence_clip_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_clip_item_id_evidence_item
+        FOREIGN KEY (item_id) REFERENCES evidence_item (id) ON DELETE CASCADE,
+    CONSTRAINT fk_evidence_clip_shot_plan_id_shot_plan
+        FOREIGN KEY (shot_plan_id) REFERENCES shot_plan (id) ON DELETE SET NULL,
+    CONSTRAINT fk_evidence_clip_render_job_id_job
+        FOREIGN KEY (render_job_id) REFERENCES job (id) ON DELETE SET NULL
+);
+CREATE INDEX idx_evidence_clip_project_scene ON evidence_clip (project_id, scene_id);
+CREATE INDEX idx_evidence_clip_item ON evidence_clip (item_id);
+```
+
+---
+
 ## 5. JSON column shapes
 
 The shapes of the narration jobs and of the assets they made were removed with migration `0022`: `transcript.words` and `script_words`, and the `job.input` and `job.output` of `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `write_last_frame_prompt`, `generate_last_frame`, `generate_clip`, `render_final`, `generate_voiceover`, the cast jobs and `auto_pipeline`. Their full text is at the tag `narration-final` (`git show narration-final:DATABASE_STRUCTURE.md`). The shapes of the lab jobs follow.
@@ -5732,6 +6029,45 @@ YTF-001: a result written by Send captions now / Set the thumbnail again also ha
 The two job types: `write_youtube_draft` (YT-003) is a paid language-model call with the rules of `jobs/llm_call.py`, `provider='llm'`, restart rule `never_rerun`; `publish_youtube` (YT-004) is `provider='local'`, restart rule `start_again`, one running at a time, and continues from the first step not done (a stored `video_id` means the video is never sent twice). The `write_youtube_draft` shapes are above; those of `publish_youtube` follow.
 
 `publish_youtube` (YT-004). `job.input`: `{"upload_id": 7, "target": "<render id>:<channel row id>", "waiting_since"?: 1794500000.0, "next_check_at"?: 1794500030.0, "steps"?: ["thumbnail"], "later"?: true}`. `steps` (YT-005) is set by a Try again on one failed step (`thumbnail` or `captions`) and limits the job to those steps; without it the job does every step that has no result. `later` (YTF-001) is set together with `steps` by Send captions now / Set the thumbnail again, and by a Try again on a step whose failed result has `later`: the step is done whatever its last result was and its result is stored with `later: true`. `target` is the dedupe key. `waiting_since` and `next_check_at` are clock times (seconds since 1970, so they survive a restart) that the job writes while it waits for YouTube to process the video: it is queued again between two checks, 30 seconds apart, and a start before `next_check_at` queues it again without asking Google; after 30 minutes it records `gave_up`. The job counts the video as processed only when `uploadStatus` is `processed` and `processingStatus` is `succeeded` (YTF-001); `processingStatus` `failed` or `terminated` fails the upload with "YouTube could not process the video (reason)." `job.output` (when it succeeds): `{"video_id": "...", "processing": "processed" | "gave_up"}`. The upload's bytes sent are kept in memory only (`live_status`), never in the database. A job that fails writes the same sentence to `job.error` and `youtube_upload.error`.
+
+
+### The evidence layer (EVD-001)
+
+Migration `0098`. Only `evidence_claim_list` is written so far (EVD-002; `words_changed` is not stored, see the Update entry); the phase that writes each of the others may add keys and says so in its notes. The contracts of the files in the round folder (`claims.json`, `result.json`) are in `Evidence_layer_implementation_phases.md` §4.4 and §4.5.
+
+`evidence_claim_list.inputs`: `{"script_sha256": "<hash of project.script_text>", "based_on_version": 3 | null}`. `content`: `{"next_id": 4, "claims": [{"id": "c1", "origin": "owner" | "glm", "start": 120, "end": 151, "text": "the exact words", "hint": "" , "kind_hint": "number" | "quote" | "statement" | "event" | "other", "reason": "" , "kept": true | false | null}]}`. `start` and `end` are code-point positions in `script_text` (end not included), as for the graphic suggestions. `id` is `c<n>` from `next_id`, never reused, and a claim keeps its id while its words are unchanged. `origin` `owner` has `reason` empty and `kept` true; `origin` `glm` has the model's reason, and `kept` is null until the owner keeps (true) or drops (false) it.
+
+`evidence_round.brief`: the `claims.json` of §4.4, with `round_id` `r<round_no>`.
+
+`evidence_import.results`: `{"c1": {"status": "found" | "partial" | "not_found" | "contradicted" | "blocked" | null, "summary": "", "attempts": [{"what": "", "outcome": ""}], "problems": ["a sentence"], "warnings": ["a sentence"]}}`, one entry for each claim of the round's brief, in the brief's order. `status` is null for a claim with no usable `result.json`: with `problems` empty there is no `result.json` at all, otherwise it exists and cannot be used (a link, not JSON, the wrong schema, round or claim, no status or summary set). `problems` are the claim-level problems (a status that does not fit its evidence, a link in the claim folder, too many pieces); `warnings` are for example "The status is found but no evidence supports the claim." and "No piece of evidence for this claim passed the checks." `summary` and `attempts` are the agent's words, kept as text. `report`: `{"claims": 6, "by_status": {"found": 4, "not_found": 1, "no_result": 1, "invalid": 0}, "items": 7, "usable_items": 6}`: `no_result` counts claims with no `result.json`, `invalid` those whose `result.json` cannot be used; only counts above zero are written.
+
+`evidence_item.source`: the `source` object of §4.5 tidied (keys `url`, `final_url`, `publisher`, `title`, `author`, `published`, `retrieved_at`, `archive_url`; NULL when it did not pass check 1). `capture`: `{"tool", "tool_version", "image_px": [w, h], "context_box": [x, y, w, h] | null, "page": 1 | null, "viewport": {...} | null, "render_scale": 8.0 | null, "rects": [[x, y, w, h], ...]}`, set only for a usable item; the agent's file names and the `sha256` map are not kept: the paths of the stored files and their hashes are in the columns (EV-7). `checks`: `{"shape": {"ok": true}, "files": {"ok": false, "reason": "a sentence"}, "quote": {...}, "rects": {...}}`, plus `"duplicate"` when a piece is the same evidence as an earlier one of its claim (then it is not usable). `warnings`: `[{"code": "number_not_in_quote", "message": "a sentence"}]`; `evidence_id` is the agent's id, or `?<position>` when it was not valid or was used twice.
+
+`evidence_review.content`: `{"claims": [{"claim_id": "c1", "items": [{"item_key": "<key>", "verdict": "accepted" | "rejected"}], "shown": ["<item_key>"], "no_proof_on_screen": false}]}`. `shown` lists the accepted items to show, in the owner's order. One entry for each claim of the round's brief, in the brief's order. `items` lists only the **usable** pieces that have a verdict, in the import's order; a piece that is not usable never has one. `evidence_review.inputs`: `{"import_id": 4}`.
+
+`evidence_clip.inputs` (EVD-008, for a preview): `{"items": ["<item_key>"], "item_ids": [12], "orientation": "landscape", "length_s": 6.0, "width": 1920, "height": 1080, "fps": 24, "frames": 144, "accent": "#FFD60A", "accent_source": "graphic_theme" | "callout_plan" | "default", "clip_version": 1}`; EVD-009 adds the keys of a shot clip (its `length_s` is the shot's). `width`, `height`, `fps`, `frames`, `accent` and `clip_version` are the keys a preview is compared by to tell whether it is out of date. `metrics`: `{"engine": "evidence_clip", "composition": "Evidence", "text_height_px": 54.0, "min_text_height_px": 37.8, "zoom": 1.07, "picture_bytes": 2415870, "context_sent": false, "render_s": 11.2, "job_s": 14.0, "size_bytes": 410233, "frames": 144, "width": 1920, "height": 1080, "fps": 24, "codec": "h264", "pix_fmt": "yuv420p", "checks": {...}, "encoding": {...}, "versions": {...}}`; `warnings`: `[{"code": "small_text", "message": "a sentence"}]` (only `small_text`, when `text_height_px` is below `min_text_height_px`).
+
+The four job types: `suggest_evidence_claims` (EVD-002) is a paid language-model call with the rules of `jobs/llm_call.py`, `provider='llm'`, restart rule `never_rerun`. `write_evidence_brief` (EVD-003), `import_evidence` (EVD-006) and `render_evidence_clip` (EVD-008, EVD-009) are `provider='local'` with restart rule `start_again`. `suggest_evidence_claims` (EVD-002), `write_evidence_brief` (EVD-003) and `import_evidence` (EVD-006) have their handlers (below); `render_evidence_clip` has its handler too (EVD-008, below; EVD-009 uses it for shot clips).
+
+### `job.input` and `job.output` for a `suggest_evidence_claims` job (EVD-002)
+
+One job per press of **Ask GLM for more claims** (or per pipeline run that finds GLM never answered). It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, on the **story model**, and is deduped per project (a press while one waits or runs returns that job). While it waits or runs, the owner's changes to the claims are refused with 409. `input` is a copy of everything the job needs, taken when it was queued: `script` (the saved story), `script_sha256`, `claims` (the claims as they stood in the story, each with `words_changed`) and `based_on_version` (the claim list version they are, or null). When the job starts, `server_url`, `endpoint` and `calls_sent.claims` (`instructions_sha256` and the exact `request`) are added. There is **one call**, with the shared at-most-two-attempts rule of `jobs/llm_call.py`: an answer without a `claims` list, a claim without a `phrase` or a `reason`, or one cut off at the token limit, is sent back once with the reason. The model answers `{"claims": [{"phrase", "kind_hint", "reason"}]}`; it never gives positions. Code then finds each phrase in the story (spaces and line breaks count alike, the range is moved out to whole words) and leaves out a phrase that is not in the story, is over 300 characters, repeats words that are already marked, were dropped by the owner or are proposed twice, or can only be placed over a claim that counts. There is no limit on how many proposals are kept. The new version keeps every claim the owner decided on and replaces only the proposals the owner had not decided on (a proposal with the same words and place keeps its id). `output` is `{"calls": {"claims": {...attempts...}}, "usage": {...}, "claim_list_id", "version", "proposed", "dropped": [{"phrase", "why"}], "seconds"}`. A successful job saves its row and finishes in **one transaction**. When the story, or the claim list, is no longer what the job started from, nothing is saved and the job fails ("Ask again"). Nothing paid starts by itself except the pipeline step's single first call: otherwise it starts only from `POST /api/projects/{id}/evidence-claims/suggest`, and only for a continuous explainer with `evidence` on (422 otherwise).
+
+### `job.input` and `job.output` for a `render_evidence_clip` job (EVD-008)
+
+One job per press of **Preview video** on an accepted piece of evidence. It belongs to a project, is `provider='local'` with the restart rule `start_again`, calls no model and costs nothing, and is deduped per piece (a press while one waits or runs returns that job). `input` is `{"evidence_clip_id": 5, "preview_item_id": 12}`: the clip row made with the job (everything the render needs is read from it and from the `evidence_item` when the job runs) and the piece's id, the dedupe key. The number of renders at the same time is the Graphics lab's "maximum parallel renders" setting. The job plans the layout from the stored capture, asks the motion service (`/evidence-renders`, the stored PNG and, only when the camera ever looks outside the screenshot, the part of the context image that is on screen, both as base64 in the request), downloads the video and checks it with `ffprobe` against the planned size, frame rate, frame count, codec (H.264) and pixel format (`yuv420p`); a difference fails the job and the file is not kept. It then stores the video under `media/<project_id>/` and, in **one transaction**, saves the clip's columns and finishes the job. A job cancelled meanwhile leaves the clip alone. `output` is `{"path": "1/9c2e....mp4", "size_bytes": 410233, "metrics": {...as stored on the clip...}, "warnings": [...], "evidence_clip_id": 5}`. Failures say what happened in one sentence (the motion service did not answer, the render failed, the video is not what was asked for, the pictures are over 30 MB). After a restart the job runs again from the start. Logs hold the job id, the clip and the sizes, never the quote. For a shot clip (EVD-009) `input` is `{"evidence_clip_id": 5, "shot_clip_ref": "scene_2/shot_4"}` and the render draws the stored `inputs.frames` exactly.
+
+### `job.input` and `job.output` for a `write_evidence_brief` job (EVD-003)
+
+One job per press of **Write the brief** on the `evidence` step. It belongs to a project, is `provider='local'` with the restart rule `start_again`, calls no model and costs nothing, and is deduped per project (a press while one waits or runs returns that job). `input` is `{"claim_list_version": <the claim list version that was newest when it was queued, or null>}`, a note only: **the job reads the claims and the story as they are when it runs.** It then makes the round: the claims that count are written to `evidence/<project_id>/r<n>/brief/claims.json` (the format of `Evidence_layer_implementation_phases.md` §4.4: `schema` `visio.evidence.brief`, `version` 1, `round_id` `r<n>`, the project's id, title, topic (the Story Bible's topic, or the title), orientation and today's date, the rules, and every claim with its `id`, `origin`, `text`, the whole `sentence`, the `context` (the sentence before and the sentence after), `hint` and `kind_hint`), `brief/README.md` (the round's folder on the Mac when `FILES_HOST_DIR` is known, the skill's name and a ready-to-paste prompt; the prompt is provisional until EVD-005) and an empty `results/` folder. Files are written first (each by a temporary name, then moved into place), then the `evidence_round` row is saved and the job marked succeeded in **one transaction**. If the claims can no longer be sent to research (an undecided proposal of GLM, a claim whose words changed, no claim, nothing changed since the newest round, the files folder missing or not marked), nothing is written and the job fails with the reason. If the job was cancelled meanwhile, the folder just written is removed. `output` is `{"round_id": "r1", "round_no": 1, "folder": "evidence/12/r1", "claims": 6, "brief_sha256": "..."}`. After a restart the job runs again from the start; a folder written for a row that was never saved is left unused and the next round takes the next number.
+
+### `job.input` and `job.output` for an `import_evidence` job (EVD-006)
+
+One job per press of **Import evidence** (or **Import again**) on the `evidence` step. It belongs to a project, is `provider='local'` with the restart rule `start_again`, calls no model and costs nothing, and is deduped per project. `input` is `{"round_no": 2, "round_id": "r2"}`, the round that was newest when it was queued. When it runs, the round must still be the newest and must have the claims that count now, or the job fails with the reason and saves nothing. It is refused when queued (422) when the project has no evidence, there is no round, the claims changed since the round's brief, a brief is being written, the files folder has a problem, or no claim of the round has a `result.json` yet. `output` is `{"import_id": 3, "version": 1, "round_id": "r2", "report": {...}}` (`report` as stored on `evidence_import`). The import row, its items and finishing the job are one transaction; if it fails or the job was cancelled, the files **this** job copied are deleted again (a file an earlier import stored is never deleted). A run cut off by a restart starts again, and files it had already copied stay in the media folder unused. Limits (the capture tool's): `result.json` 1 MB; an image 20 MB and 40 million pixels; a text copy 5 MB; a PDF 50 MB; at most 12 rectangles per piece; at most `rules.max_evidence_per_claim` pieces per claim (the rest are left out and the claim says so); the files of the whole round read at most 1 GB. The import is stricter than the tool's `validate` in four ways: an image must be a PNG; `url`, `final_url` and `archive_url` must be http or https; the text values have length limits; and a link anywhere in a claim folder makes every piece of that claim unusable. Logs hold the job id, the round and the report counts, never the claims or the agent's words.
+
+### `job.output` of a `story_pipeline` run, `waiting_for` (EVD-003)
+
+The run's `output` gains `waiting_for`: the key of the step the run waits on the **owner's own work** for (`evidence`), or null (a run made before this has none, and reads as null). It is set when nothing is going on and every step still to do is blocked only on such a wait (nothing failed): the run's phase then reads "Waiting for you (gather the evidence): ..." and the run stays `running`. It is worked out again on every poll, so the run goes on by itself once the step is done, and `Continue` is accepted too (it only makes the run look again at once; it waits again if nothing changed). A run that waits is not a failure.
 
 ---
 

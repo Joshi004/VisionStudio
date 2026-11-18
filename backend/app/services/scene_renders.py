@@ -39,6 +39,7 @@ from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     caption_plan,
+    evidence_clips,
     music_placement,
     provenance,
     render_music,
@@ -139,6 +140,7 @@ class _Context:
     callouts: story_renders.CalloutGate
     switched: set[tuple[str, str]]
     graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None]
+    evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry]
     sources: list[story_render_plan.SceneSource]
 
 
@@ -171,6 +173,7 @@ async def _context(session: AsyncSession, project: Project, *, place: bool) -> _
         callouts=await story_renders.callout_gate(session, project),
         switched=await shot_voice_sources.clip_shots(session, project),
         graphics=await story_renders.graphic_videos(session, project),
+        evidence=await story_renders.evidence_clips_now(session, project),
         sources=sources,
     )
 
@@ -315,6 +318,9 @@ def _scene_reasons(
         if isinstance(shot.get("graphic"), dict):
             reasons.extend(story_renders.graphic_reasons(shot, context.graphics))
             continue
+        if isinstance(shot.get("evidence"), dict):
+            reasons.extend(story_renders.evidence_reasons(shot, context.evidence))
+            continue
         now = shots_now.get(key)
         if now is None:
             continue  # the scene's own reason says so
@@ -338,6 +344,12 @@ def _scene_reasons(
                 if context.graphics[key] is not None:
                     reasons.append(
                         f"{shot_label} has a graphic now where this video shows a placeholder."
+                    )
+            elif key in context.evidence:
+                if context.evidence[key].done:
+                    reasons.append(
+                        f"{shot_label} has an evidence clip now where this video shows a "
+                        "placeholder."
                     )
             elif source is not None and source.file_exists:
                 reasons.append(f"{shot_label} has a clip now where this video shows a placeholder.")
@@ -606,6 +618,9 @@ def _take_text(shot: dict[str, Any]) -> str:
     graphic = shot.get("graphic")
     if isinstance(graphic, dict):
         return f"graphic {graphic.get('id')}"
+    evidence = shot.get("evidence")
+    if isinstance(evidence, dict):
+        return f"evidence clip {evidence.get('clip_id')}"
     if isinstance(shot.get("placeholder"), dict):
         return "a placeholder"
     return f"take {shot.get('take_number')}"
@@ -635,8 +650,10 @@ def compare_scene(
             reasons.append(f"The shot {shot_id} of {label} is not in its scene render.")
         elif isinstance(before.get("placeholder"), dict):
             reasons.append(f"The shot {shot_id} of {label} was a placeholder in its scene render.")
-        elif before.get("take_id") != shot.get("take_id") or before.get("graphic") != shot.get(
-            "graphic"
+        elif (
+            before.get("take_id") != shot.get("take_id")
+            or before.get("graphic") != shot.get("graphic")
+            or before.get("evidence") != shot.get("evidence")
         ):
             reasons.append(
                 f"The shot {shot_id} of {label} uses {_take_text(shot)} "

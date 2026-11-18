@@ -203,18 +203,31 @@ def frame_difference(first: list[str], second: list[str]) -> dict[str, int]:
 
 
 def check_probe(
-    probe: VideoProbe, *, width: int, height: int, fps: int, frames: int
+    probe: VideoProbe,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    frames: int,
+    transparent: bool = False,
 ) -> tuple[dict[str, bool], list[str]]:
     """Compares a rendered file with what was asked for (§4.7): the exact frame count, the size,
     the frame rate, the codec and the pixel format. Returns whether each check passed, and a
-    sentence for each one that did not.
+    sentence for each one that did not. With `transparent` (an evidence card, EVD-011) the file
+    must be ProRes with an alpha channel (ffprobe reads the pixel format back as `yuva444p12le`,
+    so only the alpha is checked).
     """
+    codec = CALLOUT_ENCODING["codec"] if transparent else ENCODING["codec"]
     checks = {
         "frames": probe.frame_count == frames,
         "size": probe.width == width and probe.height == height,
         "fps": probe.fps is not None and abs(probe.fps - fps) <= 0.001,
-        "codec": probe.codec_name == ENCODING["codec"],
-        "pix_fmt": probe.pix_fmt == ENCODING["pixel_format"],
+        "codec": probe.codec_name == codec,
+        "pix_fmt": (
+            (probe.pix_fmt or "").startswith("yuva")
+            if transparent
+            else probe.pix_fmt == ENCODING["pixel_format"]
+        ),
     }
     warnings: list[str] = []
     if not checks["frames"]:
@@ -226,7 +239,8 @@ def check_probe(
     if not checks["fps"]:
         warnings.append(f"The video is {probe.fps} frames a second; it should be {fps}.")
     if not checks["codec"]:
-        warnings.append(f"The video's codec is {probe.codec_name}; it should be h264.")
+        warnings.append(f"The video's codec is {probe.codec_name}; it should be {codec}.")
     if not checks["pix_fmt"]:
-        warnings.append(f"The video's pixel format is {probe.pix_fmt}; it should be yuv420p.")
+        wanted = "one with an alpha channel" if transparent else "yuv420p"
+        warnings.append(f"The video's pixel format is {probe.pix_fmt}; it should be {wanted}.")
     return checks, warnings

@@ -38,10 +38,14 @@ from app.services import (
     character_images,
     character_links,
     character_relations,
+    cut_planning_writer,
     discovery,
     environment_definitions,
     environment_links,
     environment_views,
+    evidence_claims,
+    evidence_clips,
+    evidence_rounds,
     explainer,
     generation_requests,
     graphic_theme,
@@ -1739,6 +1743,85 @@ async def _call_graphic_theme(session: AsyncSession, project: Project, options: 
     return await graphic_theme.start_run(session, project)
 
 
+# --- The evidence claims (EVD-002) ------------------------------------------------------------
+
+
+async def _evaluate_evidence_claims(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with evidence on has evidence claims. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not evidence_claims.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await evidence_claims.state(session, project)
+    # GLM is asked once by a run, when it has never answered for the project. Asking again is
+    # the owner's click, because it is a paid call. The owner's marks are never replaced here.
+    done = state.has_ai_version
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                last_error=_failure(state.job),
+            )
+        ]
+    )
+
+
+async def _call_evidence_claims(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> Job:
+    return await evidence_claims.start_suggest(session, project)
+
+
+# --- The evidence (EVD-003) -------------------------------------------------------------------
+
+
+async def _evaluate_evidence(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with evidence on has evidence. For any other project the step
+    # has one target that is already done, so a run reports it as skipped. Turning evidence off
+    # later keeps the rows and ignores them.
+    if not evidence_claims.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await evidence_rounds.state(session, project)
+    # Done: no claim to prove, or the newest round has the claims that count now and is reviewed.
+    done = evidence_rounds.is_done(state)
+    active = _active(state.job)
+    # What the owner has to do outside the run: decide on GLM's proposals, run the research,
+    # import, review. It is a wait, not a failure.
+    awaiting = None if done or active else evidence_rounds.awaiting_text(state)
+    # Otherwise a brief has to be written. It cannot be when the story or the files folder is
+    # not there: that is reported.
+    block = None
+    if not done and not active and awaiting is None:
+        block = evidence_rounds.refusal(state, project)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=block,
+                awaiting=awaiting,
+                last_error=None if done or awaiting is not None else _failure(state.job),
+                # A round exists, but it does not have the claims that count now.
+                stale=state.round is not None and not done and not state.current,
+            )
+        ]
+    )
+
+
+async def _call_evidence(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await evidence_rounds.start_brief(session, project)
+
+
 # --- The callout graphics (CMO-006) -----------------------------------------------------------
 
 # The target of the callout look. Every callout target waits for it.
@@ -1985,6 +2068,131 @@ async def _start_graphics(
     async def make(target: Target) -> tuple[int, ...]:
         jobs = await shot_graphics.start_shot(session, project, target.ref[0], target.ref[1])
         return tuple(job.id for job in jobs)
+
+    return await _start_each(session, targets, deadline, make)
+
+
+# --- Evidence clips (EVD-009) -----------------------------------------------------------------
+
+# The last part of the `ref` of a target that is the clip of an evidence card (EVD-011).
+CARD_REF: Final = "card"
+
+
+def _evidence_notes(plans: shot_plans.ShotPlansState) -> list[str]:
+    """What happened to each claim that has evidence to show, when every chosen piece is not an
+    evidence shot: "Scene 2: 'revenue rose 40%' has no evidence shot: <reason>", or that it is
+    shown as a card (EVD-011) or as a source line on a graphic shot (EVD-012) instead, or that a
+    piece got no room for a card. Not a problem, so it is a note, not a failure. Pure.
+    """
+    notes: list[str] = []
+    for entry in plans.entries:
+        content = entry.content
+        results = content.get(cut_planning_writer.EVIDENCE_KEY) if content is not None else None
+        label = _scene_label(entry.item)
+        carded = {card.claim_id for card in entry.cards}
+        lined = {line.claim_id for line in entry.source_lines}
+        for result in results if isinstance(results, list) else []:
+            if not isinstance(result, dict):
+                continue
+            words = f"'{result.get('text')}'"
+            claim_id = result.get("claim_id")
+            if result.get("left_out") is not None:
+                reason = result.get("reason") or "no reason was given"
+                if claim_id in carded:
+                    notes.append(
+                        f"{label}: {words} is shown as a card (no evidence shot: {reason})"
+                    )
+                elif claim_id in lined:
+                    notes.append(
+                        f"{label}: {words} shows a source line on its graphic shot "
+                        f"(no evidence shot: {reason})"
+                    )
+                else:
+                    notes.append(f"{label}: {words} has no evidence shot: {reason}")
+            elif isinstance(result.get("shown"), int) and result["shown"] < result.get("pieces", 0):
+                if claim_id in carded:
+                    notes.append(
+                        f"{label}: {words} shows {result['shown']} of {result['pieces']} pieces "
+                        "of evidence as shots, and the rest as cards."
+                    )
+                else:
+                    notes.append(
+                        f"{label}: {words} shows {result['shown']} of {result['pieces']} pieces "
+                        "of evidence."
+                    )
+        for missing in entry.unplaced_cards:
+            notes.append(
+                f"{label}: '{missing.text}' has no card for piece {missing.piece}: "
+                f"{missing.message}"
+            )
+    return notes
+
+
+async def _evaluate_evidence_clips(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with evidence on has evidence clips. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not evidence_claims.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await evidence_clips.shot_state(session, project)
+    targets: list[Target] = []
+    for scene in state.entries:
+        scene_id = scene.item["id"]
+        for shot in scene.shots:
+            shot_id = shot.shot["id"]
+            active = shot.status == "working"
+            targets.append(
+                Target(
+                    _shot_key(scene_id, shot_id),
+                    _shot_label(scene.item, shot.shot),
+                    shot.done,
+                    active=active,
+                    block=None if shot.done or active else shot.blocked_reason,
+                    last_error=None if shot.done else shot.last_error,
+                    ref=(scene_id, shot_id),
+                    stale=shot.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
+    # The cards over presenter and B-roll shots (EVD-011) have a clip each, like a shot.
+    for card_scene in (await evidence_clips.card_state(session, project)).entries:
+        scene_id = card_scene.item["id"]
+        for card in card_scene.cards:
+            active = card.status == "working"
+            targets.append(
+                Target(
+                    f"card:{scene_id}/{card.card.card_id}",
+                    f"{_scene_label(card_scene.item)}, evidence card {card.card.card_id}",
+                    card.done,
+                    active=active,
+                    block=None if card.done or active else card.blocked_reason,
+                    last_error=None if card.done else card.last_error,
+                    ref=(scene_id, card.card.card_id, CARD_REF),
+                    stale=card.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
+    return StepView(targets, warnings=_evidence_notes(await shot_plans.state(session, project)))
+
+
+async def _start_evidence_clips(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        if target.ref[-1] == CARD_REF:
+            job = await evidence_clips.queue_card_clip(
+                session, project, target.ref[0], target.ref[1]
+            )
+        else:
+            job = await evidence_clips.queue_shot_clip(
+                session, project, target.ref[0], target.ref[1]
+            )
+        return (job.id,)
 
     return await _start_each(session, targets, deadline, make)
 
@@ -2584,10 +2792,13 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
+    "evidence_claims": Adapter(_evaluate_evidence_claims, _project_start(_call_evidence_claims)),
+    "evidence": Adapter(_evaluate_evidence, _project_start(_call_evidence)),
     "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),
     "graphics": Adapter(_evaluate_graphics, _start_graphics),
+    "evidence_clips": Adapter(_evaluate_evidence_clips, _start_evidence_clips),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),
     "references": Adapter(_evaluate_references, _start_references),

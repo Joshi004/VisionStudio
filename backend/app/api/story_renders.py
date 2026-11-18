@@ -64,6 +64,8 @@ WarningCode = Literal[
     "shot_placeholder",
     "dialogue_not_heard",
     "scene_start_unknown",
+    "card_without_clip",
+    "evidence_split_empty",
 ]
 
 
@@ -84,9 +86,15 @@ class RenderGraphicOut(BaseModel):
     attempt: int
 
 
+class RenderEvidenceOut(BaseModel):
+    """The clip a render used for an evidence shot (EVD-009)."""
+
+    clip_id: int
+
+
 class RenderTakeOut(BaseModel):
-    """The take a render used for one shot, or the graphic it used for a graphic shot (which has
-    no take).
+    """The take a render used for one shot, or the graphic it used for a graphic shot, or the
+    clip it used for an evidence shot (which have no take).
     """
 
     scene_id: str
@@ -95,6 +103,7 @@ class RenderTakeOut(BaseModel):
     take_id: int | None
     take_number: int | None
     graphic: RenderGraphicOut | None
+    evidence: RenderEvidenceOut | None = None
     # True when the render shows a placeholder for the shot (a scene render, SCN-003).
     placeholder: bool
     frames: int
@@ -257,6 +266,11 @@ def takes_out(row: StoryRender | SceneRender) -> list[RenderTakeOut]:
                 graphic=(
                     RenderGraphicOut.model_validate(shot["graphic"])
                     if isinstance(shot.get("graphic"), dict)
+                    else None
+                ),
+                evidence=(
+                    RenderEvidenceOut.model_validate(shot["evidence"])
+                    if isinstance(shot.get("evidence"), dict)
                     else None
                 ),
                 placeholder=isinstance(shot.get("placeholder"), dict),

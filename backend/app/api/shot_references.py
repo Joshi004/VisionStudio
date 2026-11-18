@@ -81,6 +81,7 @@ ShotType = Literal[
     "transition",
     "presenter",
     "graphic",
+    "evidence",
 ]
 PictureKind = Literal["character", "environment"]
 DefinitionStatus = Literal["not_defined", "defined", "out_of_date"]

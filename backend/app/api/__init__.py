@@ -15,12 +15,15 @@ from app.api import (
     character_links,
     character_relations,
     chat_lab,
+    db_snapshots,
     deletion,
     discovery,
     environment_definitions,
     environment_lab,
     environment_links,
     environment_views,
+    evidence,
+    evidence_claims,
     generation_requests,
     gpu,
     graphic_briefs,
@@ -71,6 +74,7 @@ from app.api import (
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(db_snapshots.router, tags=["db-snapshots"])
 api_router.include_router(projects.router, tags=["projects"])
 api_router.include_router(story_bible.router, tags=["story-bible"])
 api_router.include_router(music_bible.router, tags=["music-bible"])
@@ -79,6 +83,8 @@ api_router.include_router(music_plan.router, tags=["music-plan"])
 api_router.include_router(callout_plan.router, tags=["callout-plan"])
 api_router.include_router(callout_look.router, tags=["callout-look"])
 api_router.include_router(callout_graphics.router, tags=["callout-graphics"])
+api_router.include_router(evidence_claims.router, tags=["evidence-claims"])
+api_router.include_router(evidence.router, tags=["evidence"])
 api_router.include_router(graphic_theme.router, tags=["graphic-theme"])
 api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
 api_router.include_router(thumbnails.router, tags=["thumbnails"])

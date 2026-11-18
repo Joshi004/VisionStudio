@@ -16,6 +16,10 @@ fades in and out. Then, by type:
 - `number` pops: it grows from `NUMBER_POP_FROM` percent past full size and settles;
 - `section_title` grows slightly as it fades in.
 
+**Source lines** (EVD-012). A line of text such as "Source: Reuters, 3 Oct 2026" is one event on
+layer 2 in the `SourceLine` style, centred at the top of the picture in the margin outside the
+safe area, where a graphic never draws. It fades in and out.
+
 **Highlight.** Each word of a group gets its own `Dialogue` event. The event shows the whole group
 with that one word coloured, and lasts from the word's start to the next word's start (the last
 word lasts to the end of the group). The events of a group follow each other with no gap, so the
@@ -32,16 +36,25 @@ no script word can become an override tag, and a line break cannot enter an even
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from app.services import callout_render
 from app.services.callout_plan_writer import TYPE_NUMBER, TYPE_SECTION_TITLE
 from app.services.callout_render import CalloutEntry, CalloutPart, CalloutStyle, CalloutTrack
-from app.services.caption_plan import CaptionGroup, CaptionStyle, CaptionTrack
+from app.services.caption_plan import FONT_NAME, CaptionGroup, CaptionStyle, CaptionTrack
 
 STYLE_NAME = "Caption"
 CALLOUT_STYLE_NAME = "Callout"
+SOURCE_LINE_STYLE_NAME = "SourceLine"
 _LAYER_CAPTION = 0
 _LAYER_CALLOUT = 1
+_LAYER_SOURCE_LINE = 2
+# A source line's text, as shares of the picture's shorter side, and the most it may be long.
+_SOURCE_FONT_RATIO = 0.028
+_SOURCE_MARGIN_RATIO = 0.01
+_SOURCE_OUTLINE_RATIO = 0.0025
+_SOURCE_FADE_MS = 200
+_SOURCE_MAX_CHARS = 90
 # ASS alignment 8: top, centred.
 _ALIGN_TOP_CENTRE = 8
 # Wrapping off: a line break is only where the text has one.
@@ -78,8 +91,49 @@ def _clean(text: str) -> str:
     return " ".join(_UNSAFE_TEXT.sub("", text).split())
 
 
-def _style_lines(caption: CaptionStyle | None, callout: CalloutStyle | None) -> list[str]:
+@dataclass(frozen=True)
+class SourceLineEvent:
+    """One source line (EVD-012): its words and when it is on screen."""
+
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+def _source_line_style(play_res: tuple[int, int]) -> str:
+    unit = min(play_res)
+    return (
+        f"Style: {SOURCE_LINE_STYLE_NAME},{FONT_NAME},{round(_SOURCE_FONT_RATIO * unit)},"
+        "&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+        f"0,0,0,0,100,100,0,0,1,{_SOURCE_OUTLINE_RATIO * unit:.1f},0,{_ALIGN_TOP_CENTRE},"
+        f"0,0,{round(_SOURCE_MARGIN_RATIO * unit)},1"
+    )
+
+
+def _source_line_events(lines: tuple[SourceLineEvent, ...]) -> list[str]:
+    events: list[str] = []
+    for line in lines:
+        start, end = _centiseconds(line.start_ms), _centiseconds(line.end_ms)
+        text = _clean(line.text)[:_SOURCE_MAX_CHARS].rstrip()
+        if end <= start or not text:
+            continue
+        fade = min(_SOURCE_FADE_MS, (line.end_ms - line.start_ms) // 2)
+        events.append(
+            f"Dialogue: {_LAYER_SOURCE_LINE},{_clock(start)},{_clock(end)},"
+            f"{SOURCE_LINE_STYLE_NAME},,0,0,0,,{{\\an{_ALIGN_TOP_CENTRE}\\q{_WRAP_NONE}"
+            f"\\fad({fade},{fade})}}{text}"
+        )
+    return events
+
+
+def _style_lines(
+    caption: CaptionStyle | None,
+    callout: CalloutStyle | None,
+    source_play_res: tuple[int, int] | None = None,
+) -> list[str]:
     lines: list[str] = []
+    if source_play_res is not None:
+        lines.append(_source_line_style(source_play_res))
     if caption is not None:
         lines.append(
             f"Style: {STYLE_NAME},{caption.font_name},{caption.font_size},"
@@ -101,7 +155,10 @@ def _style_lines(caption: CaptionStyle | None, callout: CalloutStyle | None) -> 
 
 
 def _header(
-    play_res: tuple[int, int], caption: CaptionStyle | None, callout: CalloutStyle | None
+    play_res: tuple[int, int],
+    caption: CaptionStyle | None,
+    callout: CalloutStyle | None,
+    with_source_lines: bool = False,
 ) -> list[str]:
     return [
         "[Script Info]",
@@ -115,7 +172,7 @@ def _header(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        *_style_lines(caption, callout),
+        *_style_lines(caption, callout, play_res if with_source_lines else None),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -194,18 +251,27 @@ def _callout_events(entry: CalloutEntry, style: CalloutStyle) -> list[str]:
     return events
 
 
-def ass_document(captions: CaptionTrack | None, callouts: CalloutTrack | None = None) -> str:
-    """The whole ASS file of the captions and the callouts. At least one must be given."""
+def ass_document(
+    captions: CaptionTrack | None,
+    callouts: CalloutTrack | None = None,
+    source_lines: tuple[SourceLineEvent, ...] = (),
+    play_res: tuple[int, int] | None = None,
+) -> str:
+    """The whole ASS file of the captions, the callouts and the source lines. At least one must be
+    given. `play_res` (the picture's size) is only needed for source lines without a track."""
     if captions is not None:
-        play_res = (captions.style.play_res_x, captions.style.play_res_y)
+        size = (captions.style.play_res_x, captions.style.play_res_y)
     elif callouts is not None:
-        play_res = (callouts.style.play_res_x, callouts.style.play_res_y)
+        size = (callouts.style.play_res_x, callouts.style.play_res_y)
+    elif source_lines and play_res is not None:
+        size = play_res
     else:
         raise ValueError("There is nothing to write.")
     lines = _header(
-        play_res,
+        size,
         captions.style if captions is not None else None,
         callouts.style if callouts is not None else None,
+        bool(source_lines),
     )
     if captions is not None:
         for group in captions.groups:
@@ -213,4 +279,5 @@ def ass_document(captions: CaptionTrack | None, callouts: CalloutTrack | None = 
     if callouts is not None:
         for entry in callouts.entries:
             lines.extend(_callout_events(entry, callouts.style))
+    lines.extend(_source_line_events(source_lines))
     return "\n".join(lines) + "\n"

@@ -113,6 +113,11 @@ class Project(Base):
     # EXG-001. Whether a continuous explainer gets graphic shots (EG-1). Chosen when the project
     # is created and never changed; only an explainer with a continuous voice can have it on.
     graphics: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # EVD-001. Whether a continuous explainer has an evidence layer (EV-1, EV-2). On by default
+    # for a continuous explainer on the create form, off for every project that existed. Only a
+    # continuous explainer can have it on. Can be changed at any time: switching it off deletes
+    # nothing, the evidence is only ignored.
+    evidence: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # SCN-002. The scene the owner pushed to the front of the GPU server's queue (its id in the
     # scene discovery). Its clips are sent with the most urgent priority. NULL: none is pushed.
     pushed_scene_id: Mapped[str | None] = mapped_column(default=None)
@@ -185,7 +190,7 @@ class Job(Base):
         # of one scene, since revision 0085, and the writing of thumbnail concepts, since
         # revision 0086, and the writing of the callout look, since revision 0089, and the two
         # callout component jobs, since revision 0090, and the two YouTube jobs, since revision
-        # 0096.
+        # 0096, and the four evidence jobs, since revision 0098.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -212,7 +217,9 @@ class Job(Base):
             "'render_callout_preview', 'write_callout_scene', "
             "'time_voice_recording', 'split_voice_recording', "
             "'splice_voice_recording', 'write_chat_reply', "
-            "'write_youtube_draft', 'publish_youtube')",
+            "'write_youtube_draft', 'publish_youtube', "
+            "'suggest_evidence_claims', 'write_evidence_brief', 'import_evidence', "
+            "'render_evidence_clip')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -3457,3 +3464,217 @@ class YouTubeUpload(Base):
     error: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class EvidenceClaimList(Base):
+    """One version of a project's evidence claims (EVD-001, revision 0098).
+
+    Follows the artifact provenance convention: every change is a new row with the next
+    `version`, and a stored row is never changed. `source` is `manual` for the owner's marks and
+    keep or drop choices and `ai` for GLM's proposals (`job_id` is that job). `inputs` holds the
+    hash of the script the version was made against and the version it was based on, so "out of
+    date" is worked out on read. `content` is `{next_id, claims}`; a claim is `{id, origin,
+    start, end, text, hint, kind_hint, reason, kept}`. `origin` is `owner` or `glm`, and `kept`
+    is true for an owner's claim and NULL for a GLM proposal the owner has not decided on.
+    """
+
+    __tablename__ = "evidence_claim_list"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_evidence_claim_list_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EvidenceRound(Base):
+    """One research brief written for one claim list version (EVD-001, revision 0098).
+
+    The round's id in the brief is `r<round_no>`. `folder` is the round folder, relative to the
+    files folder (`evidence/<project_id>/r<round_no>`). `brief` is exactly the `claims.json`
+    written, and `brief_sha256` its hash. Whether the round is imported or reviewed is worked out
+    from the import and review rows, never stored here.
+    """
+
+    __tablename__ = "evidence_round"
+    __table_args__ = (
+        UniqueConstraint("project_id", "round_no"),
+        Index("idx_evidence_round_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    round_no: Mapped[int]
+    claim_list_id: Mapped[int] = mapped_column(
+        ForeignKey("evidence_claim_list.id", ondelete="CASCADE")
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    folder: Mapped[str]
+    brief: Mapped[Any] = mapped_column(JSON)
+    brief_sha256: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EvidenceImport(Base):
+    """One import of one round's results (EVD-001, revision 0098).
+
+    `version` counts the imports of the round from 1, and a stored row is never changed.
+    `results` holds each claim's `{status, summary, attempts, problems}` (`status` is NULL when
+    the claim has no usable result) and `report` the counts by status.
+    """
+
+    __tablename__ = "evidence_import"
+    __table_args__ = (
+        UniqueConstraint("round_id", "version"),
+        Index("idx_evidence_import_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    round_id: Mapped[int] = mapped_column(ForeignKey("evidence_round.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    results: Mapped[Any] = mapped_column(JSON)
+    report: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EvidenceItem(Base):
+    """One piece of evidence of one import (EVD-001, revision 0098).
+
+    `item_key` tells an item that is unchanged from one import to the next (the owner's
+    decisions refer to it, not to the row id). `kind`, `relation` and `source_tier` are NULL when
+    the agent wrote a value the contract does not allow; such an item is stored with
+    `usable` false and its reasons in `checks`. The file columns hold paths relative to the media
+    folder, each with its SHA-256, and are NULL for a file that was not copied.
+    """
+
+    __tablename__ = "evidence_item"
+    __table_args__ = (
+        CheckConstraint("kind IS NULL OR kind IN ('web', 'pdf')", name="kind_valid"),
+        CheckConstraint(
+            "relation IS NULL OR relation IN "
+            "('supports', 'partly_supports', 'contradicts', 'context')",
+            name="relation_valid",
+        ),
+        CheckConstraint(
+            "source_tier IS NULL OR source_tier IN ('primary', 'secondary', 'other')",
+            name="source_tier_valid",
+        ),
+        UniqueConstraint("import_id", "claim_id", "evidence_id"),
+        Index("idx_evidence_item_import", "import_id"),
+        Index("idx_evidence_item_project_key", "project_id", "item_key"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    import_id: Mapped[int] = mapped_column(ForeignKey("evidence_import.id", ondelete="CASCADE"))
+    claim_id: Mapped[str]
+    evidence_id: Mapped[str]
+    item_key: Mapped[str]
+    kind: Mapped[str | None] = mapped_column(default=None)
+    relation: Mapped[str | None] = mapped_column(default=None)
+    source_tier: Mapped[str | None] = mapped_column(default=None)
+    source: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    quote: Mapped[str | None] = mapped_column(default=None)
+    what_it_says: Mapped[str | None] = mapped_column(default=None)
+    agent_notes: Mapped[str | None] = mapped_column(default=None)
+    capture: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    image_path: Mapped[str | None] = mapped_column(default=None)
+    image_sha256: Mapped[str | None] = mapped_column(default=None)
+    context_path: Mapped[str | None] = mapped_column(default=None)
+    context_sha256: Mapped[str | None] = mapped_column(default=None)
+    text_path: Mapped[str | None] = mapped_column(default=None)
+    text_sha256: Mapped[str | None] = mapped_column(default=None)
+    pdf_path: Mapped[str | None] = mapped_column(default=None)
+    pdf_sha256: Mapped[str | None] = mapped_column(default=None)
+    usable: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    checks: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EvidenceReview(Base):
+    """One version of the owner's decisions on one round's evidence (EVD-001, revision 0098).
+
+    Every change is a new row with the next `version` of the project, and a stored row is never
+    changed. Every version is the owner's, so there is no `source`. `inputs` is `{import_id}`.
+    `content` is `{claims: [{claim_id, items: [{item_key, verdict}], shown, no_proof_on_screen}]}`
+    with `verdict` `accepted` or `rejected` and `shown` the item keys to show, in order. A
+    decision names an item by `item_key`, so a new import keeps the decisions for unchanged
+    items. `done` is true on the version that ended the review ("Review done").
+    """
+
+    __tablename__ = "evidence_review"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version"),
+        Index("idx_evidence_review_round", "round_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    round_id: Mapped[int] = mapped_column(ForeignKey("evidence_round.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    done: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EvidenceClip(Base):
+    """One rendered evidence video (EVD-001, revision 0098).
+
+    `purpose` is `preview` (from the review screen, with no scene or shot), `shot` (the clip of
+    an evidence shot at its exact length) or `card` (EVD-011, revision 0099: a transparent clip
+    laid over a presenter or B-roll shot; `shot_id` is the first shot it covers).
+    `inputs.items` is the ordered list of the pieces the
+    clip shows; `item_id` is set when it shows exactly one. The row is made when its render is
+    queued, so the video columns are NULL until the render has written them, like `ShotGraphic`.
+    """
+
+    __tablename__ = "evidence_clip"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('preview', 'shot', 'card')", name="purpose_valid"),
+        Index("idx_evidence_clip_project_scene", "project_id", "scene_id"),
+        Index("idx_evidence_clip_item", "item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    purpose: Mapped[str]
+    item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("evidence_item.id", ondelete="CASCADE"), default=None
+    )
+    scene_id: Mapped[str | None] = mapped_column(default=None)
+    shot_id: Mapped[str | None] = mapped_column(default=None)
+    # The shot plan row the clip was made for. NULL for a preview, or when that row was deleted.
+    shot_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None
+    )
+    attempt: Mapped[int] = mapped_column(default=1, server_default=text("1"))
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    media_path: Mapped[str | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

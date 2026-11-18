@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from app.services import discovery_writer
-from app.services.scene_timeline import GRAPHIC_SHOT_TYPE as GRAPHIC
+from app.services.scene_timeline import DRAWN_SHOT_TYPES as DRAWN
 from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
@@ -127,7 +127,7 @@ def breaks_after(plan_shots: Sequence[dict[str, Any]]) -> set[str]:
     return {
         earlier["id"]
         for earlier, later in zip(plan_shots, plan_shots[1:], strict=False)
-        if earlier.get("type") != GRAPHIC and later.get("type") == GRAPHIC
+        if earlier.get("type") not in DRAWN and later.get("type") in DRAWN
     }
 
 
@@ -157,7 +157,9 @@ def follows_directly(
         return False
     if not previous_plan_shots or not plan_shots:
         return False
-    return previous_plan_shots[-1].get("type") != GRAPHIC and plan_shots[0].get("type") != GRAPHIC
+    return (
+        previous_plan_shots[-1].get("type") not in DRAWN and plan_shots[0].get("type") not in DRAWN
+    )
 
 
 def _previous_side(previous: dict[str, Any], definition: dict[str, Any]) -> dict[str, Any]:

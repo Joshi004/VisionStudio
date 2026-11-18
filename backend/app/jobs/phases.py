@@ -170,6 +170,19 @@ SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 # `write_graphic_theme` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
 
+# --- Running: the evidence claims of an explainer (EVD-002) ------------------------------
+# `suggest_evidence_claims` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_EVIDENCE_CLAIMS: Final = "saving the evidence claims"
+
+# --- Running: the research brief of the evidence layer (EVD-003) -------------------------
+# `write_evidence_brief` is a local job: it writes the round's folder and files, then the row.
+WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"
+
+# --- Running: the import of a research round's results (EVD-006) -------------------------
+# `import_evidence` is a local job: it reads and checks the round's results, copies the files,
+# then saves the rows.
+IMPORTING_EVIDENCE: Final = "checking and copying the evidence"
+
 # --- Running: the callout look of a motion explainer (CMO-002) ---------------------------
 # `write_callout_look` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_LOOK: Final = "saving the callout look"
@@ -345,6 +358,9 @@ CHECKING_GRAPHIC: Final = "checking the video"
 COMPARING_GRAPHIC_FRAMES: Final = "comparing the frames"
 ADDING_GRAPHIC_VOICE: Final = "adding the voice"
 SAVING_GRAPHIC: Final = "saving the video"
+# An evidence clip (EVD-008): the screenshot is cut and shrunk before it is sent to the motion
+# service; the other phases are those of a graphic.
+PREPARING_EVIDENCE: Final = "preparing the evidence pictures"
 
 
 def rendering_graphic(percent: int) -> str:
@@ -394,6 +410,14 @@ def pipeline_review(label: str) -> str:
     "After shot planning".
     """
     return f"Waiting for your review ({label[:1].lower()}{label[1:]}): press Continue to go on"
+
+
+def pipeline_waiting(label: str, message: str) -> str:
+    """The phase of a run that has nothing else to make and waits for the owner's own work
+    outside the run (EVD-003). `label` is the step's, as "Gather the evidence"; `message` says
+    what the owner has to do. The run goes on by itself once the step no longer waits.
+    """
+    return f"Waiting for you ({label.lower()}): {message}"
 
 
 # --- Running: the dialogue check of a take (PHASE-031) ----------------------------------------

@@ -74,6 +74,7 @@ ShotType = Literal[
     "transition",
     "presenter",
     "graphic",
+    "evidence",
 ]
 RequestStatus = Literal["not_planned", "planned", "out_of_date"]
 PromptFormat = Literal["reference", "generate"]

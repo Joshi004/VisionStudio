@@ -17,6 +17,8 @@ One status per step, the first rule that fits (`step_status`):
 2. `running`: a target has work going on (a job queued or running, or its follow-on work is
    about to show up).
 3. `attention`: a target failed and nothing is going on for it.
+3b. `owner`: a target waits for the owner's own work outside the app (EVD-003: the research, the
+   import, the review) and the steps it needs are done.
 4. `out_of_date`: a target's output exists and is out of date.
 5. `done`: every target is done. A step with no targets is done only once the steps it needs are.
 6. `waiting`: a step it needs is not done.
@@ -35,16 +37,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
-from app.services import callout_look, callout_plan, graphic_theme, word_timings
+from app.services import callout_look, callout_plan, evidence_claims, graphic_theme, word_timings
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
 
 _logger = logging.getLogger(__name__)
 
-BoardStatus = Literal["off", "running", "attention", "out_of_date", "done", "waiting", "ready"]
+BoardStatus = Literal[
+    "off", "running", "attention", "owner", "out_of_date", "done", "waiting", "ready"
+]
 BoardMode = Literal[
-    "pipeline_review", "pipeline_paused", "pipeline_running", "manual_running", "idle"
+    "pipeline_review",
+    "pipeline_paused",
+    "pipeline_waiting",
+    "pipeline_running",
+    "manual_running",
+    "idle",
 ]
 
 # The steps that are switched off when the project's music is off (MD-21).
@@ -74,6 +83,14 @@ GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs", "graphics")
 # (CMO-006).
 CALLOUT_GRAPHICS_STEP: Final = "callout_graphics"
 
+# The step that is switched off for every project but a continuous explainer with evidence on
+# (EVD-002).
+EVIDENCE_CLAIMS_STEP: Final = "evidence_claims"
+
+# The steps that are switched off for every project but a continuous explainer with evidence on
+# (EVD-002, EVD-003, EVD-009).
+EVIDENCE_STEPS: Final = (EVIDENCE_CLAIMS_STEP, "evidence", "evidence_clips")
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -96,6 +113,9 @@ GROUPS: Final[dict[str, str]] = {
     "speech_synthesis": "speech",
     "word_timings": "speech",
     "callout_plan": "speech",
+    "evidence_claims": "story",
+    "evidence": "story",
+    "evidence_clips": "graphics",
     "graphic_theme": "graphics",
     "graphic_briefs": "graphics",
     "graphics": "graphics",
@@ -148,6 +168,8 @@ class StepCounts:
     failed: int = 0
     # Targets that are not done, have nothing going on, and cannot go on.
     blocked: int = 0
+    # Targets that wait for the owner's own work outside the app (EVD-003).
+    awaiting: int = 0
     # Targets that could be started now and have no job yet: not done, nothing going on, not
     # blocked, not failed, not waiting for another target, and nothing needs allowing first.
     not_started: int = 0
@@ -165,6 +187,9 @@ class BoardStep:
     counts: StepCounts
     # The steps it needs that are not done (and not off).
     blocked_by: tuple[str, ...]
+    # Things to tell the owner that are not problems, from the step's own view (EVD-009: a claim
+    # left without an evidence shot, and why).
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -176,6 +201,8 @@ class BoardRun:
     phase: str | None
     paused_at: str | None
     review_at: str | None
+    # The step a run waits on the owner's own work for, and goes on from by itself (EVD-003).
+    waiting_for: str | None
     # What a run of some scenes is limited to, as "Scene 3: The cellar" (SCN-004). Empty for a
     # run of the whole story.
     scenes: tuple[str, ...] = ()
@@ -203,7 +230,7 @@ def _short(text: str) -> str:
 
 def count_targets(targets: list[Target]) -> StepCounts:
     """Counts a step's targets. Pure."""
-    active = stale = failed = blocked = done = not_started = 0
+    active = stale = failed = blocked = awaiting = done = not_started = 0
     reason: str | None = None
     for target in targets:
         done += target.done
@@ -212,6 +239,9 @@ def count_targets(targets: list[Target]) -> StepCounts:
             continue
         if target.active or target.settling:
             active += 1
+        elif target.awaiting is not None:
+            awaiting += 1
+            reason = reason or _short(target.awaiting)
         elif target.block is not None:
             blocked += 1
             reason = reason or _short(target.block)
@@ -227,6 +257,7 @@ def count_targets(targets: list[Target]) -> StepCounts:
         stale=stale,
         failed=failed,
         blocked=blocked,
+        awaiting=awaiting,
         not_started=not_started,
         reason=reason,
     )
@@ -240,6 +271,8 @@ def step_status(counts: StepCounts, needs_done: bool, off: bool) -> BoardStatus:
         return "running"
     if counts.failed:
         return "attention"
+    if counts.awaiting and needs_done:
+        return "owner"
     if counts.stale:
         return "out_of_date"
     if counts.done == counts.total and (counts.total > 0 or needs_done):
@@ -257,22 +290,24 @@ def _mode_of(run: Job | None, run_output: dict[str, Any], busy: bool) -> BoardMo
             return "pipeline_review"
         if run_output["paused_at"] is not None:
             return "pipeline_paused"
+        if run_output["waiting_for"] is not None:
+            return "pipeline_waiting"
         return "pipeline_running"
     return "manual_running" if busy else "idle"
 
 
 async def _read_step(
     session: AsyncSession, project: Project, step: pipeline.Step
-) -> StepCounts | None:
-    """The counts of one step, or None when its stage could not be read. One broken stage must
-    not take the whole board down.
+) -> tuple[StepCounts, tuple[str, ...]] | None:
+    """The counts and the notes of one step, or None when its stage could not be read. One broken
+    stage must not take the whole board down.
     """
     try:
         view = await ADAPTERS[step.key].evaluate(session, project, RunOptions())
     except Exception:
         _logger.exception("pipeline board: step '%s' could not be read", step.key)
         return None
-    return count_targets(view.targets)
+    return count_targets(view.targets), tuple(view.warnings)
 
 
 async def build(session: AsyncSession, project: Project) -> Board:
@@ -291,15 +326,19 @@ async def build(session: AsyncSession, project: Project) -> Board:
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
             or (step.key == CALLOUT_GRAPHICS_STEP and not callout_look.wanted(project))
+            or (step.key in EVIDENCE_STEPS and not evidence_claims.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
-        counts: StepCounts | None = (
-            StepCounts() if off else await _read_step(session, project, step)
-        )
-        if counts is None:
-            status: BoardStatus = "attention"
+        counts = StepCounts()
+        notes: tuple[str, ...] = ()
+        status: BoardStatus
+        if off:
+            status = step_status(counts, needs_done, off)
+        elif (read := await _read_step(session, project, step)) is None:
+            status = "attention"
             counts = StepCounts(reason=_UNREADABLE)
         else:
+            counts, notes = read
             status = step_status(counts, needs_done, off)
         statuses[step.key] = status
         steps.append(
@@ -311,6 +350,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
                 status=status,
                 counts=counts,
                 blocked_by=tuple(key for key in step.needs if statuses[key] not in ("done", "off")),
+                notes=notes,
             )
         )
 
@@ -333,6 +373,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
                 # A run that has ended is not waiting for anybody.
                 paused_at=run_output["paused_at"] if active else None,
                 review_at=run_output["review_at"] if active else None,
+                waiting_for=run_output["waiting_for"] if active else None,
                 scenes=scene_labels,
             )
             if run is not None

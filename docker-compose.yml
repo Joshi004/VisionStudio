@@ -49,7 +49,13 @@ services:
     ports: ["127.0.0.1:${APP_PORT:-5480}:80"]
     environment:
       APP_URL: http://localhost:${APP_PORT:-5480}
-    volumes: [data:/data:ro]
+    # Only the media folder, read-only (STOR-001, S-6): nginx has no need to see the database.
+    volumes:
+      - type: volume
+        source: data
+        target: /data/media
+        read_only: true
+        volume: {subpath: media}
     depends_on:
       backend: {condition: service_healthy}
     restart: unless-stopped

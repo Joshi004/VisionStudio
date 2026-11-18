@@ -56,6 +56,11 @@ export function BoardStepDetail({ project, stepKey, step }: BoardStepDetailProps
             </Badge>
           )}
         </Group>
+        {step?.notes.map((note) => (
+          <Text key={note} size="sm" c="dimmed">
+            {note}
+          </Text>
+        ))}
         <Suspense key={stepKey} fallback={<Loader size="sm" />}>
           <StepPanel stepKey={stepKey} project={project} />
         </Suspense>

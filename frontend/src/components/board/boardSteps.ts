@@ -3,6 +3,7 @@ import type { BoardStepStatus } from "../../api/pipelineBoard";
 /** How a step status is shown. The order of the keys is the order of the priority list. */
 export const STATUS_DISPLAY: Record<BoardStepStatus, { label: string; color: string }> = {
   attention: { label: "Needs attention", color: "red" },
+  owner: { label: "Waiting for you", color: "orange" },
   running: { label: "Running", color: "blue" },
   out_of_date: { label: "Out of date", color: "yellow" },
   done: { label: "Done", color: "green" },

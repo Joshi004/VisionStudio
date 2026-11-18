@@ -51,7 +51,9 @@ class BoardStepOut(BaseModel):
     label: str
     group: str
     needs: list[str]
-    status: Literal["off", "running", "attention", "out_of_date", "done", "waiting", "ready"]
+    status: Literal[
+        "off", "running", "attention", "owner", "out_of_date", "done", "waiting", "ready"
+    ]
     # How many targets (characters, scenes, shots, or the project) are done, of how many.
     done: int
     total: int
@@ -59,12 +61,18 @@ class BoardStepOut(BaseModel):
     active: int
     stale: int
     failed: int
+    # Targets that wait for the owner's own work outside the app (EVD-003).
+    awaiting: int
     # Targets that are ready to be started and have no job yet.
     not_started: int
     # The steps it needs that are not done yet.
     blocked_by: list[str]
-    # Why a target failed or cannot go on, when there is one. None otherwise.
+    # Why a target failed, cannot go on, or waits for the owner, when there is one. None
+    # otherwise.
     blocked_reason: str | None
+    # Things to tell the owner that are not problems, for example a claim that was left without
+    # an evidence shot and why (EVD-009). Empty for most steps.
+    notes: list[str] = []
 
 
 class BoardRunOut(BaseModel):
@@ -75,6 +83,9 @@ class BoardRunOut(BaseModel):
     # is waiting for the user to press Continue.
     paused_at: str | None
     review_at: str | None
+    # The step the run waits on the owner's own work for, and goes on from by itself. None
+    # otherwise (EVD-003).
+    waiting_for: str | None
     # The scenes a run of some scenes is limited to, as "Scene 3: The cellar". Empty for a run of
     # the whole story.
     scenes: list[str]
@@ -83,7 +94,12 @@ class BoardRunOut(BaseModel):
 class PipelineBoardOut(BaseModel):
     revision: str
     mode: Literal[
-        "pipeline_review", "pipeline_paused", "pipeline_running", "manual_running", "idle"
+        "pipeline_review",
+        "pipeline_paused",
+        "pipeline_waiting",
+        "pipeline_running",
+        "manual_running",
+        "idle",
     ]
     # The project's newest run, whatever its status. None when it never had one.
     run: BoardRunOut | None
@@ -130,6 +146,7 @@ async def get_pipeline_board(project_id: int, session: SessionDep) -> PipelineBo
                 phase=board.run.phase,
                 paused_at=board.run.paused_at,
                 review_at=board.run.review_at,
+                waiting_for=board.run.waiting_for,
                 scenes=list(board.run.scenes),
             )
             if board.run is not None
@@ -151,9 +168,11 @@ async def get_pipeline_board(project_id: int, session: SessionDep) -> PipelineBo
                 active=step.counts.active,
                 stale=step.counts.stale,
                 failed=step.counts.failed,
+                awaiting=step.counts.awaiting,
                 not_started=step.counts.not_started,
                 blocked_by=list(step.blocked_by),
                 blocked_reason=step.counts.reason,
+                notes=list(step.notes),
             )
             for step in board.steps
         ],

@@ -22,6 +22,11 @@ How it fits the dispatcher (the loop itself is not touched):
   continues where it was (`resume`). It holds no state in memory.
 - When the user ticked a step to pause after, the run pauses once that step is complete and the
   run made jobs in it: it saves `paused_at` and makes nothing more until Continue.
+- A step can wait for the owner's own work outside the app (`Target.awaiting`, the evidence step
+  of EVD-003). That is neither a failure nor a pause: the run keeps making every step that does
+  not need it, and when nothing else can go on it saves `waiting_for` (the step) and a phase that
+  says what to do. It is still looked at on every poll, and goes on by itself once the step no
+  longer waits. Continue only makes it look again at once.
 
 **The stages commit on their own.** Each stage start function commits the job it makes, so the
 run cannot save its jobs and its progress in one transaction (the old narration run could). After
@@ -522,6 +527,9 @@ class StoryPipelineHandler(JobHandler):
         queued_any = False
         failure: str | None = None
         paused_phase: str | None = None
+        # EVD-003: the phase of a run that waits for the owner's work outside it.
+        waiting_text: str | None = None
+        waiting_for: str | None = None
 
         if result.paused_review is not None:
             # Nothing more is made while the user reviews, in any step. Jobs that are running
@@ -571,12 +579,21 @@ class StoryPipelineHandler(JobHandler):
             # Other targets (and other steps) go on first: the run stops only when nothing is
             # left that could still succeed.
             if in_progress == 0:
-                failure = _stop_reason(output, problems, result.going)
-                for key in {problem.step_key for problem in problems}:
-                    if key in output["steps"]:
-                        output["steps"][key]["status"] = "failed"
+                awaiting = [problem for item in result.going for problem in item.plan.awaiting]
+                if awaiting and not problems:
+                    # Nothing else can go on, and what is left waits for the owner (EVD-003):
+                    # that is not a failure. The run is looked at on every poll and goes on by
+                    # itself once the owner has done it.
+                    waiting_text = pipeline.waiting_phase(awaiting)
+                    waiting_for = awaiting[0].step_key
+                else:
+                    failure = _stop_reason(output, problems, result.going)
+                    for key in {problem.step_key for problem in problems}:
+                        if key in output["steps"]:
+                            output["steps"][key]["status"] = "failed"
+        output["waiting_for"] = waiting_for
 
-        phase = paused_phase or _phase_of(output, result.going, options)
+        phase = paused_phase or waiting_text or _phase_of(output, result.going, options)
         nothing_new = (
             not started_any
             and failure is None

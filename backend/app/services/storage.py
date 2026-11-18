@@ -10,7 +10,10 @@ changes one class. The rules:
   that path (nginx serves it read-only from the same volume);
 - stored files are deleted only when the user deletes a project, a library item or a lab
   sample (PHASE-055: `delete_media`, `delete_project_dir`). Temporary working files in
-  `tmp_dir` are cleared freely.
+  `tmp_dir` are cleared freely;
+- when the files live in a folder on the host (FILES_DIR, STOR-001), nothing is written unless
+  that folder holds the marker file the owner put there. A missing disk or a mistyped path
+  would otherwise look like an empty media folder and new files would go into it.
 
 An upload is received into `tmp_dir` first, checked by the caller, and then
 moved into place with `save`. Temp files are created with `open(..., "xb")`
@@ -39,6 +42,9 @@ from app.core.config import get_config
 _logger = logging.getLogger(__name__)
 
 MEDIA_URL_PREFIX = "/media/"
+# An empty file the owner creates once at the root of the files folder (STOR-001). The app never
+# writes it: if it did, a wrong folder would get one too and look right.
+FILES_MARKER = ".visio-studio-files"
 _EXTENSION = re.compile(r"[a-z0-9]{1,5}")
 _PARTIAL_KEY = re.compile(r"[A-Za-z0-9_-]{1,100}")
 # The folder is a project id, or `lab` for the Image lab, which belongs to no project (Phase 13).
@@ -48,6 +54,10 @@ _RELATIVE_PATH = re.compile(rf"(?:[0-9]+|{LAB_FOLDER})/[0-9a-f]{{32}}\.[a-z0-9]{
 
 class StorageError(Exception):
     """A path or file name that Storage refuses."""
+
+
+class FilesFolderUnavailable(StorageError):
+    """The files folder is missing, is not the right one, or cannot be written."""
 
 
 class TooLargeError(StorageError):
@@ -73,9 +83,42 @@ def media_url(relative_path: str) -> str:
 
 
 class Storage:
-    def __init__(self, media_dir: Path, tmp_dir: Path) -> None:
+    def __init__(self, media_dir: Path, tmp_dir: Path, marker: Path | None = None) -> None:
         self._media_dir = media_dir
         self._tmp_dir = tmp_dir
+        # None when the files are in the data volume: no marker is needed then.
+        self._marker = marker
+
+    def files_folder_problem(self) -> str | None:
+        """A plain sentence saying why files cannot be stored, or None when all is well.
+        Checks the marker (when the files are in their own folder) and that the temp folder can
+        be written. Blocking: call it from a thread. Creates the temp folder if needed, but only
+        once the marker is found.
+        """
+        if self._marker is not None and not self._marker.is_file():
+            return (
+                f"The files folder {self._marker.parent} is not the Visio Studio files folder "
+                f"(its {FILES_MARKER} marker file is missing). Check VISIO_FILES_DIR in .env "
+                "and that the disk is connected."
+            )
+        probe = self._tmp_dir / f"{uuid.uuid4().hex}.probe"
+        try:
+            self._tmp_dir.mkdir(parents=True, exist_ok=True)
+            with probe.open("xb"):
+                pass
+            probe.unlink()
+        except OSError as exc:
+            reason = exc.strerror or str(exc)
+            return f"The files folder {self._tmp_dir.parent} cannot be written: {reason}."
+        return None
+
+    def _require_files_folder(self) -> None:
+        """Raises FilesFolderUnavailable when the marker is missing. Called before anything is
+        written. (The cheap marker check only: the write probe is for startup and health.)
+        """
+        if self._marker is not None and not self._marker.is_file():
+            problem = self.files_folder_problem()
+            raise FilesFolderUnavailable(problem or "The files folder is not available.")
 
     async def receive(self, chunks: AsyncIterable[bytes], *, max_bytes: int) -> TempFile:
         """Writes an incoming stream to a new temp file, counting bytes and hashing as it goes.
@@ -83,6 +126,7 @@ class Storage:
         The limit applies while receiving, so an oversized upload stops early.
         The temp file is removed on any failure.
         """
+        self._require_files_folder()
         path = self._tmp_dir / f"{uuid.uuid4().hex}.upload"
         digest = hashlib.sha256()
         size_bytes = 0
@@ -106,6 +150,7 @@ class Storage:
         """
         if not _EXTENSION.fullmatch(suffix):
             raise StorageError(f"Not a valid file extension: {suffix!r}")
+        self._require_files_folder()
         return self._tmp_dir / f"{uuid.uuid4().hex}.{suffix}"
 
     def partial_download_path(self, key: str) -> Path:
@@ -115,6 +160,7 @@ class Storage:
         """
         if not _PARTIAL_KEY.fullmatch(key):
             raise StorageError(f"Not a valid download key: {key!r}")
+        self._require_files_folder()
         return self._tmp_dir / f"{key}.part"
 
     async def describe_temp(self, path: Path) -> TempFile:
@@ -157,6 +203,7 @@ class Storage:
     async def _save_in(self, folder: str, temp: TempFile, ext: str) -> StoredFile:
         if not _EXTENSION.fullmatch(ext):
             raise StorageError(f"Not a valid file extension: {ext!r}")
+        self._require_files_folder()
         relative_path = f"{folder}/{uuid.uuid4().hex}.{ext}"
         destination = self.get_path(relative_path)
         await anyio.to_thread.run_sync(self._move, temp.path, destination)
@@ -167,7 +214,7 @@ class Storage:
     @staticmethod
     def _move(source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        # Same volume, so this is an atomic rename.
+        # Same mount (both are under the files folder), so this is an atomic rename.
         source.replace(destination)
 
     def get_path(self, relative_path: str) -> Path:
@@ -230,6 +277,7 @@ class Storage:
         Temporary working files may be deleted (ITERATION_1_PHASES.md Section 4.2).
         This only ever touches the temp folder, never stored media.
         """
+        self._require_files_folder()
         self._tmp_dir.mkdir(parents=True, exist_ok=True)
         removed = 0
         for entry in self._tmp_dir.iterdir():
@@ -243,4 +291,5 @@ class Storage:
 @lru_cache
 def get_storage() -> Storage:
     config = get_config()
-    return Storage(config.media_dir, config.tmp_dir)
+    marker = config.files_dir / FILES_MARKER if config.files_dir_is_separate else None
+    return Storage(config.media_dir, config.tmp_dir, marker)

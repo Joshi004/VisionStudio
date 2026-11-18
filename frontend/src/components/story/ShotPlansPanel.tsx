@@ -229,6 +229,36 @@ function EntryRow({
               ))}
             </Stack>
           )}
+          {entry.shots !== null && entry.shots.evidence.length > 0 && (
+            <Stack gap={2}>
+              <Text size="xs" fw={500}>
+                Evidence to show
+              </Text>
+              {entry.shots.evidence.map((result) => (
+                <Group key={result.claim_id} gap={6} wrap="nowrap" align="flex-start">
+                  <Badge
+                    variant="light"
+                    color={result.shown === result.pieces ? "green" : "orange"}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {result.shown} of {result.pieces}{" "}
+                    {result.pieces === 1 ? "piece" : "pieces"}
+                  </Badge>
+                  <Text size="xs">
+                    <Text span fs="italic">
+                      “{result.text}”
+                    </Text>
+                    {result.left_out != null && (
+                      <Text span c="dimmed">
+                        {" "}
+                        — Left out: {result.reason ?? "No reason given."}
+                      </Text>
+                    )}
+                  </Text>
+                </Group>
+              ))}
+            </Stack>
+          )}
           {triesUsed && (
             <Text size="xs" c="dimmed">
               {replanMaxTries === 0

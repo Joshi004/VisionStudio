@@ -2,7 +2,8 @@
 (PHASE-055).
 
 Deleting the project row removes every story artifact and job of the project (ON DELETE
-CASCADE), and its media folder `media/<project_id>/` holds the files they made. The library
+CASCADE), and its media folder `media/<project_id>/` holds the files they made (and
+`evidence/<project_id>/` the research rounds of the evidence layer, EVD-003). The library
 characters and environments the project used are separate: they are offered for deletion too,
 all ticked by default, and the user can untick any of them. An item that another project uses
 as well is deleted just the same when it is ticked, and that other project is flagged
@@ -36,7 +37,7 @@ from app.db.models import (
     StoryRender,
 )
 from app.jobs import store
-from app.services import library_deletion, server_cleanup
+from app.services import evidence_rounds, library_deletion, server_cleanup
 from app.services.library_deletion import Kind
 from app.services.server_cleanup import PurgePlan
 from app.services.storage import Storage, StorageError
@@ -310,4 +311,9 @@ async def delete_project(
         await storage.delete_project_dir(project_id)
     except (StorageError, OSError):
         _logger.exception("could not remove the media folder of project %d", project_id)
+    # The research rounds of the evidence layer (EVD-003) are files of the project too.
+    try:
+        await evidence_rounds.remove_project_folder(project_id)
+    except (StorageError, OSError):
+        _logger.exception("could not remove the evidence folder of project %d", project_id)
     return plan

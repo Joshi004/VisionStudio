@@ -25,6 +25,9 @@ dialogue is a presenter shot. Landscape B-roll has the upper third, centred. A l
 presenter shot has a narrower box on one side (`PRESENTER_SIDE`). Portrait has one centred upper
 area above the captions. A section title is centred.
 
+**Split evidence shots** (EVD-016). A callout that starts inside an evidence shot drawn split is
+kept: it is laid out in the callout panel (`zone_box(..., split=True)`) and ends with the shot.
+
 **Fit.** Each line is measured, so a callout is never wider than its zone and stacked boxes never
 overlap: a text is split into at most two balanced lines, then its font size is reduced until it
 fits. A list item and a comparison side are one line. libass wrapping is off, and each line is a
@@ -40,6 +43,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from app.services import evidence_layout
 from app.services.callout_plan_writer import (
     TYPE_COMPARISON,
     TYPE_LIST,
@@ -114,6 +118,8 @@ CODE_DROPPED: Final = "callout_dropped"
 # A motion callout drawn as a box (CMO-005): at plan time because both versions failed outright,
 # at render time because its drawing failed (the render job adds those).
 CODE_FALLBACK: Final = "callout_fallback"
+# An evidence shot was drawn split for a callout that is not on screen (EVD-016).
+CODE_SPLIT_EMPTY: Final = "evidence_split_empty"
 
 # --- Motion callouts (CMO-005) ---------------------------------------------------------------
 STYLE_BOXES: Final = "boxes"
@@ -359,6 +365,8 @@ class _Placed:
     start_ms: int
     natural_end_ms: int
     at_unit_start: bool = False
+    # The callout starts inside a split evidence shot (EVD-016) and is drawn in its panel.
+    split: bool = False
 
 
 def _times(callout: dict[str, Any], words: _Words, total_ms: int) -> _Placed:
@@ -388,6 +396,15 @@ def _times(callout: dict[str, Any], words: _Words, total_ms: int) -> _Placed:
     )
 
 
+def timing_of(callout: dict[str, Any], unit: CalloutUnit, total_ms: int) -> tuple[int, int]:
+    """When a callout starts and would end if nothing came after it, in ms on the timeline the
+    unit is on (public since EVD-016: the evidence layer finds the shots a callout lands on with
+    the same times). Pure.
+    """
+    placed = _times(callout, _Words(unit), total_ms)
+    return placed.start_ms, placed.natural_end_ms
+
+
 # --- Where -----------------------------------------------------------------------------------
 
 
@@ -403,10 +420,16 @@ class Zone:
     centred: bool = False
 
 
-def zone_box(kind: str, on_presenter: bool, layout: str, width: int, height: int) -> Zone:
+def zone_box(
+    kind: str, on_presenter: bool, layout: str, width: int, height: int, split: bool = False
+) -> Zone:
     """The zone a callout of this kind fills (public since CMO-003: the motion callouts are
-    drawn and checked at the zone's size).
+    drawn and checked at the zone's size). `split` is a callout on a split evidence shot
+    (EVD-016): it fills its own panel (`evidence_layout.callout_zone`).
     """
+    if split and kind != TYPE_SECTION_TITLE:
+        cx, zone_width, top, bottom = evidence_layout.callout_zone(width, height)
+        return Zone(cx, zone_width, top, bottom)
     if kind == TYPE_SECTION_TITLE:
         share = 0.84 if layout == LAYOUT_PORTRAIT else 0.70
         return Zone(width / 2, width * share, height * 0.25, height * 0.75, centred=True)
@@ -418,13 +441,14 @@ def zone_box(kind: str, on_presenter: bool, layout: str, width: int, height: int
     return Zone(width / 2, width * 0.70, height * 0.08, height * 0.40)
 
 
-def placement_of(kind: str, on_presenter: bool, layout: str) -> str:
-    """The name of the zone a callout lands in (the motion service's `placement`)."""
+def placement_of(kind: str, on_presenter: bool, layout: str, split: bool = False) -> str:
+    """The name of the zone a callout lands in (the motion service's `placement`). A callout on a
+    split evidence shot is drawn like one beside the presenter in landscape."""
     if kind == TYPE_SECTION_TITLE:
         return "title"
     if layout == LAYOUT_PORTRAIT:
         return "portrait"
-    return "presenter" if on_presenter else "broll"
+    return "presenter" if on_presenter or split else "broll"
 
 
 def even_side(value: float) -> int:
@@ -433,14 +457,14 @@ def even_side(value: float) -> int:
 
 
 def zone_rect(
-    kind: str, on_presenter: bool, layout: str, width: int, height: int
+    kind: str, on_presenter: bool, layout: str, width: int, height: int, split: bool = False
 ) -> tuple[int, int, int, int]:
     """The zone of `zone_box` as the box a motion callout is drawn in and laid at, in pixels of
     the output: `(x, y, width, height)`, with even sizes (CMO-005). It is the one definition for
     the preview's zones (`callout_graphics.zones_of`) and for the render, so they cannot differ.
     The box stays inside the picture.
     """
-    zone = zone_box(kind, on_presenter, layout, width, height)
+    zone = zone_box(kind, on_presenter, layout, width, height, split)
     box_width = min(even_side(zone.width), width // 2 * 2)
     box_height = min(even_side(zone.bottom - zone.top), height // 2 * 2)
     x = max(0, min(round(zone.cx - box_width / 2), width - box_width))
@@ -580,7 +604,7 @@ def _layout(
     """The parts of a callout, with their places and sizes: one part for each line of text."""
     kind = placed.callout["type"]
     width, height = style.play_res_x, style.play_res_y
-    zone = zone_box(kind, on_presenter, style.layout, width, height)
+    zone = zone_box(kind, on_presenter, style.layout, width, height, placed.split)
     nominal = _nominal_size(kind, style.layout, height)
     texts = [spec.text for spec in placed.specs]
     several = len(texts) > 1
@@ -652,6 +676,7 @@ def resolve(
     height: int,
     measure: Measure,
     graphics: Sequence[tuple[int, int]] = (),
+    splits: Sequence[tuple[int, int]] = (),
 ) -> Resolution:
     """The callout track of a render, and its warnings. `shots` and `dialogue` are
     `(start_ms, end_ms)` spans on the story's timeline, and `total_ms` is the length of the video.
@@ -659,6 +684,12 @@ def resolve(
     that starts inside one is left out, and one that would run into one ends `CUT_BEFORE_NEXT_MS`
     before it, or is left out when it would then show for less than `MIN_VISIBLE_MS`. Without
     graphics, nothing changes.
+
+    `splits` are the spans of the evidence shots drawn split (EVD-016). A callout that starts
+    inside one is kept, drawn in the callout panel and ended with the shot (it is left out, with
+    the others, when it would then show for less than `MIN_VISIBLE_MS`, and a section title is
+    left out as it is on a graphic). One that would run into a split shot ends
+    `CUT_BEFORE_NEXT_MS` before it, as before a graphic.
     """
     style = style_for(width, height)
     by_ref = {(unit.scene_id, unit.unit_id): _Words(unit) for unit in units}
@@ -697,6 +728,28 @@ def resolve(
             clear.append(placed)
         candidates = clear
 
+    if splits:
+        clear = []
+        for placed in candidates:
+            inside = next(((s, e) for s, e in splits if s <= placed.start_ms < e), None)
+            if inside is not None:
+                if placed.callout["type"] == TYPE_SECTION_TITLE:
+                    on_graphic.append(_label(placed.callout))
+                    continue
+                placed.split = True
+                placed.natural_end_ms = min(placed.natural_end_ms, inside[1])
+            else:
+                next_split = min((s for s, _e in splits if s > placed.start_ms), default=None)
+                if next_split is not None:
+                    cut = next_split - CUT_BEFORE_NEXT_MS
+                    if placed.natural_end_ms > cut:
+                        if cut - placed.start_ms < MIN_VISIBLE_MS:
+                            on_graphic.append(_label(placed.callout))
+                            continue
+                        placed.natural_end_ms = cut
+            clear.append(placed)
+        candidates = clear
+
     kept: list[_Placed] = []
     for placed in candidates:
         if kept:
@@ -731,12 +784,12 @@ def resolve(
             else:
                 kind = str(placed.callout["type"])
                 x, y, box_width, box_height = zone_rect(
-                    kind, on_presenter, style.layout, width, height
+                    kind, on_presenter, style.layout, width, height, placed.split
                 )
                 motion = MotionDraw(
                     use=pick.use,
                     other=pick.other,
-                    placement=placement_of(kind, on_presenter, style.layout),
+                    placement=placement_of(kind, on_presenter, style.layout, placed.split),
                     x=x,
                     y=y,
                     width=box_width,
@@ -775,10 +828,24 @@ def resolve(
             )
         if on_graphic:
             sentences.append(
-                "These callouts are left out because they fall on a graphic shot: "
-                f"{_named(on_graphic)}."
+                "These callouts are left out because they fall on a graphic, an evidence shot "
+                f"or an evidence card: {_named(on_graphic)}."
             )
         warnings.append({"code": CODE_DROPPED, "message": " ".join(sentences)})
+    empty = [
+        f"{start // _MS_PER_S // 60}:{start // _MS_PER_S % 60:02d}"
+        for start, end in splits
+        if not any(start <= entry.start_ms < end for entry in entries)
+    ]
+    if empty:
+        warnings.append(
+            {
+                "code": CODE_SPLIT_EMPTY,
+                "message": "These evidence shots are drawn split for a callout that is not on "
+                f"screen, so half of the picture is empty (time in the video): {_named(empty)}. "
+                "Draw the evidence shots again.",
+            }
+        )
     if boxed:
         warnings.append(
             {

@@ -21,6 +21,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/db-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Db Snapshots */
+        get: operations["get_db_snapshots_api_db_snapshots_get"];
+        put?: never;
+        /**
+         * Make Db Snapshot
+         * @description Starts a snapshot in the background. Poll `GET` to see when it is done.
+         */
+        post: operations["make_db_snapshot_api_db_snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -578,6 +599,227 @@ export interface paths {
          */
         put: operations["set_callout_graphic_choice_api_projects__project_id__callout_graphics__callout_id__choice_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence Claims */
+        get: operations["get_evidence_claims_api_projects__project_id__evidence_claims_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims/marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Evidence Claim
+         * @description Marks words of the saved story as a claim, as a new version written by the owner.
+         */
+        post: operations["mark_evidence_claim_api_projects__project_id__evidence_claims_marks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Evidence Claims
+         * @description Starts the job that asks GLM for more claims. If one is already waiting or running for the
+         *     project, its id is returned and no second job is made.
+         */
+        post: operations["suggest_evidence_claims_api_projects__project_id__evidence_claims_suggest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence-claims/{claim_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Evidence Claim
+         * @description Removes one of the owner's marks. A proposal of GLM is dropped instead (PATCH).
+         */
+        delete: operations["remove_evidence_claim_api_projects__project_id__evidence_claims__claim_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit Evidence Claim
+         * @description Changes a claim's note or kind, or keeps or drops a proposal of GLM.
+         */
+        patch: operations["edit_evidence_claim_api_projects__project_id__evidence_claims__claim_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence */
+        get: operations["get_evidence_api_projects__project_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Evidence Brief
+         * @description Starts the job that writes the next round's brief. If one is already waiting or running
+         *     for the project, its id is returned and no second job is made.
+         */
+        post: operations["write_evidence_brief_api_projects__project_id__evidence_brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Evidence
+         * @description Starts the job that imports the newest round's results. If one is already waiting or
+         *     running for the project, its id is returned and no second job is made.
+         */
+        post: operations["import_evidence_api_projects__project_id__evidence_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence Review */
+        get: operations["get_evidence_review_api_projects__project_id__evidence_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/review/claims/{claim_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Evidence Claim Decision
+         * @description Replaces the owner's decision on one claim. It is stored as a new version of the review
+         *     (with "Review done" taken back), unless it changes nothing.
+         */
+        put: operations["put_evidence_claim_decision_api_projects__project_id__evidence_review_claims__claim_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/review/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish Evidence Review
+         * @description Ends the review: every claim must be decided. The `evidence` step is then complete.
+         */
+        post: operations["finish_evidence_review_api_projects__project_id__evidence_review_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/evidence/review/items/{item_key}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Evidence Item
+         * @description Starts the job that draws a short preview video of one accepted piece of evidence (EVD-008).
+         *     If a preview of that piece is already waiting or running, its job is returned. 422 when the
+         *     piece is not an accepted piece of the newest import, 409 while an import runs.
+         */
+        post: operations["preview_evidence_item_api_projects__project_id__evidence_review_items__item_key__preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6466,6 +6708,8 @@ export interface components {
             paused_at: string | null;
             /** Review At */
             review_at: string | null;
+            /** Waiting For */
+            waiting_for: string | null;
             /** Scenes */
             scenes: string[];
         };
@@ -6483,7 +6727,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "off" | "running" | "attention" | "out_of_date" | "done" | "waiting" | "ready";
+            status: "off" | "running" | "attention" | "owner" | "out_of_date" | "done" | "waiting" | "ready";
             /** Done */
             done: number;
             /** Total */
@@ -6494,12 +6738,19 @@ export interface components {
             stale: number;
             /** Failed */
             failed: number;
+            /** Awaiting */
+            awaiting: number;
             /** Not Started */
             not_started: number;
             /** Blocked By */
             blocked_by: string[];
             /** Blocked Reason */
             blocked_reason: string | null;
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
         };
         /** BoundaryDecisionIn */
         BoundaryDecisionIn: {
@@ -7633,6 +7884,18 @@ export interface components {
         ChooseReferenceIn: {
             /** Candidate Id */
             candidate_id: number;
+        };
+        /**
+         * ClaimDecisionIn
+         * @description The whole decision on one claim. It replaces the claim's earlier decision.
+         */
+        ClaimDecisionIn: {
+            /** Items */
+            items: components["schemas"]["ItemVerdictIn"][];
+            /** Shown */
+            shown: string[];
+            /** No Proof On Screen */
+            no_proof_on_screen: boolean;
         };
         /**
          * ConceptIn
@@ -8910,6 +9173,214 @@ export interface components {
             /** Units */
             units?: string[] | null;
         };
+        /**
+         * EvidenceBriefJobOut
+         * @description The newest `write_evidence_brief` job of the project, whatever its status.
+         */
+        EvidenceBriefJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** EvidenceBriefRun */
+        EvidenceBriefRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** EvidenceClaimEditIn */
+        EvidenceClaimEditIn: {
+            /** Hint */
+            hint?: string | null;
+            /** Kind Hint */
+            kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
+            /** Kept */
+            kept?: boolean | null;
+        };
+        /** EvidenceClaimOut */
+        EvidenceClaimOut: {
+            /** Id */
+            id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "owner" | "glm";
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /** Hint */
+            hint: string;
+            /**
+             * Kind Hint
+             * @enum {string}
+             */
+            kind_hint: "number" | "quote" | "statement" | "event" | "other";
+            /** Reason */
+            reason: string;
+            /** Kept */
+            kept: boolean | null;
+            /** Words Changed */
+            words_changed: boolean;
+        };
+        /**
+         * EvidenceClaimsJobOut
+         * @description The newest `suggest_evidence_claims` job of the project, whatever its status.
+         */
+        EvidenceClaimsJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** EvidenceClaimsRun */
+        EvidenceClaimsRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** EvidenceClaimsState */
+        EvidenceClaimsState: {
+            /** Version */
+            version: number | null;
+            /** Claims */
+            claims: components["schemas"]["EvidenceClaimOut"][];
+            job: components["schemas"]["EvidenceClaimsJobOut"] | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+            /** Has Ai Version */
+            has_ai_version: boolean;
+        };
+        /** EvidenceMarkIn */
+        EvidenceMarkIn: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /**
+             * Hint
+             * @default
+             */
+            hint: string;
+            /** Kind Hint */
+            kind_hint?: ("number" | "quote" | "statement" | "event" | "other") | null;
+        };
+        /**
+         * EvidenceResultOut
+         * @description What became of one claim with evidence to show in a scene (EVD-009): how many pieces were
+         *     chosen, how many got a shot, and why it got none (`left_out` is a code, `reason` a sentence).
+         */
+        EvidenceResultOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Text */
+            text: string;
+            /** Pieces */
+            pieces: number;
+            /** Shown */
+            shown: number;
+            /** Left Out */
+            left_out?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * EvidenceReviewOut
+         * @description The owner's review of the newest import. `claims` is empty when there is nothing to
+         *     review: `blocked_reason` says why.
+         */
+        EvidenceReviewOut: {
+            /** Round Id */
+            round_id: string | null;
+            /** Import Version */
+            import_version: number | null;
+            /** Version */
+            version: number | null;
+            /** Done */
+            done: boolean;
+            /** Editable */
+            editable: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Undecided */
+            undecided: string[];
+            /** Claims */
+            claims: components["schemas"]["ReviewClaimOut"][];
+        };
+        /** EvidenceRoundOut */
+        EvidenceRoundOut: {
+            /** Round Id */
+            round_id: string;
+            /** Round No */
+            round_no: number;
+            /** Host Folder */
+            host_folder: string | null;
+            /** Folder */
+            folder: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "brief_written" | "imported" | "reviewed";
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Claims */
+            claims: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** EvidenceStateOut */
+        EvidenceStateOut: {
+            /** Wanted */
+            wanted: boolean;
+            /** Claims Count */
+            claims_count: number;
+            /** Pending */
+            pending: string[];
+            /** Awaiting */
+            awaiting: string | null;
+            /** Done */
+            done: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Can Write Brief */
+            can_write_brief: boolean;
+            round: components["schemas"]["EvidenceRoundOut"] | null;
+            job: components["schemas"]["EvidenceBriefJobOut"] | null;
+            /** Prompt */
+            prompt: string;
+            /** Skill */
+            skill: string;
+            /** Can Import */
+            can_import: boolean;
+            /** Import Blocked Reason */
+            import_blocked_reason: string | null;
+            import_job: components["schemas"]["EvidenceBriefJobOut"] | null;
+            latest_import: components["schemas"]["ImportOut"] | null;
+        };
         /** FactsOut */
         FactsOut: {
             /** Total S */
@@ -8959,6 +9430,15 @@ export interface components {
             maximum: number | null;
             /** Choices */
             choices: string[] | null;
+        };
+        /** FilesStatus */
+        FilesStatus: {
+            /** Ok */
+            ok: boolean;
+            /** Separate */
+            separate: boolean;
+            /** Problem */
+            problem?: string | null;
         };
         /** FirstFrameIn */
         FirstFrameIn: {
@@ -10080,6 +10560,8 @@ export interface components {
              */
             status: "ok" | "degraded";
             database: components["schemas"]["DatabaseStatus"];
+            files: components["schemas"]["FilesStatus"];
+            snapshots: components["schemas"]["SnapshotsHealth"];
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };
@@ -10183,6 +10665,67 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ImportClaimOut */
+        ImportClaimOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Status */
+            status: ("found" | "partial" | "not_found" | "contradicted" | "blocked") | null;
+            /**
+             * Result State
+             * @enum {string}
+             */
+            result_state: "ok" | "no_result" | "invalid";
+            /** Problems */
+            problems: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["ImportItemOut"][];
+        };
+        /**
+         * ImportItemOut
+         * @description One piece of evidence of the newest import.
+         */
+        ImportItemOut: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Usable */
+            usable: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * ImportOut
+         * @description The newest import of the newest round.
+         */
+        ImportOut: {
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            report: components["schemas"]["ImportReportOut"];
+            /** Claims */
+            claims: components["schemas"]["ImportClaimOut"][];
+        };
+        /** ImportReportOut */
+        ImportReportOut: {
+            /** Claims */
+            claims: number;
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            /** Items */
+            items: number;
+            /** Usable Items */
+            usable_items: number;
+        };
         /** InnerPlaceIn */
         InnerPlaceIn: {
             /** Environment Id */
@@ -10237,6 +10780,16 @@ export interface components {
             /** Wordings */
             wordings: components["schemas"]["WordingOut"][];
         };
+        /** ItemVerdictIn */
+        ItemVerdictIn: {
+            /** Item Key */
+            item_key: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "accepted" | "rejected";
+        };
         /** JobCapacity */
         JobCapacity: {
             /** Pools */
@@ -10273,7 +10826,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip";
             /**
              * Status
              * @enum {string}
@@ -10358,7 +10911,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip";
             /**
              * Kind
              * @enum {string}
@@ -10409,7 +10962,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip";
             /**
              * Status
              * @enum {string}
@@ -12739,7 +13292,7 @@ export interface components {
              * Mode
              * @enum {string}
              */
-            mode: "pipeline_review" | "pipeline_paused" | "pipeline_running" | "manual_running" | "idle";
+            mode: "pipeline_review" | "pipeline_paused" | "pipeline_waiting" | "pipeline_running" | "manual_running" | "idle";
             run: components["schemas"]["BoardRunOut"] | null;
             /** Queued */
             queued: number;
@@ -12866,6 +13419,8 @@ export interface components {
             review_points: string[];
             /** Review At */
             review_at: string | null;
+            /** Waiting For */
+            waiting_for: string | null;
             /**
              * Scope
              * @enum {string}
@@ -13310,7 +13865,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip";
             /** Running */
             running: number;
             /** Queued */
@@ -13336,6 +13891,35 @@ export interface components {
             arrives_after_event_id: string | null;
             /** Leaves After Event Id */
             leaves_after_event_id: string | null;
+        };
+        /**
+         * PreviewOut
+         * @description The newest preview video of a piece of evidence (EVD-008).
+         */
+        PreviewOut: {
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Error */
+            error: string | null;
+            /** Video Url */
+            video_url: string | null;
+            /** Warnings */
+            warnings: string[];
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Caption Top */
+            caption_top: number;
+            /** Caption Bottom */
+            caption_bottom: number;
         };
         /** ProfileRef */
         ProfileRef: {
@@ -13394,6 +13978,8 @@ export interface components {
             take_source?: ("generated" | "recorded") | null;
             /** Graphics */
             graphics?: boolean | null;
+            /** Evidence */
+            evidence?: boolean | null;
             /** Presenter Staging */
             presenter_staging?: string | null;
             /** Presenter Outfit */
@@ -13514,6 +14100,8 @@ export interface components {
             presenter_named_look_deleted: boolean;
             /** Graphics */
             graphics: boolean;
+            /** Evidence */
+            evidence: boolean;
             /** Graphic Suggestions */
             graphic_suggestions: components["schemas"]["GraphicSuggestionOut"][];
             story_length: components["schemas"]["StoryLengthOut"];
@@ -13567,7 +14155,8 @@ export interface components {
         /**
          * ProjectUpdate
          * @description Only the fields that are sent are changed. The orientation, the speech mode, the kind,
-         *     the voice track and the graphics setting cannot be changed.
+         *     the voice track and the graphics setting cannot be changed. The evidence switch can be
+         *     changed at any time, but only on a continuous explainer.
          */
         ProjectUpdate: {
             /** Name */
@@ -13600,6 +14189,8 @@ export interface components {
             presenter_delivery?: string | null;
             /** Take Source */
             take_source?: ("generated" | "recorded") | null;
+            /** Evidence */
+            evidence?: boolean | null;
             /** Presenter Staging */
             presenter_staging?: string | null;
             /** Presenter Outfit */
@@ -13671,7 +14262,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -13784,6 +14375,20 @@ export interface components {
             seed?: number | null;
             /** Steps */
             steps?: number | null;
+        };
+        /**
+         * ReadabilityOut
+         * @description Whether the quote can be read in the video (EVD-008): the height of its lines on the output
+         *     frame after the zoom, against the least that is readable. Worked out from the capture's
+         *     rectangles, with no render.
+         */
+        ReadabilityOut: {
+            /** Text Height Px */
+            text_height_px: number;
+            /** Min Px */
+            min_px: number;
+            /** Ok */
+            ok: boolean;
         };
         /** ReferenceCandidateOut */
         ReferenceCandidateOut: {
@@ -13942,6 +14547,14 @@ export interface components {
             created_at: string;
         };
         /**
+         * RenderEvidenceOut
+         * @description The clip a render used for an evidence shot (EVD-009).
+         */
+        RenderEvidenceOut: {
+            /** Clip Id */
+            clip_id: number;
+        };
+        /**
          * RenderGraphicOut
          * @description The graphic a render used for a graphic shot (EXG-007): which attempt of which version.
          */
@@ -14026,8 +14639,8 @@ export interface components {
         };
         /**
          * RenderTakeOut
-         * @description The take a render used for one shot, or the graphic it used for a graphic shot (which has
-         *     no take).
+         * @description The take a render used for one shot, or the graphic it used for a graphic shot, or the
+         *     clip it used for an evidence shot (which have no take).
          */
         RenderTakeOut: {
             /** Scene Id */
@@ -14041,6 +14654,7 @@ export interface components {
             /** Take Number */
             take_number: number | null;
             graphic: components["schemas"]["RenderGraphicOut"] | null;
+            evidence?: components["schemas"]["RenderEvidenceOut"] | null;
             /** Placeholder */
             placeholder: boolean;
             /** Frames */
@@ -14058,7 +14672,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "callout_fallback" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown";
+            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "callout_fallback" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown" | "card_without_clip" | "evidence_split_empty";
             /** Scene Id */
             scene_id?: string | null;
             /** Shot Id */
@@ -14175,7 +14789,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -14259,6 +14873,94 @@ export interface components {
             /** Job Id */
             job_id: number;
         };
+        /** ReviewAttemptOut */
+        ReviewAttemptOut: {
+            /** What */
+            what: string;
+            /** Outcome */
+            outcome: string;
+        };
+        /** ReviewClaimOut */
+        ReviewClaimOut: {
+            /** Claim Id */
+            claim_id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "owner" | "glm";
+            /** Text */
+            text: string;
+            /** Sentence */
+            sentence: string;
+            /** Hint */
+            hint: string;
+            /** Status */
+            status: ("found" | "partial" | "not_found" | "contradicted" | "blocked") | null;
+            /**
+             * Result State
+             * @enum {string}
+             */
+            result_state: "ok" | "no_result" | "invalid";
+            /** Summary */
+            summary: string;
+            /** Attempts */
+            attempts: components["schemas"]["ReviewAttemptOut"][];
+            /** Problems */
+            problems: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["ReviewItemOut"][];
+            /** Shown */
+            shown: string[];
+            /** No Proof On Screen */
+            no_proof_on_screen: boolean;
+            /** Decided */
+            decided: boolean;
+        };
+        /** ReviewItemOut */
+        ReviewItemOut: {
+            /** Item Key */
+            item_key: string;
+            /** Evidence Id */
+            evidence_id: string;
+            /** Usable */
+            usable: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Kind */
+            kind: ("web" | "pdf") | null;
+            /** Relation */
+            relation: ("supports" | "partly_supports" | "contradicts" | "context") | null;
+            /** Source Tier */
+            source_tier: ("primary" | "secondary" | "other") | null;
+            source: components["schemas"]["ReviewSourceOut"] | null;
+            /** Quote */
+            quote: string | null;
+            /** What It Says */
+            what_it_says: string | null;
+            /** Agent Notes */
+            agent_notes: string | null;
+            /** Image Url */
+            image_url: string | null;
+            /** Context Url */
+            context_url: string | null;
+            /** Image Px */
+            image_px: number[] | null;
+            /** Rects */
+            rects: number[][];
+            /** Context Box */
+            context_box: number[] | null;
+            /** Page */
+            page: number | null;
+            /** Verdict */
+            verdict: ("accepted" | "rejected") | null;
+            readability: components["schemas"]["ReadabilityOut"] | null;
+            preview: components["schemas"]["PreviewOut"] | null;
+        };
         /**
          * ReviewOut
          * @description What the user can review while the run waits at a review point.
@@ -14288,6 +14990,29 @@ export interface components {
             label: string;
             /** Steps */
             steps: string[];
+        };
+        /**
+         * ReviewSourceOut
+         * @description Where a piece of evidence comes from, as the import tidied it. The addresses start with
+         *     http:// or https:// (checked on import).
+         */
+        ReviewSourceOut: {
+            /** Url */
+            url: string | null;
+            /** Final Url */
+            final_url: string | null;
+            /** Publisher */
+            publisher: string | null;
+            /** Title */
+            title: string | null;
+            /** Author */
+            author: string | null;
+            /** Published */
+            published: string | null;
+            /** Retrieved At */
+            retrieved_at: string | null;
+            /** Archive Url */
+            archive_url: string | null;
         };
         /** ReviewStepOut */
         ReviewStepOut: {
@@ -15713,7 +16438,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Target Duration */
             target_duration: number;
             /**
@@ -15730,6 +16455,13 @@ export interface components {
             place?: string | null;
             /** Description */
             description: string;
+        };
+        /** ShotEvidenceOut */
+        ShotEvidenceOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Piece */
+            piece: number;
         };
         /** ShotGraphicAskRun */
         ShotGraphicAskRun: {
@@ -15946,7 +16678,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Target Duration */
             target_duration: number;
             /**
@@ -15973,6 +16705,7 @@ export interface components {
             end_s?: number | null;
             /** Spoken Text */
             spoken_text?: string | null;
+            evidence?: components["schemas"]["ShotEvidenceOut"] | null;
         };
         /** ShotPlacementOut */
         ShotPlacementOut: {
@@ -16000,6 +16733,11 @@ export interface components {
              * @default []
              */
             graphic_suggestions: components["schemas"]["GraphicSuggestionResultOut"][];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceResultOut"][];
         };
         /** ShotPlanEditIn */
         ShotPlanEditIn: {
@@ -16340,7 +17078,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -16416,7 +17154,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Source Event Ids */
@@ -16649,6 +17387,44 @@ export interface components {
             start_s: number;
             /** End S */
             end_s: number;
+        };
+        /** SnapshotOut */
+        SnapshotOut: {
+            /** Name */
+            name: string;
+            /**
+             * Made At
+             * Format: date-time
+             */
+            made_at: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /**
+         * SnapshotsHealth
+         * @description Information only (STOR-004): a missing or old snapshot never makes the status degraded.
+         */
+        SnapshotsHealth: {
+            /** Enabled */
+            enabled: boolean;
+            /** Last Made At */
+            last_made_at?: string | null;
+            /** Stale */
+            stale: boolean;
+        };
+        /** SnapshotsStatusOut */
+        SnapshotsStatusOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Problem */
+            problem: string | null;
+            /** Running */
+            running: boolean;
+            last: components["schemas"]["SnapshotOut"] | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Stale */
+            stale: boolean;
         };
         /** SoundRequestIn */
         SoundRequestIn: {
@@ -17848,7 +18624,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -19088,6 +19864,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_db_snapshots_api_db_snapshots_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotsStatusOut"];
+                };
+            };
+        };
+    };
+    make_db_snapshot_api_db_snapshots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotsStatusOut"];
+                };
+            };
+            /** @description Off, or one is already running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -20502,6 +21327,565 @@ export interface operations {
                 };
             };
             /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_evidence_claims_api_projects__project_id__evidence_claims_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_evidence_claim_api_projects__project_id__evidence_claims_marks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceMarkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    suggest_evidence_claims_api_projects__project_id__evidence_claims_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsRun"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_evidence_claim_api_projects__project_id__evidence_claims__claim_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                claim_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    edit_evidence_claim_api_projects__project_id__evidence_claims__claim_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                claim_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceClaimEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceClaimsState"];
+                };
+            };
+            /** @description No such project or claim. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing claims. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no evidence, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_evidence_api_projects__project_id__evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_evidence_brief_api_projects__project_id__evidence_brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A brief cannot be written now: the project has no evidence, the claims are not ready, nothing changed, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_evidence_api_projects__project_id__evidence_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results cannot be imported now: the project has no evidence, there is no round, the claims changed since the round's brief, nothing was written in results yet, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_evidence_review_api_projects__project_id__evidence_review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_evidence_claim_decision_api_projects__project_id__evidence_review_claims__claim_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                claim_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    finish_evidence_review_api_projects__project_id__evidence_review_done_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReviewOut"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_evidence_item_api_projects__project_id__evidence_review_items__item_key__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -23063,7 +24447,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip")[] | null;
                 limit?: number;
                 offset?: number;
             };

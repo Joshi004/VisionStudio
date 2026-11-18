@@ -162,6 +162,9 @@ class PipelineRunOut(BaseModel):
     # waiting for the user to press Continue).
     review_points: list[str]
     review_at: str | None
+    # The step the run waits on the owner's own work for (EVD-003), and goes on from by itself.
+    # None otherwise.
+    waiting_for: str | None
     # What the run makes: everything that is not up to date, or only what is out of date.
     scope: Literal["all", "out_of_date"]
     # The scenes the run is limited to, in story order (SCN-004). Empty: the whole story.
@@ -367,6 +370,7 @@ def _run_out(job: Job, scenes: list[dict[str, Any]]) -> PipelineRunOut:
         confirm_overwrite=options.confirm_overwrite,
         review_points=review_points.normalize(options.review_points),
         review_at=output["review_at"] if active else None,
+        waiting_for=output["waiting_for"] if active else None,
         scope=options.scope,
         scenes=_scenes_out(scenes, options.scenes),
         remake_from=options.remake_from,

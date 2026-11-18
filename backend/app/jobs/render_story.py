@@ -147,7 +147,8 @@ class Shot:
     scene_index: int
     shot_id: str
     frames: int
-    # None for a graphic shot (EXG-007), which has `graphic_id` instead.
+    # None for a graphic shot (EXG-007), which has `graphic_id` instead, and for an evidence shot
+    # (EVD-009), which has `evidence_clip_id`.
     take_id: int | None
     take_number: int | None
     path: str
@@ -165,6 +166,12 @@ class Shot:
     # in, the last fades out). None: the usual fade.
     fade_in_s: float | None = None
     fade_out_s: float | None = None
+    evidence_clip_id: int | None = None
+
+    @property
+    def is_drawn(self) -> bool:
+        """A graphic or an evidence shot: a video drawn by code, no take, no sound."""
+        return self.graphic_id is not None or self.evidence_clip_id is not None
 
     @property
     def label(self) -> str:
@@ -252,6 +259,21 @@ class Music:
 
 
 @dataclass(frozen=True)
+class EvidenceCard:
+    """An evidence card (EVD-011) laid over the shots it spans: its clip (ProRes 4444 with
+    alpha), the story frame it starts at, and where it sits in the picture.
+    """
+
+    card_id: str
+    path: str
+    start_frame: int
+    frames: int
+    clip_frames: int
+    x: int
+    y: int
+
+
+@dataclass(frozen=True)
 class Timeline:
     fps: int
     width: int
@@ -282,6 +304,9 @@ class Timeline:
     # The project's `callout_style` the timeline was made with (CMO-005); a version 5 timeline
     # has none and its callouts are boxes.
     callout_style: str = callout_render.STYLE_BOXES
+    # Evidence cards and source lines (EVD-011, EVD-012); a timeline made before has none.
+    cards: tuple[EvidenceCard, ...] = ()
+    source_lines: tuple[caption_ass.SourceLineEvent, ...] = ()
 
     @property
     def total_samples(self) -> int:
@@ -472,6 +497,48 @@ _CONSTANT_KEYS: Final = (
 )
 
 
+def _parse_cards(raw: dict[str, Any], total_frames: int) -> tuple[EvidenceCard, ...]:
+    """The evidence cards of the timeline: none when the key is missing."""
+    entries = raw.get("evidence_cards", [])
+    if not isinstance(entries, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    cards: list[EvidenceCard] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        card_id, path = entry.get("id"), entry.get("path")
+        numbers = [
+            _whole(entry.get(key)) for key in ("start_frame", "frames", "clip_frames", "x", "y")
+        ]
+        if (
+            not isinstance(card_id, str)
+            or not isinstance(path, str)
+            or any(value is None for value in numbers)
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        start, frames, clip_frames, x, y = (value or 0 for value in numbers)
+        if start < 0 or frames < 1 or clip_frames < frames - 1 or start + frames > total_frames:
+            raise RenderFailed(_CHANGED_MESSAGE)
+        cards.append(EvidenceCard(card_id, path, start, frames, clip_frames, x, y))
+    return tuple(cards)
+
+
+def _parse_source_lines(raw: dict[str, Any]) -> tuple[caption_ass.SourceLineEvent, ...]:
+    """The source lines of the timeline: none when the key is missing."""
+    entries = raw.get("source_lines", [])
+    if not isinstance(entries, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    lines: list[caption_ass.SourceLineEvent] = []
+    for entry in entries:
+        start = _whole(entry.get("start_ms")) if isinstance(entry, dict) else None
+        end = _whole(entry.get("end_ms")) if isinstance(entry, dict) else None
+        text = entry.get("text") if isinstance(entry, dict) else None
+        if start is None or end is None or end <= start or not isinstance(text, str):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        lines.append(caption_ass.SourceLineEvent(start, end, text))
+    return tuple(lines)
+
+
 def _parse_voice(raw: object) -> list[VoiceTake] | None:
     """The voice takes of the timeline, or None for a render without. Their pieces must lie
     inside the take.
@@ -609,6 +676,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 take_id is not None
                 or number is not None
                 or entry.get("graphic") is not None
+                or entry.get("evidence") is not None
                 or path is not None
             ):
                 raise RenderFailed(_CHANGED_MESSAGE)
@@ -621,13 +689,23 @@ def parse_timeline(recorded: object) -> Timeline:
             raise RenderFailed(_CHANGED_MESSAGE)
         if graphic_id is not None and (take_id is not None or number is not None):
             raise RenderFailed(_CHANGED_MESSAGE)
+        # An evidence shot (EVD-009) has the id of its clip in the same place.
+        evidence = entry.get("evidence")
+        evidence_id = _whole(evidence.get("clip_id")) if isinstance(evidence, dict) else None
+        if evidence is not None and evidence_id is None:
+            raise RenderFailed(_CHANGED_MESSAGE)
+        if evidence_id is not None and (
+            take_id is not None or number is not None or graphic_id is not None
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        drawn = graphic_id is not None or evidence_id is not None
         if (
             frames is None
             or frames < 1
-            or (placeholder is None and take_id is None and graphic_id is None)
+            or (placeholder is None and take_id is None and not drawn)
             or source_frames is None
             or source_frames < 1
-            or (placeholder is None and number is None and graphic_id is None)
+            or (placeholder is None and number is None and not drawn)
             or index is None
             or duck is None
             or bed_duck is None
@@ -655,6 +733,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 placeholder,
                 fade_in,
                 fade_out,
+                evidence_clip_id=evidence_id,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -722,6 +801,8 @@ def parse_timeline(recorded: object) -> Timeline:
         captions=captions,
         callouts=callouts,
         callout_style=callout_style,
+        cards=_parse_cards(raw, total),
+        source_lines=_parse_source_lines(raw),
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
         max_boost_db=known("max_boost_db"),
@@ -815,6 +896,15 @@ class RenderStoryHandler(JobHandler):
                 job_id, job.project_id, timeline.callouts, timeline.fps, storage, temp_paths
             )
             shot_overlays = drawn.overlays_by_shot([shot.frames for shot in timeline.shots])
+
+        # Evidence cards (EVD-011): the same kind of clip, laid over the shots they span.
+        if timeline.cards:
+            card_files = [(card, await probe_card(storage, card)) for card in timeline.cards]
+            on_cards = card_overlays(card_files, [shot.frames for shot in timeline.shots])
+            shot_overlays = [
+                [*callouts_on, *cards_on]
+                for callouts_on, cards_on in zip(shot_overlays, on_cards, strict=True)
+            ]
 
         await self._phase(job_id, phases.MEASURING_LEVELS)
         shot_lufs = [
@@ -956,13 +1046,15 @@ class RenderStoryHandler(JobHandler):
                 ),
             )
         has_callouts = box_track is not None and bool(box_track.entries)
-        if has_captions or has_callouts:
+        if has_captions or has_callouts or timeline.source_lines:
             await self._phase(job_id, phases.WRITING_CAPTIONS)
             captions = await write_subtitles(
                 storage,
                 timeline.captions if has_captions else None,
                 box_track if has_callouts else None,
                 temp_paths,
+                source_lines=timeline.source_lines,
+                play_res=(timeline.width, timeline.height),
             )
 
         # Stage 3: join the picture, bring the sound to its target, encode.
@@ -1044,6 +1136,11 @@ class RenderStoryHandler(JobHandler):
                     "shot_id": shot.shot_id,
                     "take_id": shot.take_id,
                     **({"graphic_id": shot.graphic_id} if shot.graphic_id is not None else {}),
+                    **(
+                        {"evidence_clip_id": shot.evidence_clip_id}
+                        if shot.evidence_clip_id is not None
+                        else {}
+                    ),
                     **({"placeholder": True} if shot.placeholder is not None else {}),
                     "sound": sound.label,
                     "loudness_lufs": _tenth(sound.loudness_lufs),
@@ -1209,20 +1306,71 @@ async def probe_shot(storage: Storage, shot: Shot) -> Source:
         raise RenderFailed(
             f"The clip of shot {shot.label} could not be read. Regenerate it, or use another take."
         )
-    # A graphic is drawn at the shot's frames plus one spare, so at the story's rounding it may be
-    # one frame short: the render repeats its last frame, as the plan allows (D-9).
+    # A graphic or an evidence clip is drawn at the shot's frames plus one spare, so at the
+    # story's rounding it may be one frame short: the render repeats its last frame, as the plan
+    # allows (D-9).
     short_by = shot.source_frames - probe.frame_count
     if shot.graphic_id is not None and short_by > 1:
         raise RenderFailed(
             f"The graphic of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Make the graphics again."
         )
-    if shot.graphic_id is None and short_by > 0:
+    if shot.evidence_clip_id is not None and short_by > 1:
+        raise RenderFailed(
+            f"The evidence clip of shot {shot.label} has {probe.frame_count} frames; the shot "
+            f"needs {shot.source_frames}. Draw the evidence shots again."
+        )
+    if not shot.is_drawn and short_by > 0:
         raise RenderFailed(
             f"The clip of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Regenerate it, or use another take."
         )
     return Source(path=path, probe=probe)
+
+
+async def probe_card(storage: Storage, card: EvidenceCard) -> Path:
+    """The file of an evidence card; refuses one that cannot be read or is too short."""
+    try:
+        path = storage.get_path(card.path)
+    except StorageError as exc:
+        raise RenderFailed("A file of this render could not be found on disk.") from exc
+    probe = await ffmpeg.probe_video(path)
+    if probe is None or probe.frame_count is None or probe.frame_count < card.clip_frames:
+        raise RenderFailed(
+            f"The evidence card {card.card_id} could not be read. Draw the evidence shots again."
+        )
+    return path
+
+
+def card_overlays(
+    cards: Sequence[tuple[EvidenceCard, Path]], shot_frames: Sequence[int]
+) -> list[list[render_commands.Overlay]]:
+    """The overlays of each shot for the evidence cards, as `DrawnCallouts.overlays_by_shot` does
+    for callouts: a card that runs across a cut is split over the shots it crosses.
+    """
+    shots: list[list[render_commands.Overlay]] = []
+    first = 0
+    for frames in shot_frames:
+        end = first + frames
+        overlays: list[render_commands.Overlay] = []
+        for card, path in cards:
+            low = max(first, card.start_frame)
+            high = min(end, card.start_frame + card.frames)
+            if high <= low:
+                continue
+            overlays.append(
+                render_commands.Overlay(
+                    path=path,
+                    x=card.x,
+                    y=card.y,
+                    at_frame=low - first,
+                    from_frame=low - card.start_frame,
+                    to_frame=high - card.start_frame,
+                )
+            )
+        shots.append(overlays)
+        first = end
+    return shots
 
 
 async def probe_speech(storage: Storage, speech: Narration) -> tuple[Path, int | None]:
@@ -1583,6 +1731,8 @@ def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
         return "clip voice"
     if shot.graphic_id is not None:
         return "none (a graphic)"
+    if shot.evidence_clip_id is not None:
+        return "none (an evidence clip)"
     return "clip" if audio is not None else "none in the clip"
 
 
@@ -1686,15 +1836,21 @@ async def write_subtitles(
     captions: caption_plan.CaptionTrack | None,
     callouts: callout_render.CalloutTrack | None,
     temp_paths: list[Path],
+    source_lines: tuple[caption_ass.SourceLineEvent, ...] = (),
+    play_res: tuple[int, int] | None = None,
 ) -> tuple[Path, Path]:
-    """Writes the captions and the callouts as one ASS file in the temp folder. Returns the file
-    and the folder of the bundled fonts, which is what `final_encode_args` burns in.
+    """Writes the captions, the callouts and the source lines as one ASS file in the temp folder.
+    Returns the file and the folder of the bundled fonts, which `final_encode_args` burns in.
     """
     if not FONTS_DIR.is_dir():
         raise RenderFailed("The caption font is missing from this installation.")
     path = storage.new_temp_path("ass")
     temp_paths.append(path)
-    await asyncio.to_thread(write_new_file, path, caption_ass.ass_document(captions, callouts))
+    await asyncio.to_thread(
+        write_new_file,
+        path,
+        caption_ass.ass_document(captions, callouts, source_lines, play_res),
+    )
     return path, FONTS_DIR
 
 

@@ -8,6 +8,7 @@ import { readCallout } from "./callout/props";
 import { layoutReport } from "./blocks/report";
 import type { LayoutReport } from "./blocks/report";
 import { readScene } from "./blocks/scene";
+import { Evidence } from "./evidence/Evidence";
 import { fontsLoaded } from "./fonts";
 import { Generated } from "./generated/Generated";
 import { TestCard } from "./TestCard";
@@ -166,6 +167,16 @@ export function Root() {
         fps={24}
         durationInFrames={72}
         defaultProps={defaults("generated_component")}
+        calculateMetadata={metadata}
+      />
+      <Composition
+        id="Evidence"
+        component={Evidence}
+        width={1920}
+        height={1080}
+        fps={24}
+        durationInFrames={144}
+        defaultProps={defaults("evidence_clip")}
         calculateMetadata={metadata}
       />
       <Composition

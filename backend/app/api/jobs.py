@@ -101,6 +101,10 @@ JobType = Literal[
     "write_chat_reply",
     "write_youtube_draft",
     "publish_youtube",
+    "suggest_evidence_claims",
+    "write_evidence_brief",
+    "import_evidence",
+    "render_evidence_clip",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
