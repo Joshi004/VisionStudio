@@ -82,6 +82,10 @@ LEFT_OUT_TEXT: Final = {
 }
 NOT_IN_TAKE: Final = "not_in_take"
 NOT_IN_TAKE_TEXT: Final = "The claim's words are not in this scene's voice take."
+# Set by code, never by the planner: a claim with no evidence shot whose first word is on a graphic
+# shot. Its source is shown as a line on that graphic (EVD-012).
+ON_GRAPHIC: Final = "on_graphic"
+ON_GRAPHIC_TEXT: Final = "A graphic shot covers its words, so its source is a line on that graphic."
 
 
 def cut_types(graphics: bool, evidence: bool = False) -> tuple[str, ...]:
@@ -196,8 +200,8 @@ _SUGGESTION_RULES: Final = (
     'like a "graphic" shot over the words that share an id. It is a wish, not an order: plan a '
     "graphic shot that covers those words, starting on or just before the first of them, unless "
     "a rule above makes that impossible (the shortest and the longest shot, a scene that would "
-    "have only graphic shots, opening and closing on the presenter) or the words hold nothing a "
-    "chart, diagram or text card could show.\n"
+    "have only graphic shots) or the words hold nothing a chart, diagram or text card could "
+    "show.\n"
     '- List each suggestion you did not follow in "declined_suggestions": its "id" and a "reason" '
     f"of one plain sentence of at most {REASON_MAX_CHARS} characters. Leave the list empty when "
     "you followed them all.\n"
@@ -222,14 +226,14 @@ _EVIDENCE_RULES: Final = (
     "script needs and no longer. Its description is one plain sentence of what the screenshot "
     "shows.\n"
     "- Never cut, move or shorten a graphic shot for evidence. When a graphic shot covers the "
-    "first word of a claim, plan the claim's evidence shots directly before that graphic shot or "
-    "directly after it.\n"
+    "first word of a claim, the claim needs no evidence shot: its source is shown as a line of "
+    'text on that graphic. Plan no evidence shot for it and leave it out of "left_out_evidence".\n'
     '- List each claim you give no evidence shot in "left_out_evidence": its "claim", a "code" '
     f'and a "reason" of one plain sentence of at most {REASON_MAX_CHARS} characters. The code is '
     '"scene_too_short" (the scene has no room under the shot rules), '
     '"too_close_to_other_evidence" (another evidence shot is in the way) or '
     '"opening_or_closing_shot" (the words fall in the opening or closing presenter shot). '
-    "Every claim needs an evidence shot or an entry in the list.\n"
+    "Every other claim needs an evidence shot or an entry in the list.\n"
 )
 
 
@@ -322,8 +326,9 @@ Its description says that the presenter is speaking to the viewer, in the set, a
 the presenter or the set. Every B-roll shot is a picture that makes sense without the presenter \
 and needs no one's speech to be understood. Do not show on-screen text, charts or diagrams: only \
 what a camera could film or a video model could draw.{graphic_broll}
-- Make the video feel like an edited explainer. Open on the presenter and close on the presenter. \
-Use B-roll for {broll_use}, and go back to the presenter \
+- Make the video feel like an edited explainer. Prefer to open and close on the presenter. A \
+graphic or an evidence shot may open or close the scene when the words there need it; B-roll never \
+does. Use B-roll for {broll_use}, and go back to the presenter \
 for the main points and the transitions. Do not leave the presenter off screen for a long \
 stretch, and do not cut more often than the words need.
 - Cut on a natural phrase boundary: after a comma, at a pause ("pause_before" is a good sign) or \
@@ -875,8 +880,9 @@ def _check_evidence(
 
     For each claim: no more shots than pieces, the shots one right after the other, the first
     one starting on the claim's first word or at most `EVIDENCE_LEAD_WORDS` words before it (or
-    directly before or after a graphic shot that covers that word), and, with no shot at all, a
-    reason with a code from `LEFT_OUT_TEXT`. Raises ValueError.
+    directly before or after a graphic shot that covers that word), and, with no shot at all,
+    `ON_GRAPHIC` when a graphic shot covers that word, else a reason with a code from
+    `LEFT_OUT_TEXT`. Raises ValueError.
     """
     ranges = _evidence_ranges(parsed, word_count)
     shots_of: dict[str, list[int]] = {}
@@ -889,6 +895,14 @@ def _check_evidence(
         claim_id = claim["id"]
         indices = shots_of.get(claim_id, [])
         if not indices:
+            first_word = claim["words"][0] + 1
+            on_graphic = any(
+                shot["type"] == GRAPHIC and ranges[index][0] <= first_word <= ranges[index][1]
+                for index, shot in enumerate(parsed)
+            )
+            if on_graphic:
+                left_out[claim_id] = (ON_GRAPHIC, ON_GRAPHIC_TEXT)
+                continue
             if claim_id not in declared:
                 raise ValueError(
                     f"The claim {claim_id} has evidence to show but no evidence shot and no "
@@ -922,7 +936,7 @@ def _check_evidence(
                 f"The first evidence shot of the claim {claim_id} (shot {indices[0] + 1}) starts "
                 f"on word {start}. It must start on word {first_word}, the first word of the "
                 f"claim, or at most {EVIDENCE_LEAD_WORDS} words before it. When a graphic shot "
-                "covers that word, plan the evidence shots directly before or after it."
+                "covers that word, plan no evidence shot for the claim."
             )
     return left_out
 
@@ -952,8 +966,8 @@ def evidence_results(
 ) -> list[dict[str, Any]]:
     """What became of each claim of the scene (EVD-009), in story order:
     `[{claim_id, text, pieces, shown, left_out, reason}]`. `shown` is the number of evidence
-    shots the claim got; `left_out` is the code of the reason (`LEFT_OUT_TEXT`, or
-    `NOT_IN_TAKE` for a claim with no word in the take, set by code) and None for a claim that
+    shots the claim got; `left_out` is the code of the reason (`LEFT_OUT_TEXT`, or `NOT_IN_TAKE`
+    or `ON_GRAPHIC`, set by code) and None for a claim that
     got a shot. A claim that got fewer shots than it has pieces says which are not shown in
     `shown` alone.
     """
