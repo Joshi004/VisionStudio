@@ -21,7 +21,7 @@ export const EVIDENCE_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 const EVIDENCE_IMAGE_BASE64_MAX = 28 * 1024 * 1024;
 
 // The engines that draw a callout (CMO-001): a transparent clip laid over a shot. Only they may be
-// asked for ProRes 4444, and only they may be longer than MAX_FRAMES. `callout_blocks` (CMO-004)
+// asked for ProRes 4444, and they are held to CALLOUT_MAX_FRAMES. `callout_blocks` (CMO-004)
 // draws the block scene of a callout.
 export const CALLOUT_ENGINES: readonly Engine[] = ["callout_component", "callout_blocks"];
 
@@ -29,7 +29,8 @@ export function isCalloutEngine(engine: Engine): boolean {
   return CALLOUT_ENGINES.includes(engine);
 }
 
-export const MAX_FRAMES = 720;
+// 180 s at 24 fps: the longest Graphics lab graphic.
+export const MAX_FRAMES = 4320;
 // A callout stays up as long as its narration unit, up to 60 s: 1800 frames is 60 s at 30 fps.
 export const CALLOUT_MAX_FRAMES = 1800;
 export const MAX_TIME_LIMIT_S = 900;
@@ -69,8 +70,9 @@ export const renderRequestSchema = {
     width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     fps: { type: "integer", minimum: 1, maximum: 60 },
-    // The most any engine may ask for; `requestProblem` holds the other engines to MAX_FRAMES.
-    frames: { type: "integer", minimum: 1, maximum: CALLOUT_MAX_FRAMES },
+    // The most any engine may ask for; `requestProblem` holds the callout engines to
+    // CALLOUT_MAX_FRAMES.
+    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
     resolved: { type: "object" },
     input: {},
     code: { type: ["string", "null"], maxLength: 100_000 },
@@ -163,22 +165,30 @@ export const layoutRequestSchema = {
     width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     fps: { type: "integer", minimum: 1, maximum: 60 },
-    // The most any mode may ask for; `layoutProblem` holds a shot's scene to MAX_FRAMES.
-    frames: { type: "integer", minimum: 1, maximum: CALLOUT_MAX_FRAMES },
+    // The most any mode may ask for; `layoutProblem` holds a callout's scene to CALLOUT_MAX_FRAMES.
+    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
     resolved: { type: "object" },
     input: {},
     at_frames: {
       type: "array",
       minItems: 1,
       maxItems: MAX_LAYOUT_FRAMES,
-      items: { type: "integer", minimum: 0, maximum: CALLOUT_MAX_FRAMES - 1 },
+      items: { type: "integer", minimum: 0, maximum: MAX_FRAMES - 1 },
     },
   },
 } as const;
 
 // The rules of a layout request that the JSON schema cannot hold. A readable message, or null.
 export function layoutProblem(request: LayoutRequest): string | null {
-  if (request.mode === "callout") return null;
+  if (request.mode === "callout") {
+    if (request.frames > CALLOUT_MAX_FRAMES) {
+      return `A callout scene is laid out at most ${CALLOUT_MAX_FRAMES} frames long.`;
+    }
+    if (request.at_frames.some((frame) => frame >= CALLOUT_MAX_FRAMES)) {
+      return `A callout scene is measured at frames below ${CALLOUT_MAX_FRAMES}.`;
+    }
+    return null;
+  }
   if (request.frames > MAX_FRAMES) return `A block scene is laid out at most ${MAX_FRAMES} frames long.`;
   if (request.at_frames.some((frame) => frame >= MAX_FRAMES)) {
     return `A block scene is measured at frames below ${MAX_FRAMES}.`;
@@ -227,14 +237,14 @@ export const checksRequestSchema = {
     width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     fps: { type: "integer", minimum: 1, maximum: 60 },
-    frames: { type: "integer", minimum: 1, maximum: CALLOUT_MAX_FRAMES },
+    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
     resolved: { type: "object" },
     code: { type: "string", minLength: 1, maxLength: MAX_CODE_CHARS },
     at_frames: {
       type: "array",
       minItems: 1,
       maxItems: MAX_CHECK_FRAMES,
-      items: { type: "integer", minimum: 0, maximum: CALLOUT_MAX_FRAMES - 1 },
+      items: { type: "integer", minimum: 0, maximum: MAX_FRAMES - 1 },
     },
   },
 } as const;
@@ -252,8 +262,8 @@ export function requestProblem(request: RenderRequest): string | null {
   if (engine === EVIDENCE_ENGINE && (request.input === null || request.input === undefined)) {
     return "An evidence clip needs its images in `input`.";
   }
-  if (!callout && frames > MAX_FRAMES) {
-    return `The engine "${engine}" draws at most ${MAX_FRAMES} frames.`;
+  if (callout && frames > CALLOUT_MAX_FRAMES) {
+    return `The engine "${engine}" draws at most ${CALLOUT_MAX_FRAMES} frames.`;
   }
   if (encoding.codec === "h264") {
     if (encoding.pixel_format !== "yuv420p") return "H.264 is drawn as yuv420p.";
@@ -283,8 +293,12 @@ export function requestProblem(request: RenderRequest): string | null {
 // The rules of a check request that the JSON schema cannot hold.
 export function checksProblem(request: ChecksRequest): string | null {
   const engine = request.engine ?? "generated_component";
-  if (engine !== "callout_component" && request.frames > MAX_FRAMES) {
-    return `The engine "${engine}" is checked at most ${MAX_FRAMES} frames long.`;
+  if (engine !== "callout_component") return null;
+  if (request.frames > CALLOUT_MAX_FRAMES) {
+    return `The engine "${engine}" is checked at most ${CALLOUT_MAX_FRAMES} frames long.`;
+  }
+  if (request.at_frames?.some((frame) => frame >= CALLOUT_MAX_FRAMES)) {
+    return `The engine "${engine}" is checked at frames below ${CALLOUT_MAX_FRAMES}.`;
   }
   return null;
 }

@@ -62,7 +62,7 @@ _MAX_ID: Final = 2**63 - 1
 
 # The widest line the request may carry. The form's own limit (`graphics_lab.LINE_MAX_CHARS`) is
 # checked by the service, so the user gets its message; this only stops a huge body.
-_REQUEST_LINE_MAX: Final = 2000
+_REQUEST_LINE_MAX: Final = 12_000
 
 _INVALID = {422: {"model": ErrorResponse, "description": "The form breaks a rule."}}
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No run or render has this id."}}
@@ -462,7 +462,7 @@ def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
     responses=_INVALID,
 )
 async def create_run(body: GraphicRunCreate, session: SessionDep) -> GraphicRunOut:
-    """Makes a run from a line (1 to 300 characters), an orientation and, optionally, a saved
+    """Makes a run from a line (1 to 3,000 characters), an orientation and, optionally, a saved
     voice. No model is called. With a voice, its speech starts now (a GPU job).
     """
     try:
@@ -541,7 +541,7 @@ async def _brief_click(session: SessionDep, run_id: int, action: Any) -> Graphic
 )
 async def write_brief(run_id: int, session: SessionDep) -> GraphicRunOut:
     """Starts the paid call that writes the run's brief. Refused (409) while it is being written
-    or is written, and (422) for a line whose speech is longer than 15 s, before any call.
+    or is written, and (422) for a line whose speech is longer than 180 s, before any call.
     """
     return await _brief_click(session, run_id, graphics_lab.start_brief)
 
@@ -654,7 +654,7 @@ def test_card_out(newest: Job | None, stored: Job | None) -> GraphicTestCardOut:
     responses={**_CONFLICT, **_INVALID},
 )
 async def render_test_card(body: GraphicTestCardCreate, session: SessionDep) -> GraphicTestCardOut:
-    """Renders the test card at an orientation and a length (72 to 360 frames) in the motion
+    """Renders the test card at an orientation and a length (72 to 4320 frames) in the motion
     service. Refused (409) while another test card is being rendered. Nothing is paid for.
     """
     try:

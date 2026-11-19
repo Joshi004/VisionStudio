@@ -43,7 +43,7 @@ LAYOUT_TIMEOUT_S: Final = 90.0
 # plus 1 s for each frame above three, so 73 s at most).
 CHECKS_TIMEOUT_S: Final = 105.0
 DOWNLOAD_TIMEOUT_S: Final = 300.0
-# A graphic is at most 15 s long. A callout (ProRes 4444, CMO-001) is at most 75 s long: the
+# A graphic is at most 180 s long. A callout (ProRes 4444, CMO-001) is at most 75 s long: the
 # largest one measured (908 x 826, 1800 frames, 24 fps, a flat card with a shadow) is 618 MB, so
 # the limit is that size with half as much again. A file this large means something is wrong.
 DOWNLOAD_MAX_BYTES: Final = 900 * 1024 * 1024

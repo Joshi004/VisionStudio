@@ -3556,7 +3556,7 @@ CREATE INDEX idx_shot_voice_source_project ON shot_voice_source (project_id);
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `created_at` | DATETIME | NOT NULL | now | |
-| `line_text` | TEXT | NOT NULL | — | The line, trimmed, 1 to 300 characters (`graphics_lab.LINE_MAX_CHARS`; checked by the service) |
+| `line_text` | TEXT | NOT NULL | — | The line, trimmed, 1 to 3,000 characters (`graphics_lab.LINE_MAX_CHARS`; checked by the service) |
 | `orientation` | TEXT | NOT NULL | — | `landscape` or `portrait` (`CHECK`) |
 | `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice that speaks the line (GFX-004). `ON DELETE SET NULL` |
 | `speech_run_id` | INTEGER, FK → `lab_voice_run.id` | NULL | — | The Voice lab speech of the line (GFX-004). `ON DELETE SET NULL` |
