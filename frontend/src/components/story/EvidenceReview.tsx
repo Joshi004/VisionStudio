@@ -55,7 +55,6 @@ const TIER_LABEL: Record<string, string> = {
 const HIGHLIGHT_STYLE = {
   position: "absolute",
   boxSizing: "border-box",
-  border: "2px solid #f08c00",
   backgroundColor: "rgba(255, 212, 59, 0.35)",
   pointerEvents: "none",
 } as const;
@@ -309,6 +308,7 @@ function PieceCard({
               <div
                 style={{
                   ...HIGHLIGHT_STYLE,
+                  border: "2px solid #f08c00",
                   backgroundColor: "transparent",
                   left: percent(item.context_box[0]),
                   top: percent(item.context_box[1]),
