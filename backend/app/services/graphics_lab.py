@@ -66,7 +66,7 @@ SPEECH_DELIVERY: Final = explainer.DEFAULT_PRESENTER_DELIVERY
 # The answer to Ask again and Render again on a retired engine (EXG-008).
 RETIRED_ENGINE_MESSAGE: Final = "Templates are no longer made. Older attempts are kept."
 
-LINE_MAX_CHARS: Final = 300
+LINE_MAX_CHARS: Final = voice_lab.LONG_TEXT_MAX_CHARS
 NOTE_MAX_CHARS: Final = 1000
 VERDICTS: Final = ("good", "usable", "bad")
 ORIENTATIONS: Final = (projects.LANDSCAPE, projects.PORTRAIT)
@@ -282,7 +282,7 @@ async def create_run(
             cfg_scale=None,
         )
         try:
-            speech = await voice_lab.create_run(session, form, commit=False)
+            speech = await voice_lab.create_run(session, form, commit=False, long_text=True)
         except voice_lab.VoiceLabInputError as exc:
             await session.rollback()
             raise GraphicsLabInputError(str(exc)) from exc

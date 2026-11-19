@@ -11,9 +11,9 @@ import {
 import { isJobActive } from "../../api/polling";
 import { ORIENTATION_LABELS } from "./graphicsLabView";
 
-// The limits of the server (a test card is 3 to 15 seconds at 24 frames a second).
+// The limits of the server (a test card is 3 to 180 seconds at 24 frames a second).
 const MIN_FRAMES = 72;
-const MAX_FRAMES = 360;
+const MAX_FRAMES = 4320;
 const DEFAULT_FRAMES = 101;
 
 const CHECK_LABELS: Record<string, string> = {

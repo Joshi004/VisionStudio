@@ -10,7 +10,7 @@ import type {
 import { isJobActive } from "../../api/polling";
 
 /** The longest line the lab takes. The server stays the judge; the form only says so early. */
-export const LINE_MAX_CHARS = 300;
+export const LINE_MAX_CHARS = 3000;
 
 export type GraphicsLabFormState = {
   line: string;

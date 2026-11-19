@@ -52,7 +52,7 @@ CALLOUT_ENCODING: Final[dict[str, Any]] = {
 
 # How long the motion service may spend on one render before it stops it. The backend waits this
 # long plus a minute, then gives up on the service.
-RENDER_TIME_LIMIT_S: Final = 300
+RENDER_TIME_LIMIT_S: Final = 900
 BACKEND_EXTRA_WAIT_S: Final = 60
 
 # The engine key the motion service uses for the test card, and for each engine the composition of
@@ -67,7 +67,7 @@ COMPOSITION_OF: Final[dict[str, str]] = {
 # The engine that is drawn in the backend, not in the motion service.
 PYTHON_ENGINE: Final = "python_templates"
 
-# The test card's length: as short as a real graphic can be (3 s) up to as long (15 s).
+# The test card's length: as short as a real graphic can be (3 s) up to as long (180 s).
 TEST_CARD_MIN_FRAMES: Final = graphics_resolve.MIN_FRAMES
 TEST_CARD_MAX_FRAMES: Final = graphics_resolve.MAX_FRAMES
 TEST_CARD_DEFAULT_FRAMES: Final = 101
