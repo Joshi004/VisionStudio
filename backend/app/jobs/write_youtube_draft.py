@@ -57,6 +57,9 @@ class _Task:
     context: dict[str, Any]
     saved_inputs: dict[str, Any]
     feedback: user_feedback.Feedback | None
+    # The accepted evidence for the Sources section (`youtube_sources`). Empty for a job queued
+    # before the section existed, or for a project without evidence.
+    sources: list[Any]
 
 
 def _is_id(value: object) -> bool:
@@ -80,7 +83,16 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     ok, feedback = user_feedback.read(job_input.get("feedback"))
     if not ok:
         return None
-    return _Task(render_id=render_id, context=context, saved_inputs=saved_inputs, feedback=feedback)
+    sources = job_input.get("sources", [])
+    if not isinstance(sources, list):
+        return None
+    return _Task(
+        render_id=render_id,
+        context=context,
+        saved_inputs=saved_inputs,
+        feedback=feedback,
+        sources=sources,
+    )
 
 
 def _draft_reader() -> llm_call.ReadAnswer:
@@ -147,6 +159,11 @@ class WriteYouTubeDraftHandler(JobHandler):
         content: dict[str, Any] | None = outcome.value
         if content is None:
             await self._fail(job_id, f"The YouTube draft could not be written: {outcome.failure}")
+            return
+        try:
+            content = writer.with_sources(content, task.sources)
+        except ValueError as exc:
+            await self._fail(job_id, f"The sources could not be added to the description: {exc}")
             return
 
         await self._phase(job_id, phases.SAVING_YOUTUBE_DRAFT)
