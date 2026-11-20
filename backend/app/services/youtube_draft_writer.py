@@ -22,7 +22,7 @@ import re
 import unicodedata
 from typing import Any, Final
 
-from app.services import graphic_theme_writer, user_feedback
+from app.services import graphic_theme_writer, user_feedback, youtube_sources
 from app.services.music_bible_writer import parse_answer as parse_answer
 from app.services.project_kinds import KIND_EXPLAINER
 from app.services.text_limits import length_rule
@@ -58,6 +58,7 @@ LIMIT_NAMES: Final = {
 }
 
 _HASHTAG = re.compile(r"[A-Za-z0-9_]+")
+_LINK = re.compile(r"https?://", re.IGNORECASE)
 
 
 # --- The instructions ------------------------------------------------------------------------
@@ -85,7 +86,8 @@ THE DESCRIPTION
 program). It starts with one or two sentences that say what the video is about, because those \
 are what viewers see first, and then says a little more. Aim for under {description_target} \
 characters. Do not invent facts, links, credits, timestamps or calls to subscribe that the \
-inputs do not give.
+inputs do not give. Do not write any link, any list of sources or a "Sources" heading: when the \
+video has evidence, a program adds the sources with their links after your text.
 
 THE HASHTAGS
 - "hashtags" is a list of {min_tags} to {max_tags} words, each one word of letters, digits or \
@@ -366,6 +368,13 @@ def check_content(answer: dict[str, Any], *, min_hashtags: int = HASHTAGS_MIN_AI
         min_hashtags=min_hashtags,
         allow_empty_description=False,
     )
+    # Links come only from the program (`with_sources`). The owner's own edit may keep any link,
+    # so this is not in `check_fields`.
+    if _LINK.search(description):
+        raise ValueError(
+            "The description holds a link. Do not write links or a list of sources: a program "
+            "adds the sources after your text."
+        )
     tags = check_tags(
         answer.get("tags"),
         minimum=TAGS_MIN_AI,
@@ -373,3 +382,23 @@ def check_content(answer: dict[str, Any], *, min_hashtags: int = HASHTAGS_MIN_AI
         max_chars=TAGS_MAX_CHARS_AI,
     )
     return {"title": title, "description": description, "hashtags": hashtags, "tags": tags}
+
+
+def with_sources(content: dict[str, Any], entries: object) -> dict[str, Any]:
+    """The content with the Sources section added to the end of its description (before the
+    hashtags, which are added when the text is sent). The section takes only the bytes that are
+    left under YouTube's limit with the hashtags counted. `content` is returned as it is when there
+    are no entries or nothing fits. Raises ValueError if the result breaks a check, which the
+    budget should make impossible.
+    """
+    description = content["description"]
+    hashtags = content["hashtags"]
+    used = utf8_bytes(description_with_hashtags(description, hashtags))
+    # Two bytes for the empty line between the description and the section.
+    room = DESCRIPTION_MAX_BYTES - used - 2
+    section = youtube_sources.block(entries, room)
+    if not section:
+        return content
+    joined = f"{description}\n\n{section}"
+    check_fields(content["title"], joined, hashtags, min_hashtags=0, allow_empty_description=False)
+    return {**content, "description": joined}

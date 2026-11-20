@@ -10,7 +10,11 @@ carry `made_for_kids` and `synthetic_media`; they are ignored, and a missing `ta
 it is read and never stored:
 
     {"story_bible": {"id", "version"}, "script_sha256", "scenes": {"id", "version"} | None,
+     "evidence_review": {"id", "version"} | None,
      "render_id" | "render_job_id", "started_at_render"?, "feedback"?, "edited_from"?}
+
+`evidence_review` is the owner's newest review of the current evidence round, or None when evidence
+does not apply. The description's Sources section (`services/youtube_sources`) is made from it.
 
 A draft is written for a finished render (`render_id`) or, when it is started while the video is
 still being made (YTF-004), for the render job (`render_job_id`; the `render_id` column is then
@@ -51,6 +55,8 @@ from app.jobs import store
 from app.services import (
     caption_plan,
     discovery,
+    evidence_review,
+    evidence_rounds,
     provenance,
     story_bible,
     story_renders,
@@ -58,6 +64,7 @@ from app.services import (
     thumbnails,
     user_feedback,
     youtube_auth,
+    youtube_sources,
 )
 from app.services import youtube_draft_writer as writer
 
@@ -255,10 +262,32 @@ def _render_keys(target: _Target) -> dict[str, int]:
     return {"render_job_id": target.job.id}
 
 
+async def _evidence_review_row(session: AsyncSession, project: Project) -> Any:
+    """The newest evidence review of the newest round, or None. Also None when evidence does not
+    apply to the project or the claims changed since the round's brief (then the review no longer
+    describes the video, and no Sources section is written).
+    """
+    current = await evidence_rounds.state(session, project)
+    if not current.wanted or current.round is None or not current.current:
+        return None
+    return await evidence_review.latest_review(session, current.round.id)
+
+
+async def _evidence_sources(session: AsyncSession, project: Project) -> list[dict[str, Any]]:
+    """The accepted evidence of the project, as the entries of the Sources section. Empty when
+    evidence does not apply or nothing is accepted.
+    """
+    current = await evidence_rounds.state(session, project)
+    if not current.wanted or current.round is None or not current.current:
+        return []
+    return youtube_sources.entries_from_review(await evidence_review.view(session, project))
+
+
 def _saved_inputs(
     bible: Any,
     script: str,
     scenes: Any,
+    review: Any,
     target: _Target,
     feedback: user_feedback.Feedback | None,
     *,
@@ -268,6 +297,7 @@ def _saved_inputs(
         "story_bible": _record(bible),
         "script_sha256": story_bible.story_sha256(script),
         "scenes": _record(scenes),
+        "evidence_review": _record(review),
     }
     inputs.update(_render_keys(target))
     if started_at_render:
@@ -427,11 +457,13 @@ async def _queue_draft(
         duration_s=target.duration_s,
         short=writer.is_short(target.width, target.height, target.duration_s),
     )
+    review = await _evidence_review_row(session, project)
     job_input: dict[str, Any] = {
         **_render_keys(target),
         "context": context,
+        "sources": await _evidence_sources(session, project),
         "saved_inputs": _saved_inputs(
-            bible, script, scenes, target, note, started_at_render=started_at_render
+            bible, script, scenes, review, target, note, started_at_render=started_at_render
         ),
     }
     if note is not None:
@@ -650,6 +682,9 @@ async def out_of_date_reasons(
     scenes = await _scenes_row(session, project.id)
     if not _same_record(inputs.get("scenes"), scenes):
         reasons.append("The scenes were changed since this draft was made.")
+    review = await _evidence_review_row(session, project)
+    if not _same_record(inputs.get("evidence_review"), review):
+        reasons.append("The evidence review changed since this draft was made.")
     state, number = drafted_for(row, renders, rendering)
     reasons.extend(_render_reasons(state, number, selected))
     return reasons
