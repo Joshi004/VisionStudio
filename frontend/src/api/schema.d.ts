@@ -2797,7 +2797,7 @@ export interface paths {
         put?: never;
         /**
          * Create Run
-         * @description Makes a run from a line (1 to 300 characters), an orientation and, optionally, a saved
+         * @description Makes a run from a line (1 to 3,000 characters), an orientation and, optionally, a saved
          *     voice. No model is called. With a voice, its speech starts now (a GPU job).
          */
         post: operations["create_run_api_lab_graphics_runs_post"];
@@ -2859,7 +2859,7 @@ export interface paths {
         /**
          * Write Brief
          * @description Starts the paid call that writes the run's brief. Refused (409) while it is being written
-         *     or is written, and (422) for a line whose speech is longer than 15 s, before any call.
+         *     or is written, and (422) for a line whose speech is longer than 180 s, before any call.
          */
         post: operations["write_brief_api_lab_graphics_runs__run_id__brief_post"];
         delete?: never;
@@ -2968,7 +2968,7 @@ export interface paths {
         put?: never;
         /**
          * Render Test Card
-         * @description Renders the test card at an orientation and a length (72 to 360 frames) in the motion
+         * @description Renders the test card at an orientation and a length (72 to 4320 frames) in the motion
          *     service. Refused (409) while another test card is being rendered. Nothing is paid for.
          */
         post: operations["render_test_card_api_lab_graphics_test_cards_post"];

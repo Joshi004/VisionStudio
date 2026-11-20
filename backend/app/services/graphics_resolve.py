@@ -10,8 +10,8 @@ word of `graphics_brief_writer.line_words`. With a voice (GFX-004) the same shap
 Parakeet times, so `resolve` works for both.
 
 **Length.** The graphic starts with the speech and lasts until the end of the last word plus
-0.5 s, at least 3 s (72 frames) and at most 15 s (360 frames). A line whose speech would be
-longer than 15 s is refused before any call (`ensure_fits`).
+0.5 s, at least 3 s (72 frames) and at most 180 s (4320 frames). A line whose speech would be
+longer than 180 s is refused before any call (`ensure_fits`).
 
 **Beat frames.** A beat's frame is the frame of the first word of its phrase,
 `round(start_s x fps)`, at most the last frame. `resolve` finds the phrases again in the timing's
@@ -51,9 +51,9 @@ from app.services.graphics_brief_writer import (
 
 SOURCE_ESTIMATED: Final = "estimated"
 
-MAX_SPEECH_S: Final = 15.0
+MAX_SPEECH_S: Final = 180.0
 MIN_FRAMES: Final = 72
-MAX_FRAMES: Final = 360
+MAX_FRAMES: Final = 4320
 TAIL_S: Final = 0.5
 
 SAFE_MARGIN: Final = 0.05
@@ -147,7 +147,7 @@ def ensure_fits(timing: dict[str, Any]) -> None:
 
 def frames_of(timing: dict[str, Any], fps: int) -> int:
     """The number of frames of the graphic: the end of the last word plus the tail, kept between
-    3 s and 15 s.
+    3 s and 180 s.
     """
     last_end = max((float(word["end"]) for word in timing["words"]), default=0.0)
     return max(MIN_FRAMES, min(MAX_FRAMES, round((last_end + TAIL_S) * fps)))
