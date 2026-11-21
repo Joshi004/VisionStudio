@@ -3,7 +3,9 @@
 
 Every version is a new `evidence_claim_list` row and a stored row is never changed (the artifact
 provenance convention, DATABASE_STRUCTURE.md Section 2.1). `content` is `{next_id, claims}`, and
-a claim is `{id, origin, start, end, text, hint, kind_hint, reason, kept}` (Section 5).
+a claim is `{id, origin, start, end, text, hint, kind_hint, want, speaker, reason, kept}`
+(Section 5). `want` is `evidence` or `soundbite` (the owner's choice, SB-001) and `speaker` names
+who says a sound bite; a claim stored before they existed reads as `evidence` with no speaker.
 
 - `origin` `owner`: marked by the owner. `reason` is empty and `kept` is true.
 - `origin` `glm`: proposed by the model. `kept` is null until the owner keeps (true) or drops
@@ -51,6 +53,13 @@ ORIGIN_OWNER: Final = "owner"
 ORIGIN_GLM: Final = "glm"
 
 KINDS: Final = ("number", "quote", "statement", "event", "other")
+# What the owner wants for a claim: ordinary evidence, or a clip of the person saying the quote
+# (`Sound_bite_implementation_phases.md`, SB-3).
+WANT_EVIDENCE: Final = "evidence"
+WANT_SOUNDBITE: Final = "soundbite"
+WANTS: Final = (WANT_EVIDENCE, WANT_SOUNDBITE)
+# The longest name an owner may give for who says a sound bite.
+SPEAKER_MAX_CHARS: Final = 100
 # The longest note an owner may add to a claim.
 HINT_MAX_CHARS: Final = 300
 # The most claims the owner may mark in one project.
@@ -64,9 +73,13 @@ _CLAIM_FIELDS: Final = (
     "text",
     "hint",
     "kind_hint",
+    "want",
+    "speaker",
     "reason",
     "kept",
 )
+# What a claim stored before sound bites reads as.
+_CLAIM_DEFAULTS: Final = {"want": WANT_EVIDENCE, "speaker": None}
 
 OFF_MESSAGE: Final = (
     "Evidence is only for an explainer with a continuous voice and evidence switched on, and "
@@ -146,7 +159,8 @@ def reanchor_claims(script: str | None, claims: Sequence[dict[str, Any]]) -> lis
     found: list[dict[str, Any]] = []
     taken: list[tuple[int, int]] = []
     order = sorted(claims, key=lambda claim: (claim["origin"] != ORIGIN_OWNER, claim["start"]))
-    for claim in order:
+    for stored in order:
+        claim = {**_CLAIM_DEFAULTS, **stored}
         placed = {key: claim[key] for key in _CLAIM_FIELDS}
         start, end, text = claim["start"], claim["end"], claim["text"]
         ok = False
@@ -184,6 +198,21 @@ def _clean_hint(hint: str) -> str:
     if len(cleaned) > HINT_MAX_CHARS:
         raise EvidenceClaimsError(f"A note can be at most {HINT_MAX_CHARS} characters.")
     return cleaned
+
+
+def is_soundbite(claim: dict[str, Any]) -> bool:
+    """Whether the owner chose a sound bite for the claim."""
+    return claim.get("want", WANT_EVIDENCE) == WANT_SOUNDBITE
+
+
+def _clean_speaker(speaker: str) -> str | None:
+    """The speaker's name as one line of plain text, or None when it is empty."""
+    cleaned = " ".join(speaker.split())
+    if len(cleaned) > SPEAKER_MAX_CHARS:
+        raise EvidenceClaimsError(
+            f"A speaker's name can be at most {SPEAKER_MAX_CHARS} characters."
+        )
+    return cleaned or None
 
 
 def _check_kind(kind: str) -> str:
@@ -368,6 +397,8 @@ async def add_mark(
             "text": script[start:end],
             "hint": _clean_hint(hint),
             "kind_hint": kind,
+            "want": WANT_EVIDENCE,
+            "speaker": None,
             "reason": "",
             "kept": True,
         }
@@ -380,6 +411,30 @@ async def add_mark(
     )
 
 
+def _apply_want(
+    claim: dict[str, Any], changed: dict[str, Any], want: str | None, speaker: str | None
+) -> None:
+    """Sets `want` and `speaker` on `changed` by the rules of a sound bite. Raises
+    EvidenceClaimsError.
+    """
+    if want is not None and want not in WANTS:
+        raise EvidenceClaimsError(f"What is wanted must be one of: {', '.join(WANTS)}.")
+    new_want = want if want is not None else claim["want"]
+    new_speaker = _clean_speaker(speaker) if speaker is not None else claim["speaker"]
+    if new_want == WANT_EVIDENCE:
+        if speaker is not None and new_speaker is not None:
+            raise EvidenceClaimsError("Only a sound bite has a speaker. Choose sound bite first.")
+        changed["want"], changed["speaker"] = WANT_EVIDENCE, None
+        return
+    if changed["kept"] is False or claim["words_changed"]:
+        raise EvidenceClaimsError(
+            "A sound bite needs a claim that is kept and whose words are still in the story."
+        )
+    if new_speaker is None:
+        raise EvidenceClaimsError("Say who speaks the quote before choosing a sound bite.")
+    changed["want"], changed["speaker"] = WANT_SOUNDBITE, new_speaker
+
+
 async def update_claim(
     session: AsyncSession,
     project: Project,
@@ -388,11 +443,15 @@ async def update_claim(
     hint: str | None = None,
     kind_hint: str | None = None,
     kept: bool | None = None,
+    want: str | None = None,
+    speaker: str | None = None,
 ) -> None:
-    """Changes a claim's note, kind, or (for a proposal of the model) whether it is kept, as a
-    new `manual` version, and commits. A value left as None is not changed, and nothing is
-    stored when nothing changes. Raises EvidenceClaimsError (ClaimNotFoundError for an unknown
-    claim).
+    """Changes a claim's note, kind, `want` and `speaker` (SB-001), or (for a proposal of the
+    model) whether it is kept, as a new `manual` version, and commits. A sound bite needs a
+    speaker and a claim that counts. Choosing `evidence` clears the speaker, and a speaker
+    for a claim that is not a sound bite is refused. A value left as None is not changed, and
+    nothing is stored when nothing changes. Raises EvidenceClaimsError (ClaimNotFoundError for an
+    unknown claim).
     """
     editing = await _load_for_edit(session, project)
     claim = next((c for c in editing.claims if c["id"] == claim_id), None)
@@ -415,6 +474,8 @@ async def update_claim(
             if _overlaps(claim["start"], claim["end"], others):
                 raise EvidenceClaimsError("Those words overlap another claim.")
         changed["kept"] = kept
+    if want is not None or speaker is not None:
+        _apply_want(claim, changed, want, speaker)
     if all(changed[key] == claim[key] for key in _CLAIM_FIELDS):
         return
     claims = [changed if c["id"] == claim_id else c for c in editing.claims]
@@ -511,6 +572,8 @@ async def save_ai_version(
                 "text": proposal["text"],
                 "hint": "",
                 "kind_hint": proposal["kind_hint"],
+                "want": WANT_EVIDENCE,
+                "speaker": None,
                 "reason": proposal["reason"],
                 "kept": None,
             }

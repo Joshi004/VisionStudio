@@ -167,7 +167,7 @@ One field is added to each claim, and the version goes to 2 so the skill knows t
 
 - `want` is `evidence` (today's behaviour) or `soundbite`. A sound bite claim may also get web or PDF evidence; the agent is told to look for the clip first.
 - `speaker` is the owner's name for who says the quote (required for a sound bite).
-- The capture tool and the import accept version 1 and version 2.
+- The capture tool and the import accept version 1 and version 2. (The tool does since SB-001; the import reads no brief version, so it needs no change.)
 
 ### 4.5 The result for a clip (`kind: "video"`)
 
@@ -271,7 +271,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 | Id | Title | Kind | Hard dependencies | Status |
 |----|-------|------|-------------------|--------|
-| SB-001 | Tables, contracts and job type | Code | — | Not Started |
+| SB-001 | Tables, contracts and job type | Code | — | Completed (2026-11-21) |
 | SB-002 | One time mapping for every consumer | Code | — | Not Started |
 | SB-003 | The capture tool's `video` command | Code (Mac) | — | Not Started |
 | SB-004 | The research skill for sound bites | Code (Mac) | SB-003 | Not Started |
@@ -292,7 +292,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 0 completed.
+**Progress snapshot:** 1 completed (SB-001).
 
 ---
 
@@ -300,7 +300,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-001 — Tables, contracts and job type
 
-**Status:** Not Started
+**Status:** Completed (2026-11-21)
 
 **Objective.** Create, in one migration, everything sound bites store, and fix the brief's version 2.
 
@@ -326,13 +326,24 @@ Planning in SB-001 decides the names. The feature needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Migration and models
-- [ ] Claim fields and brief version 2
-- [ ] Job type registered
-- [ ] `DATABASE_STRUCTURE.md`
-- [ ] Standard checks
+- [x] Migration and models
+- [x] Claim fields and brief version 2
+- [x] Job type registered
+- [x] `DATABASE_STRUCTURE.md`
+- [x] Standard checks
+- [ ] Owner: real app rebuilt (`docker compose up --build -d`) so `0100` is applied there. The agent did not touch the real app or its database.
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-21).
+- **Migration `0100`** (`0100_sound_bites.py`, revises `0099`). `job` is rebuilt for the new CHECK, as in `0098`. Downgrade deletes `evidence_clip` rows of purpose `soundbite` or of a `video` item, then the `video` items, then the jobs of the new type; files in `media/` stay.
+- **`evidence_item`** (`kind` CHECK now allows `video`). New nullable columns: `video_path`, `video_sha256` (the downloaded window), `captions_path`, `captions_sha256` (YouTube's caption track; the captions' plain text reuses `text_path` and `text_sha256`), `heard_words` (JSON `{text, words: [{text, start, end}]}`, seconds from the start of the window; **in a column, not a file**), `fidelity` (`exact`, `near`, `paraphrase`, `mismatch`; CHECK `ck_evidence_item_fidelity_valid`), `proposed_trim` (JSON `{in_s, out_s, in_clean, out_clean}`), `flags` (JSON `[{code, message}]`, kept apart from `warnings` because each must be acknowledged) and `transcribe_job_id` (FK to `job.id`, `ON DELETE SET NULL`). The transcription results are columns on the item, filled in later by the job (owner's choice at planning). Nothing writes them yet.
+- **`evidence_clip.purpose`** may be `soundbite`.
+- **Job type `transcribe_evidence_clip`** (a GPU job). In the `job.type` CHECK, `JobType` in `api/jobs.py` and the label "Sound bite transcription" in `jobFormat.ts`; **no handler and no `JOB_TYPE` constant**: SB-006 writes both, sets the restart rule and documents its input and output.
+- **Owner's review decisions:** no column. SB-007 adds an optional `soundbite` object to an `items` entry of `evidence_review.content`; the shape is in `DATABASE_STRUCTURE.md` Section 5.
+- **Claims** (`services/evidence_claims.py`): `want` (`WANT_EVIDENCE`, `WANT_SOUNDBITE`, `WANTS`) and `speaker` (`SPEAKER_MAX_CHARS` 100) are in `_CLAIM_FIELDS`. A claim stored before the migration has neither key and reads as `evidence` with no speaker (`_CLAIM_DEFAULTS`, applied in `reanchor_claims`); every new version stores both. `is_soundbite(claim)` is the check other code should use. `update_claim(..., want, speaker)` (and `PATCH .../evidence-claims/{claim_id}` with `want` and `speaker`): a sound bite needs a speaker and a claim that is kept and whose words are still in the story; `evidence` clears the speaker; a speaker for a claim that is not a sound bite is refused (422). A new mark and a GLM proposal are always `evidence`. **The rule "whole sentences in quotation marks" is not checked here: SB-005 adds it.**
+- **Brief** (`services/evidence_rounds.py`): `BRIEF_VERSION_PLAIN` 1 and `BRIEF_VERSION_SOUNDBITE` 2 replace `BRIEF_VERSION`. When any claim that counts is a sound bite, the brief is version 2 and every entry also has `want` and `speaker` after `kind_hint`; otherwise it is version 1, byte for byte as before. `claim_keys` includes `want` and `speaker`, so changing either (or turning the last sound bite back to evidence) makes the newest round out of date. `jobs/write_evidence_brief.py` needed no change.
+- **Capture tool** accepts briefs of version 1 and 2 (`BRIEF_VERSIONS` in `tools/evidence-capture`); anything else is refused. `TOOL_VERSION` is unchanged. The `video` command and the use of `want` and `speaker` are SB-003's.
+- **Checked** on throwaway databases (2026-11-21): upgrade, downgrade to `0099` and upgrade again; `alembic check` shows no difference for the evidence tables or `job` (it still lists the older FLOAT/REAL differences of other tables, which are not from this phase). A brief for claims without a sound bite has the same SHA-256 as the one made by the code at `HEAD` (old claims without the new keys, and new claims with `want` `evidence`). Through the API: a sound bite without a speaker, with a blank speaker, on a dropped proposal, or with a speaker on an `evidence` claim gives 422; with a speaker it is stored; `evidence` clears it; claims stored without the new keys read correctly. `make_round` wrote a version 2 brief, the round was current, and a changed speaker made it out of date. The capture tool's `validate` accepts a version 2 and a version 1 round and refuses version 3. `ruff`, `eslint` and `tsc` pass; `schema.d.ts` was regenerated (from the app's own OpenAPI document, not a running server) and differs only by `want`, `speaker` and one description.
+- **Not done by the agent:** the real app was not rebuilt, so `0100` is not yet applied to the real database (the owner rebuilds when no job is running; never `down -v`).
 
 ### SB-002 — One time mapping for every consumer
 
@@ -712,3 +723,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | Date | Phase | Change |
 |------|-------|--------|
 | 2026-11-21 | — | Document written. |
+| 2026-11-21 | SB-001 | Completed: migration `0100`, claim `want` and `speaker`, brief version 2, job type `transcribe_evidence_clip` (no handler), capture tool accepts brief versions 1 and 2. |

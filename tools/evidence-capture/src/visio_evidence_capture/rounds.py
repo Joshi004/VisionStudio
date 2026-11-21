@@ -17,7 +17,7 @@ from typing import Any, Final
 
 from . import (
     BRIEF_SCHEMA,
-    BRIEF_VERSION,
+    BRIEF_VERSIONS,
     KINDS,
     RELATIONS,
     RESULT_SCHEMA,
@@ -198,9 +198,9 @@ class Round:
         if (
             not isinstance(brief, dict)
             or brief.get("schema") != BRIEF_SCHEMA
-            or brief.get("version") != BRIEF_VERSION
+            or brief.get("version") not in BRIEF_VERSIONS
         ):
-            raise Refused("brief/claims.json is not a version 1 evidence brief.")
+            raise Refused("brief/claims.json is not a version 1 or 2 evidence brief.")
         claims = brief.get("claims")
         project = brief.get("project")
         if (

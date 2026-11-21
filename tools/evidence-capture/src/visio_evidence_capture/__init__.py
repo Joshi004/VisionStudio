@@ -12,7 +12,9 @@ TOOL_VERSION: Final = "1"
 RESULT_SCHEMA: Final = "visio.evidence.result"
 RESULT_VERSION: Final = 1
 BRIEF_SCHEMA: Final = "visio.evidence.brief"
-BRIEF_VERSION: Final = 1
+# Version 2 (SB-001) adds `want` and `speaker` to each claim. The `video` command that reads
+# them is SB-003.
+BRIEF_VERSIONS: Final = (1, 2)
 
 # Limits. The import (EVD-006) applies its own limits to what it finds.
 PAGE_LOAD_TIMEOUT_S: Final = 30

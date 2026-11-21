@@ -5,7 +5,8 @@
   project has claims at all. Marks that moved with an edit of the story, and claims whose words
   are gone (`words_changed`), are worked out on every read.
 - `POST .../marks` marks words of the saved story as a claim, with an optional note and kind.
-- `PATCH .../{claim_id}` changes a claim's note or kind, or keeps or drops a proposal of GLM.
+- `PATCH .../{claim_id}` changes a claim's note, kind, `want` or `speaker`, or keeps or drops a
+  proposal of GLM.
 - `DELETE .../{claim_id}` removes one of the owner's marks.
 - `POST .../suggest` starts the `suggest_evidence_claims` job: one model call proposes more claims.
 
@@ -47,6 +48,7 @@ _INVALID = {
 
 Origin = Literal["owner", "glm"]
 Kind = Literal["number", "quote", "statement", "event", "other"]
+Want = Literal["evidence", "soundbite"]
 
 
 # --- What the claims hold --------------------------------------------------------------------
@@ -61,6 +63,10 @@ class EvidenceClaimOut(BaseModel):
     text: str
     hint: str
     kind_hint: Kind
+    # `soundbite` when the owner wants a clip of the person saying the quote (SB-001).
+    want: Want
+    # Who says a sound bite; null for any other claim.
+    speaker: str | None
     # GLM's reason; empty for the owner's marks.
     reason: str
     # True for the owner's marks. For a proposal: null until the owner decides, then true (kept)
@@ -119,6 +125,9 @@ class EvidenceClaimEditIn(BaseModel):
     kind_hint: Kind | None = None
     # Only for a proposal of GLM.
     kept: StrictBool | None = None
+    # Left out: not changed. A sound bite needs a speaker; choosing "evidence" clears it.
+    want: Want | None = None
+    speaker: StrictStr | None = Field(default=None, max_length=300)
 
 
 # --- Mapping ---------------------------------------------------------------------------------
@@ -221,7 +230,7 @@ async def edit_evidence_claim(
     body: EvidenceClaimEditIn,
     session: SessionDep,
 ) -> EvidenceClaimsState:
-    """Changes a claim's note or kind, or keeps or drops a proposal of GLM."""
+    """Changes a claim's note, kind, `want` or `speaker`, or keeps or drops a proposal of GLM."""
     project = await load_project(session, project_id)
     try:
         await claims_service.update_claim(
@@ -231,6 +240,8 @@ async def edit_evidence_claim(
             hint=body.hint,
             kind_hint=body.kind_hint,
             kept=body.kept,
+            want=body.want,
+            speaker=body.speaker,
         )
     except claims_service.EvidenceClaimsError as exc:
         raise _refusal(exc) from exc

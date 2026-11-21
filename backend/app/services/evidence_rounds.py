@@ -16,8 +16,9 @@ alone: the newest round is the evidence, and earlier rounds stay as records.
 **The `evidence` pipeline step** waits on the owner, not on a job: `awaiting_text` is what the
 owner has to do next, or None. The step is done when the claims that count are empty, or when the
 newest round has exactly the claims that count now and is reviewed. A claim that is not as the
-round brief says (its id, origin, words, sentence, note or kind) makes the round out of date; the
-sentences around it do not, so an edit elsewhere in the story forces no new round.
+round brief says (its id, origin, words, sentence, note, kind, or for a sound bite its `want` and
+`speaker`) makes the round out of date; the sentences around it do not, so an edit elsewhere
+in the story forces no new round.
 
 Claims are read through `evidence_claims.state()`, never straight from a row (EVD-002): a claim
 whose words changed in the story is unusable.
@@ -56,7 +57,10 @@ from app.services.storage import FILES_MARKER, StorageError
 JOB_TYPE: Final = "write_evidence_brief"
 
 BRIEF_SCHEMA: Final = "visio.evidence.brief"
-BRIEF_VERSION: Final = 1
+# Version 1 is the brief of a round with no sound bite; version 2 (SB-001) is written when any
+# claim is a sound bite, and then every entry also says `want` and `speaker`.
+BRIEF_VERSION_PLAIN: Final = 1
+BRIEF_VERSION_SOUNDBITE: Final = 2
 # What the agent may keep for one claim (§4.4 `rules`). Domain lists are for a later phase.
 MAX_EVIDENCE_PER_CLAIM: Final = 3
 
@@ -112,6 +116,9 @@ def brief_claims(script: str, claims: Sequence[dict[str, Any]]) -> list[dict[str
     """
     spans = sentence_spans(script)
     entries: list[dict[str, Any]] = []
+    # Only a round with a sound bite says `want` and `speaker`, so every other brief stays as it
+    # was before sound bites.
+    with_want = any(evidence_claims.is_soundbite(claim) for claim in claims)
     for claim in sorted(claims, key=lambda item: item["start"]):
         start, end = claim["start"], claim["end"]
         first = next((i for i, (_, stop) in enumerate(spans) if stop > start), len(spans) - 1)
@@ -126,17 +133,19 @@ def brief_claims(script: str, claims: Sequence[dict[str, Any]]) -> list[dict[str
             for index in (first - 1, last + 1)
             if 0 <= index < len(spans)
         ]
-        entries.append(
-            {
-                "id": claim["id"],
-                "origin": claim["origin"],
-                "text": claim["text"],
-                "sentence": _one_line(sentence),
-                "context": _one_line(" ".join(around)),
-                "hint": claim["hint"],
-                "kind_hint": claim["kind_hint"],
-            }
-        )
+        entry = {
+            "id": claim["id"],
+            "origin": claim["origin"],
+            "text": claim["text"],
+            "sentence": _one_line(sentence),
+            "context": _one_line(" ".join(around)),
+            "hint": claim["hint"],
+            "kind_hint": claim["kind_hint"],
+        }
+        if with_want:
+            entry["want"] = claim.get("want", evidence_claims.WANT_EVIDENCE)
+            entry["speaker"] = claim.get("speaker")
+        entries.append(entry)
     return entries
 
 
@@ -152,7 +161,16 @@ def claim_keys(entries: Sequence[dict[str, Any]]) -> list[tuple[Any, ...]]:
         keys.append(
             tuple(
                 entry.get(name)
-                for name in ("id", "origin", "text", "sentence", "hint", "kind_hint")
+                for name in (
+                    "id",
+                    "origin",
+                    "text",
+                    "sentence",
+                    "hint",
+                    "kind_hint",
+                    "want",
+                    "speaker",
+                )
             )
         )
     return keys
@@ -203,10 +221,17 @@ def build_brief(
     today: str,
     entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """`brief/claims.json` exactly as §4.4 states it. Pure."""
+    """`brief/claims.json` exactly as §4.4 states it. Pure. The version is 2 when the entries
+    carry `want` (a round with a sound bite) and 1 otherwise.
+    """
+    version = (
+        BRIEF_VERSION_SOUNDBITE
+        if any("want" in entry for entry in entries)
+        else BRIEF_VERSION_PLAIN
+    )
     return {
         "schema": BRIEF_SCHEMA,
-        "version": BRIEF_VERSION,
+        "version": version,
         "round_id": round_id,
         "project": {
             "id": project_id,

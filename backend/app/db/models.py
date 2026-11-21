@@ -190,7 +190,8 @@ class Job(Base):
         # of one scene, since revision 0085, and the writing of thumbnail concepts, since
         # revision 0086, and the writing of the callout look, since revision 0089, and the two
         # callout component jobs, since revision 0090, and the two YouTube jobs, since revision
-        # 0096, and the four evidence jobs, since revision 0098.
+        # 0096, and the four evidence jobs, since revision 0098, and the transcription of a
+        # sound bite clip, since revision 0100.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -219,7 +220,7 @@ class Job(Base):
             "'splice_voice_recording', 'write_chat_reply', "
             "'write_youtube_draft', 'publish_youtube', "
             "'suggest_evidence_claims', 'write_evidence_brief', 'import_evidence', "
-            "'render_evidence_clip')",
+            "'render_evidence_clip', 'transcribe_evidence_clip')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -3474,8 +3475,10 @@ class EvidenceClaimList(Base):
     keep or drop choices and `ai` for GLM's proposals (`job_id` is that job). `inputs` holds the
     hash of the script the version was made against and the version it was based on, so "out of
     date" is worked out on read. `content` is `{next_id, claims}`; a claim is `{id, origin,
-    start, end, text, hint, kind_hint, reason, kept}`. `origin` is `owner` or `glm`, and `kept`
-    is true for an owner's claim and NULL for a GLM proposal the owner has not decided on.
+    start, end, text, hint, kind_hint, want, speaker, reason, kept}`. `origin` is `owner` or
+    `glm`, and `kept` is true for an owner's claim and NULL for a GLM proposal the owner has not
+    decided on. `want` is `evidence` or `soundbite` and `speaker` names who says a sound bite
+    (SB-001); a claim stored before that has neither key and reads as `evidence` and no speaker.
     """
 
     __tablename__ = "evidence_claim_list"
@@ -3561,12 +3564,18 @@ class EvidenceItem(Base):
     decisions refer to it, not to the row id). `kind`, `relation` and `source_tier` are NULL when
     the agent wrote a value the contract does not allow; such an item is stored with
     `usable` false and its reasons in `checks`. The file columns hold paths relative to the media
-    folder, each with its SHA-256, and are NULL for a file that was not copied.
+    folder, each with its SHA-256, and are NULL for a file that was not copied. A `video` piece
+    (SB-001, revision 0100) also has the columns from `video_path` to `transcribe_job_id`; the
+    captions' plain text is in `text_path`.
     """
 
     __tablename__ = "evidence_item"
     __table_args__ = (
-        CheckConstraint("kind IS NULL OR kind IN ('web', 'pdf')", name="kind_valid"),
+        CheckConstraint("kind IS NULL OR kind IN ('web', 'pdf', 'video')", name="kind_valid"),
+        CheckConstraint(
+            "fidelity IS NULL OR fidelity IN ('exact', 'near', 'paraphrase', 'mismatch')",
+            name="fidelity_valid",
+        ),
         CheckConstraint(
             "relation IS NULL OR relation IN "
             "('supports', 'partly_supports', 'contradicts', 'context')",
@@ -3603,6 +3612,24 @@ class EvidenceItem(Base):
     text_sha256: Mapped[str | None] = mapped_column(default=None)
     pdf_path: Mapped[str | None] = mapped_column(default=None)
     pdf_sha256: Mapped[str | None] = mapped_column(default=None)
+    # Sound bites (SB-001, revision 0100). The downloaded window of a `video` piece and YouTube's
+    # caption track, with their hashes.
+    video_path: Mapped[str | None] = mapped_column(default=None)
+    video_sha256: Mapped[str | None] = mapped_column(default=None)
+    captions_path: Mapped[str | None] = mapped_column(default=None)
+    captions_sha256: Mapped[str | None] = mapped_column(default=None)
+    # `{text, words: [{text, start, end}]}`, seconds from the start of the window. Filled in by
+    # the transcription job (SB-006).
+    heard_words: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # `exact`, `near`, `paraphrase` or `mismatch`.
+    fidelity: Mapped[str | None] = mapped_column(default=None)
+    # `{in_s, out_s, in_clean, out_clean}`.
+    proposed_trim: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # `[{code, message}]`: what the owner must acknowledge before accepting the clip.
+    flags: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    transcribe_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
     usable: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     checks: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
@@ -3641,7 +3668,8 @@ class EvidenceClip(Base):
 
     `purpose` is `preview` (from the review screen, with no scene or shot), `shot` (the clip of
     an evidence shot at its exact length) or `card` (EVD-011, revision 0099: a transparent clip
-    laid over a presenter or B-roll shot; `shot_id` is the first shot it covers).
+    laid over a presenter or B-roll shot; `shot_id` is the first shot it covers) or `soundbite`
+    (SB-001, revision 0100: the trimmed, gain-matched clip of a sound bite and its overlay).
     `inputs.items` is the ordered list of the pieces the
     clip shows; `item_id` is set when it shows exactly one. The row is made when its render is
     queued, so the video columns are NULL until the render has written them, like `ShotGraphic`.
@@ -3649,7 +3677,9 @@ class EvidenceClip(Base):
 
     __tablename__ = "evidence_clip"
     __table_args__ = (
-        CheckConstraint("purpose IN ('preview', 'shot', 'card')", name="purpose_valid"),
+        CheckConstraint(
+            "purpose IN ('preview', 'shot', 'card', 'soundbite')", name="purpose_valid"
+        ),
         Index("idx_evidence_clip_project_scene", "project_id", "scene_id"),
         Index("idx_evidence_clip_item", "item_id"),
     )

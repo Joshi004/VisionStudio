@@ -76,6 +76,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_evidence_brief: "Evidence brief",
   import_evidence: "Evidence import",
   render_evidence_clip: "Evidence clip",
+  transcribe_evidence_clip: "Sound bite transcription",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

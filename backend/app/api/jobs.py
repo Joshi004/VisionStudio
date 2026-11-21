@@ -105,6 +105,7 @@ JobType = Literal[
     "write_evidence_brief",
     "import_evidence",
     "render_evidence_clip",
+    "transcribe_evidence_clip",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
