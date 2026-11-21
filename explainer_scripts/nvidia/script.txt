@@ -1,0 +1,115 @@
+In October 2026, one company was worth almost six trillion dollars. It was the first company in history to cross four trillion, and then five trillion. Microsoft, Google, Amazon and Meta were all lining up at its door, begging to buy what it makes.
+
+That company is Nvidia.
+
+And here is the strange part. For most of its life, Nvidia made chips for video games. It started with three engineers in a roadside restaurant, and a first product that failed. Twice, it came very close to dying. And about a month after its biggest high, its founder, the only boss Nvidia had ever known, was suddenly gone.
+
+So how did a company that made graphics cards for gamers end up powering the entire AI revolution? Intel had far more money. AMD had similar chips. Dozens of other companies started at the same time. What did Nvidia do that all of them didn't?
+
+The answer is not one genius idea. It is a handful of very uncomfortable decisions, the kind most companies are too scared to make.
+
+To understand Nvidia, you first have to understand the man who ran it for thirty-three years. Jensen Huang.
+
+Jensen was born in Taiwan in 1963. When he was around nine, his parents sent him and his older brother to America, alone, because they felt it was safer for the kids. A relative put the boys in what he thought was a good boarding school in Kentucky. It turned out to be a school for troubled kids. Every student had a job, and nine-year-old Jensen's job was cleaning the toilets. He was small, his English was weak, and older boys bullied him. He just held on.
+
+Later, the family came together again in Oregon. At fifteen, Jensen got his first job at a restaurant chain called Denny's. He washed dishes, then cleared tables, then became a waiter. Years later he joked, "I used to be a dishwasher here. But I worked hard! Like, really hard. So I got to be a busboy."
+
+Remember that idea of hard work and suffering. It keeps coming back in this story.
+
+Jensen became a chip designer, and there he met two engineers, Chris Malachowsky and Curtis Priem. In 1993, the three of them sat down in a Denny's in San Jose and planned a company. Why Denny's? In Jensen's words, "It had all the coffee you could drink and no one could kick you out."
+
+Their idea was simple. Computers back then were slow at drawing pictures. Video games were starting to go 3D, and someone needed to build a special chip just for graphics. They named the company Nvidia, after invidia, the Latin word for envy. They wanted their rivals to be green with envy.
+
+But their first chip was a disaster. It came out in 1995, and Nvidia had bet on its own special way of drawing 3D shapes, using curved surfaces. Then Microsoft, whose software ran on almost every computer in the world, decided the whole industry would draw 3D using triangles instead. Suddenly, Nvidia's chip was built for a world that did not exist. Nvidia actually lost money on every chip it sold.
+
+It got worse. Nvidia was also building a chip for Sega's next game console, using the same wrong design. As Jensen later put it, "we would finish the project and die, or not finish the project and die right away."
+
+So he did something most CEOs would never do. He went to Sega's president and told him the truth. Nvidia could not deliver. Sega should find another partner. And then he asked Sega to pay Nvidia anyway.
+
+Incredibly, Sega agreed. It gave Nvidia about five million dollars. "It was all the money that we had," Jensen said. Decades later, the Sega boss, Shoichiro Irimajiri, explained why: "I came to like Jensen Huang's character, and bet everything on him."
+
+Even then, Jensen had to let go of at least half his people. Nvidia had one last shot, and only a few months of cash.
+
+Normally, when you design a chip, you make a test version at the factory, find the mistakes, fix them, and make it again. That takes many months and a lot of money. Nvidia had neither. So Jensen spent a big part of the company's remaining cash on a giant machine that could pretend to be the chip, so the team could test everything before building anything. It was so big they pushed the ping pong table out of the break room to make space for it.
+
+The logic was simple. If you can only make the chip once, it has to be perfect. "We get one shot," Jensen told his team.
+
+The chip was called RIVA 128, and it came out in August 1997. It worked. In about four months, Nvidia sold more than a million of them. Its yearly sales jumped from about four million dollars to twenty-nine million. Nvidia had come back from the dead.
+
+But it was close. By one account, when that chip shipped, Nvidia had just one month of salary money left. For years after that, Jensen opened his staff meetings with the same sentence: "Our company is thirty days from going out of business." Decades later, he said the feeling never changed.
+
+In 1999, Nvidia went public and launched a chip it called the world's first GPU, a graphics processing unit. In simple words, a chip whose whole job is to draw pictures, so the computer's main brain doesn't have to.
+
+At that time, the king of gaming graphics was a company called 3dfx. So how did a small company that had nearly died beat the king?
+
+Here is the first thing Nvidia did differently. 3dfx bought a company that made graphics cards, so it could build the whole card by itself. Sounds smart, right? But that turned all the card makers who used to buy 3dfx chips into its competitors. So they went to Nvidia instead. Nvidia never competed with its own customers. It sold to everyone.
+
+The second thing was speed. A new chip took about a year and a half to design. So Jensen split his engineers into three teams working side by side, and Nvidia brought out a new, faster chip every six months. 3dfx kept chasing perfection, and its chips kept arriving late. By the end of 2000, 3dfx was finished, and Nvidia bought what was left of it.
+
+By the mid 2000s, Nvidia was doing well. This is the point where most companies play it safe. Instead, Jensen made the biggest bet of his life.
+
+To understand it, think of the main processor in your computer as a brilliant professor. It can solve almost any problem, but it works on one problem at a time. A graphics chip is like a stadium full of thousands of school kids, and each kid only knows simple maths. Give them one very hard problem, and they are stuck. But give them a million simple sums, and they finish before the professor has even picked up his pencil.
+
+Drawing a video game is exactly that kind of work. Millions of tiny dots on the screen, each one coloured again, sixty times every second.
+
+A few scientists noticed that this same power could be used for things like medical scans, weather and physics. But using a gaming chip for science was a nightmare. One Stanford researcher, Ian Buck, said it "required a PhD in computer graphics." Nvidia hired him. And in November 2006, Nvidia launched something called CUDA.
+
+In simple words, CUDA was a free tool that let any programmer use a graphics chip for maths, without being a graphics expert. Flip a switch, and a video game card becomes a low-budget supercomputer.
+
+Now here is the crazy part. Jensen did not put CUDA only on expensive professional chips. He put it on every chip, including the cheap gaming cards teenagers bought. By his own estimate, that made each chip about fifty percent more expensive to build, at a time when Nvidia was not making much on each chip anyway. In his words, the gaming cards "would carry the burden of CUDA, and none of the gamers would appreciate it." For years, every gamer who bought an Nvidia card was quietly paying a hidden tax for a future nobody could see.
+
+And for a long time, that future did not show up. Wall Street hated CUDA. Why was a gaming chip company spending so much on a tool hardly anyone used?
+
+Then came 2008. Nvidia admitted that some of its laptop chips were faulty, and paid almost two hundred million dollars to deal with it. The stock fell thirty percent in one day. Then the global financial crisis hit. By late 2008, a company worth about nineteen billion dollars a year earlier was worth around four billion.
+
+Most CEOs would have killed the expensive experiment right there. Jensen did not. Nvidia kept raising its research spending, paid universities to teach CUDA, and gave chips to scientists. Even so, after 2009, CUDA downloads fell for three years in a row.
+
+And Nvidia was not perfect either. In 2009, Geoffrey Hinton, one of the godfathers of modern AI, emailed Nvidia. He said he had just told a thousand AI researchers to go and buy Nvidia cards, and asked for one free card. Nvidia said no. Remember that.
+
+In 2012, two of Hinton's students in Toronto, Alex Krizhevsky and Ilya Sutskever, entered a famous competition where computers had to recognise what is in a photo. A dog, a car, a cup of tea. To train their AI, they bought two ordinary Nvidia gaming cards from Amazon. Hinton later remembered the cards whirring away in Alex's bedroom, and joked that Alex's parents paid the huge electricity bill.
+
+Their program, called AlexNet, did not just win. It crushed everyone. The second-best team got about one in four answers wrong. AlexNet got fewer than one in six wrong. Hinton called it a kind of Big Bang moment. Sutskever said GPUs showed up, "and it felt like a miracle."
+
+But why Nvidia chips? Hinton answered that too. Doing it without CUDA, he said, "would have just been too much trouble." The tool Wall Street had laughed at for six years was the one thing that made it easy.
+
+Jensen saw what this meant. Around 2013, one Friday evening, he emailed the whole company. From now on, everything was about deep learning, the kind of AI that AlexNet used. One Nvidia vice president remembers: "By Monday morning, we were an A.I. company. Literally, it was that fast."
+
+In 2016, Nvidia built a machine made just for AI. It cost one hundred and twenty-nine thousand dollars. And Jensen personally delivered the very first one to a small non-profit lab, with a handwritten note: "To the future of computing and humanity."
+
+That lab was OpenAI.
+
+So in 2009, Nvidia refused to send Geoffrey Hinton one free gaming card. Seven years later, its CEO was hand-delivering an AI supercomputer to OpenAI.
+
+Jensen made one more quiet move. AI was getting so big that you needed thousands of chips working together as one giant computer. So in 2019, Nvidia beat Intel to buy Mellanox, a company that made the super-fast networking that connects computers, for about seven billion dollars. Now Nvidia did not just sell the engine. It could sell the whole car.
+
+And then, on November 30, 2022, OpenAI released ChatGPT.
+
+Within months, every big company in the world wanted its own AI. And building AI needs huge numbers of one thing above all: Nvidia chips. A single top Nvidia AI chip was estimated to cost twenty to forty thousand dollars, and buyers waited in line. Oracle founder Larry Ellison described a dinner with Elon Musk and Jensen as "me and Elon begging Jensen for GPUs. Please take our money; no, take more of it."
+
+At the end of 2022, Nvidia was worth about three hundred and sixty billion dollars. By May 2023, it crossed one trillion. In June 2024, it became the most valuable company in the world. In 2025, it became the first company ever to reach four trillion dollars, and then five trillion.
+
+Its yearly sales went from about twenty-seven billion dollars to about two hundred and sixteen billion in just three years. In the three months up to October 2026 alone, Nvidia made more than sixty-five billion dollars in profit. If you had put one thousand dollars into Nvidia when it went public in 1999, it would be worth millions today.
+
+So, what did Nvidia do that others didn't?
+
+It sold to everyone, and never fought its own customers. It moved faster than anyone, and still brings out a new generation of chips every year. It built the whole machine, not just the chip. And it ran on fear. Jensen ran Nvidia as if it could die any day. He once told Stanford students, "I wish upon you ample doses of pain and suffering," because, in his words, "character isn't formed out of smart people, it's formed out of people who suffered."
+
+But the most important thing was this. Nvidia paid for a market that did not exist yet. Jensen calls these zero-billion-dollar markets. "Where there are no customers," he says, "there are also no competitors." Intel reportedly thought about buying Nvidia in 2005, then backed its own graphics chip instead, and that project was cancelled. AMD bought Nvidia's old rival ATI, but its software never caught up with CUDA. Nvidia spent a decade building CUDA while people laughed. Today, millions of developers use it.
+
+To be fair, luck played a big part too. Nvidia did not invent modern AI. Two students with gaming cards in a bedroom showed the world what was possible. What Nvidia did was survive long enough, and stay stubborn long enough, to be standing in exactly the right place when that moment came.
+
+Which brings us to the strangest chapter of all.
+
+In early October 2026, Nvidia reached its highest value ever, almost five point eight trillion dollars. Around the same time, Jensen said he hoped to keep running Nvidia for another twenty years.
+
+Then, in November 2026, Nvidia announced that Jensen Huang had resigned as CEO, effective immediately. It came after he admitted to an affair. News reports said the situation raised national security concerns. Those reports are still being investigated, and the US Justice Department says it has not reached any conclusion. For now, Nvidia's chief financial officer, Colette Kress, is running the company while the board searches for a new leader.
+
+And here is the twist. Less than a week later, Nvidia reported the best quarter in its history, with sales more than double the year before. And still, the stock kept falling. Investors were worried about AI spending, about new rules on chip sales to China, and above all, about what Nvidia looks like without the man at the centre of everything. By November 20, Nvidia had lost around forty percent of its value from the peak. Google, Amazon and AMD are all building their own AI chips. For the first time, the biggest buyers have real alternatives.
+
+Think about this journey for a second. A nine-year-old boy cleaning toilets in Kentucky. A teenager washing dishes at Denny's. Three engineers in a restaurant booth. A company thirty days from going out of business. A chip made for gamers that ended up powering the AI revolution.
+
+For thirty-three years, Nvidia was built around one man's fear of failure. That fear helped make it one of the most powerful companies on Earth. Now Nvidia has to answer a question it has never faced before. Can Nvidia still be Nvidia without Jensen?
+
+As the writer Stephen Witt put it, "There's no obvious replacement. It's not even clear Nvidia can be the same kind of company without Jensen."
+
+Whatever happens next, the lesson of Nvidia's rise stays the same. Big wins rarely come from one brilliant idea. They come from making a painful bet that everyone else thinks is foolish, and then having the stubbornness to survive until the world finally catches up.
