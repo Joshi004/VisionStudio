@@ -25,6 +25,8 @@ def draw_debug(rnd: Round, claim_id: str, evidence_id: str) -> list[Path]:
     )
     if item is None:
         raise Refused(f"Claim {claim_id} has no evidence {evidence_id}.")
+    if item.get("kind") == "video":
+        raise Refused(f"Evidence {evidence_id} is a video: it has no rectangles to draw.")
     capture = item.get("capture") or {}
     folder = rnd.claim_dir(claim_id, create=False)
     try:

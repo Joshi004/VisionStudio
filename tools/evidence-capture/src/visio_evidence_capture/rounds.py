@@ -58,6 +58,8 @@ def file_names(evidence_id: str) -> dict[str, str]:
         "context_image": f"{evidence_id}-context.png",
         "text_copy": f"{evidence_id}.txt",
         "source_copy": f"{evidence_id}.pdf",
+        "media": f"{evidence_id}.mp4",
+        "captions": f"{evidence_id}-captions.json",
     }
 
 
@@ -334,7 +336,7 @@ class Round:
         evidence_id = entry["id"]
         self._check_evidence_id(evidence_id)
         if entry["kind"] not in KINDS:
-            raise Refused("kind must be web or pdf.")
+            raise Refused(f"kind must be one of: {', '.join(KINDS)}.")
         self.check_room(claim_id, evidence_id)
         result = self.result_or_new(claim_id)
         folder = self.claim_dir(claim_id, create=True)

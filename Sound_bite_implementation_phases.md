@@ -273,7 +273,7 @@ Planning in SB-001 decides the names. The feature needs:
 |----|-------|------|-------------------|--------|
 | SB-001 | Tables, contracts and job type | Code | — | Completed (2026-11-21) |
 | SB-002 | One time mapping for every consumer | Code | — | Completed (2026-11-21) |
-| SB-003 | The capture tool's `video` command | Code (Mac) | — | Not Started |
+| SB-003 | The capture tool's `video` command | Code (Mac) | — | Completed (2026-11-21) |
 | SB-004 | The research skill for sound bites | Code (Mac) | SB-003 | Not Started |
 | SB-005 | Marking sound bites and the script rules | Code | SB-001 | Not Started |
 | SB-006 | Importing clips: transcription, fidelity, trim, flags | Code | SB-001, SB-003 | Not Started |
@@ -292,7 +292,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 2 completed (SB-001, SB-002).
+**Progress snapshot:** 3 completed (SB-001, SB-002, SB-003).
 
 ---
 
@@ -391,14 +391,14 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-003 — The capture tool's `video` command
 
-**Status:** Not Started
+**Status:** Completed (2026-11-21)
 
 **Objective.** The agent can capture the moment a person says a quote: the tool finds it in the captions and downloads only that part of the video.
 
 **Current state.** The tool (`tools/evidence-capture`) has `web` and `pdf` captures, a network guard (`netguard.py`), `report`, `remove` and `validate`. The feasibility check (§2) showed `yt-dlp` works for captions and section downloads, with warnings about YouTube's JavaScript challenge.
 
 **Scope.**
-- `TOOL video --claim c4 --id e1 --url <youtube address> --quote "<words>" [--near <mm:ss>] --relation ... --tier ... --what-it-says "..." [--recorded YYYY-MM-DD]`.
+- `TOOL video --claim c4 --evidence e1 --url <youtube address> --quote "<words>" [--near <mm:ss>] [--as-context] --relation ... --tier ... --publisher ... --what-it-says "..." [--recorded YYYY-MM-DD]` (flag names as in `web` and `pdf`; `--recorded` is stored as `source.published`).
 - Reads the claim's brief entry; refuses unless the claim is `want: soundbite`, or the agent passes `--as-context`.
 - Fetches the video's details and its English caption track (manual captions first, then automatic); finds the quote with a loose match (normalised words, a minimum share of words in order); refuses with the nearest caption lines when it is not found, like `web` does.
 - Downloads only the window of §4.5 with `yt-dlp`, re-encoded to start on the first frame asked for, at most 1080p.
@@ -418,12 +418,23 @@ Planning in SB-001 decides the names. The feature needs:
 - `validate` fails on a changed file (hash), a window over 90 s and a missing caption file.
 
 **Completion checklist.**
-- [ ] `video` command, caption search, window download
-- [ ] Result and `validate`
-- [ ] Refusals
-- [ ] `uv` lock updated
+- [x] `video` command, caption search, window download
+- [x] Result and `validate`
+- [x] Refusals
+- [x] `uv` lock updated
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-21).
+- **New code** in `tools/evidence-capture/src/visio_evidence_capture/`: `youtube.py` (pure helpers: address to video id, caption track choice, `json3` parsing, the loose match, `licence_of`), `video.py` (`capture_video`, `probe_video`, `media_problems`), the `video` subcommand in `cli.py`, `_validate_video` in `validate.py`, `media` and `captions` in `rounds.file_names`, and a refusal in `draw` for a video. `TOOL_VERSION` is now `"2"` and `KINDS` has `video`. The `result.json` of §4.5 is unchanged.
+- **yt-dlp** is `yt-dlp[default]` 2026.10.26 in `pyproject.toml` and `uv.lock`, used as a library (Q-S5 interim answer below). It is updated with `uv lock --upgrade-package yt-dlp` when YouTube breaks it. Every call uses one video only, no cookies, no cache, `remote_components` empty, and a logger whose warnings are printed in the capture's notes.
+- **The window.** Format `bv*[height<=1080]+ba/b[height<=1080]`, `download_ranges` plus `force_keyframes_at_cuts`, and the ffmpeg output arguments (H.264 `crf 18`, AAC 192k, `+faststart`) given as `external_downloader_args={"ffmpeg_o": [...]}`. **`postprocessor_args` does not reach this ffmpeg** (checked: the clip came out at x264's default `crf 23`); `quiet` must be on or the section download's ffmpeg prints its whole log. Window = quote start minus 15 s to quote end plus 15 s, clamped to the video, at most 90 s (so a quote may run at most 30 s; above 15 s a note says the review will not accept it). The temporary download folder is under the system temp folder and is removed; the tool writes only `e1.mp4`, `e1-captions.json`, `e1.txt` and `result.json` in `results/<claim>/`.
+- **Loose match** (the rule that Planning decided). Quote and captions are normalised as in `text.py`, casefolded, and cut into words (letters and digits, apostrophes kept; sound labels such as `[Music]` dropped). A stretch of the captions matches when at least **80 %** of the quote's words are in it in order (`difflib.SequenceMatcher`, stretches of 1.3 times the quote's length plus one word). The quote must have at least 4 words. The best match is used; with several, a note lists their times and `--near` chooses the closest. A refusal lists up to three nearest stretches with their times. `quote` in the result is the matched caption words; `quote_at_s.end` is the start of the next word or the end of its line, whichever is earlier (a first guess only). `validate` finds the quote again in the stored captions within 1 s of `quote_at_s.start`.
+- **Captions.** The uploader's English track first; then YouTube's own recognition (`en-orig`, or `en` only when the video's language is English). A machine translation is never used; no usable track is a refusal that suggests `not_found`. `e1-captions.json` holds the `json3` events that overlap the window, unchanged.
+- **Licence.** yt-dlp reports a licence only for Creative Commons, so no licence is stored as `standard` (the stricter answer: SB-007 asks for a rights note), Creative Commons as `creative_commons`, any other text as `unknown`. *This rests on how yt-dlp fills `license`; it was `None` for every standard video tried.*
+- **Size limit** (Planning decided): `MAX_VIDEO_BYTES` 150 MB (a 40 s 1080p window was 22 MB), `MAX_CAPTIONS_BYTES` 5 MB.
+- **`validate`** for a video: plain names, hashes, size limits, `ftyp` in the mp4, JSON captions, `video_id`, `licence`, `upload_date`, the window (inside the video, at most 90 s, `quote_at_s` inside it), `ffprobe` (exactly one H.264 video and one AAC audio stream, duration within 0.5 s of the window, height at most 1080, `video_px` equal to the real size) and the quote in the captions.
+- **Q-S5 (JavaScript challenge), interim answer.** No Deno, no remote solver. **Correction to the plan:** `yt-dlp[default]` ships the solver scripts (`yt-dlp-ejs`) but they still need a JavaScript runtime to run, so the warning "No supported JavaScript runtime" stays on every call and is printed in the notes. Every capture below worked without one. Measured on the SIEPR video: with no runtime 78 formats and the warning; with Node (already on the Mac through nvm, `js_runtimes={"node": {}}`) 83 formats, the same heights up to 1080, and no warning. Not switched on: the owner decides after a week of use whether to allow Node (local, no download of code) or install Deno.
+- **Checked** (2026-11-21, a throwaway round under `/tmp`, removed afterwards; real YouTube, no cookies): Georgetown (`XnEHpT4cieE`, 720p, 36.8 s), CNBC (`qC8Abk2atrM`, 1080p, 10.8 MB) and the Nvidia SIEPR keynote (`cEg8cOx7UZk`, Appendix A quote 1, matched although the captions have an extra "you know"; `--near` and a `youtu.be` address used; 1080p, 22 MB) all pass `validate`. **Start frame:** frame 0 of the Georgetown clip against frames of a wider download around `window.start_s` gives the best match (PSNR 40.9 dB, neighbours 35 to 37.5 dB) at exactly `window.start_s`, so the clip starts on the frame asked for. Refused with a sentence: a wrong quote (with nearest text and times), a removed video (`blocked` advice), a non-YouTube address, an address that is not one video, a quote under 4 words, an `evidence` claim without `--as-context`, a claim not in the round, a bad `--near`. `validate` fails on a changed mp4 (hash), a window of 95 s, a deleted captions file, a wrong `video_px` and a `quote_at_s` where the captions do not have the quote. `ruff check` and `ruff format --check` pass.
+- **Not checked:** a private video, an age gate, a members-only video and a bot check (none was met; those messages come from yt-dlp's wording and are untested), a Creative Commons video, manual captions, and the CNBC quote of the feasibility check (the CNBC clip above is another quote from the same interview). The skill's `install.sh` and docs were not changed (SB-004).
 
 ### SB-004 — The research skill for sound bites
 
@@ -734,3 +745,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | 2026-11-21 | — | Document written. |
 | 2026-11-21 | SB-001 | Completed: migration `0100`, claim `want` and `speaker`, brief version 2, job type `transcribe_evidence_clip` (no handler), capture tool accepts brief versions 1 and 2. |
 | 2026-11-21 | SB-002 | Completed: `services/take_map.py` (`TakeMap`, replaced spans always empty), carried as `SceneTimeline.take_map`; every copy of the take clock uses it; identical output on a snapshot of all 13 real projects (frozen timeline, ASS, H3 window starts, graphic hashes, music hashes). |
+| 2026-11-21 | SB-003 | Completed: `video` command of the capture tool (`youtube.py`, `video.py`), `yt-dlp[default]` locked, `validate` for `video`, tool version 2; three real clips captured and validated, start frame checked, refusals and validate failures tried. |

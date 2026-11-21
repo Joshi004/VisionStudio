@@ -29,8 +29,16 @@ def _add_claim(parser: argparse.ArgumentParser, *, evidence: bool = False) -> No
         parser.add_argument("--evidence", required=True, help="the evidence id, for example e1")
 
 
-def _add_described(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--quote", required=True, help="the exact words of the source")
+def _add_described(parser: argparse.ArgumentParser, *, video: bool = False) -> None:
+    parser.add_argument(
+        "--quote",
+        required=True,
+        help=(
+            "the words said in the video, as the captions have them (a loose match is used)"
+            if video
+            else "the exact words of the source"
+        ),
+    )
     parser.add_argument("--relation", required=True, choices=RELATIONS)
     parser.add_argument("--tier", required=True, choices=TIERS, help="source_tier")
     parser.add_argument("--publisher", required=True)
@@ -42,7 +50,15 @@ def _add_described(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--title", help="default: the page's own title")
     parser.add_argument("--author")
-    parser.add_argument("--published", metavar="YYYY-MM-DD")
+    if video:
+        parser.add_argument(
+            "--recorded",
+            dest="published",
+            metavar="YYYY-MM-DD",
+            help="the recording date (not the upload date); say how you know in --what-it-says",
+        )
+    else:
+        parser.add_argument("--published", metavar="YYYY-MM-DD")
     parser.add_argument("--archive-url", dest="archive_url")
     parser.add_argument("--notes", default="", help="agent_notes")
 
@@ -51,9 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=TOOL_NAME,
         description=(
-            "Captures verified screenshots of web pages and PDFs for a research round. It is "
-            "the only thing that writes coordinates and screenshots, and it writes the whole "
-            "result.json. Run it inside the round folder."
+            "Captures verified screenshots of web pages and PDFs, and video windows of YouTube "
+            "quotes, for a research round. It is the only thing that writes coordinates, "
+            "screenshots and video, and it writes the whole result.json. Run it inside the "
+            "round folder."
         ),
     )
     parser.add_argument("--version", action="version", version=f"{TOOL_NAME} {TOOL_VERSION}")
@@ -73,6 +90,25 @@ def build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("--source-url", dest="source_url", help="where the --file came from")
     pdf.add_argument("--page", type=int, help="the page (from 1), to search only there")
     _add_described(pdf)
+
+    video = commands.add_parser(
+        "video", help="capture the moment a person says a quote in a YouTube video"
+    )
+    _add_round(video)
+    _add_claim(video, evidence=True)
+    video.add_argument("--url", required=True, help="the video's YouTube address")
+    video.add_argument(
+        "--near",
+        metavar="MM:SS",
+        help="where in the video the quote is, to choose between several matches",
+    )
+    video.add_argument(
+        "--as-context",
+        action="store_true",
+        dest="as_context",
+        help="allow a video for a claim that is not a sound bite claim (context only)",
+    )
+    _add_described(video, video=True)
 
     report = commands.add_parser(
         "report", help="set a claim's status and summary, and add attempts"
@@ -168,6 +204,26 @@ def _run_pdf(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_video(args: argparse.Namespace) -> int:
+    from .video import capture_video
+
+    rnd = Round(Path(args.round))
+    described = _described(args)
+    captured = capture_video(
+        rnd,
+        claim_id=args.claim,
+        evidence_id=args.evidence,
+        url=args.url,
+        quote=args.quote,
+        near=args.near,
+        as_context=args.as_context,
+        described=described,
+    )
+    rnd.store_evidence(args.claim, captured.entry, captured.files)
+    _saved(rnd, args.claim, args.evidence, captured.notes)
+    return 0
+
+
 def _run_report(args: argparse.Namespace) -> int:
     rnd = Round(Path(args.round))
     rnd.claim(args.claim)
@@ -225,6 +281,7 @@ def _run_draw(args: argparse.Namespace) -> int:
 _COMMANDS = {
     "web": _run_web,
     "pdf": _run_pdf,
+    "video": _run_video,
     "report": _run_report,
     "remove": _run_remove,
     "validate": _run_validate,

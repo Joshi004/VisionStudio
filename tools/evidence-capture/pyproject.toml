@@ -1,13 +1,14 @@
 [project]
 name = "visio-evidence-capture"
 version = "1.0.0"
-description = "Captures verified screenshots of web pages and PDFs for the Visio Studio evidence layer."
+description = "Captures verified screenshots of web pages and PDFs, and video windows of YouTube quotes, for the Visio Studio evidence layer."
 requires-python = ">=3.13"
 dependencies = [
     "httpx>=0.28.1",
     "pillow>=12.3.0",
     "playwright>=1.50.0",
     "pypdfium2>=4.30.0",
+    "yt-dlp[default]>=2026.10.26",
 ]
 
 [project.scripts]

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -17,10 +18,14 @@ from PIL import Image, UnidentifiedImageError
 
 from . import (
     KINDS,
+    LICENCES,
+    MAX_CAPTIONS_BYTES,
     MAX_IMAGE_BYTES,
     MAX_PDF_BYTES,
     MAX_RECTS,
     MAX_TEXT_BYTES,
+    MAX_VIDEO_BYTES,
+    MAX_WINDOW_S,
     RELATIONS,
     RESULT_SCHEMA,
     RESULT_VERSION,
@@ -32,11 +37,21 @@ from . import (
 from .pdf import find_in_text, open_pdf, page_text
 from .rounds import DATE_TEXT, EVIDENCE_ID, Refused, Round
 from .text import normalise, normalise_with_map
+from .video import media_problems, probe_video
+from .youtube import (
+    MIN_QUOTE_WORDS,
+    VIDEO_ID,
+    find_quote_in_captions,
+    parse_json3,
+    quote_word_count,
+)
 
 PLAIN_NAME: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PNG_SIGNATURE: Final = b"\x89PNG\r\n\x1a\n"
 MAX_IMAGE_PIXELS: Final = 40_000_000
 EPSILON: Final = 1e-5
+# How far from `quote_at_s` the stored captions may put the quote, in seconds.
+QUOTE_AT_TOLERANCE_S: Final = 1.0
 
 
 @dataclass
@@ -226,6 +241,10 @@ def _validate_evidence(
     if capture.get("tool") != TOOL_NAME:
         problem(f"the capture was not made by {TOOL_NAME} (coordinates are never written by hand).")
 
+    if item.get("kind") == "video":
+        _validate_video(rnd, folder, item, capture, named, problem)
+        return
+
     # Check 2: files.
     hashes = capture.get("sha256")
     if not isinstance(hashes, dict):
@@ -388,3 +407,152 @@ def _check_rects(rects: object, problem) -> None:
             problem(f"rectangle {number} is empty.")
         elif x < -EPSILON or y < -EPSILON or x + w > 1 + EPSILON or y + h > 1 + EPSILON:
             problem(f"rectangle {number} is outside the image.")
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _video_files(
+    rnd: Round,
+    folder: Path,
+    capture: dict[str, Any],
+    named: set[str],
+    problem,
+) -> dict[str, tuple[Path, bytes]]:
+    """Check 2 for a video: the three files are plain, present, not too large, unchanged and of
+    the right type. Returns the ones that can be used further.
+    """
+    hashes = capture.get("sha256")
+    if not isinstance(hashes, dict):
+        problem("capture.sha256 is missing.")
+        hashes = {}
+    usable: dict[str, tuple[Path, bytes]] = {}
+    for key, kind, limit in (
+        ("media", "mp4", MAX_VIDEO_BYTES),
+        ("captions", "json", MAX_CAPTIONS_BYTES),
+        ("context_text", "text", MAX_TEXT_BYTES),
+    ):
+        try:
+            path = capture_file(folder, capture.get(key), root=rnd.root)
+        except ValueError as error:
+            problem(f"capture.{key}: {error}.")
+            continue
+        named.add(path.name)
+        size = path.stat().st_size
+        if size > limit:
+            problem(f"{path.name} is too large ({size} bytes, the limit is {limit}).")
+            continue
+        content = path.read_bytes()
+        if hashes.get(path.name) != hashlib.sha256(content).hexdigest():
+            problem(f"{path.name} does not match its recorded SHA-256 (it was changed).")
+        if kind == "mp4":
+            real = content[4:8] == b"ftyp"
+        elif kind == "json":
+            try:
+                real = isinstance(json.loads(content.decode("utf-8")), dict)
+            except ValueError:
+                real = False
+        else:
+            real = _file_type_ok("text", content)
+        if not real:
+            problem(f"{path.name} is not a real {kind} file.")
+            continue
+        usable[key] = (path, content)
+    return usable
+
+
+def _check_window(capture: dict[str, Any], problem) -> float | None:
+    """The window and the quote's place in it. Returns the window's length when it is sound."""
+    duration = capture.get("duration_s")
+    window = capture.get("window")
+    at = capture.get("quote_at_s")
+    if not _is_number(duration) or duration <= 0:
+        problem("capture.duration_s must be a number above 0.")
+        return None
+    if (
+        not isinstance(window, dict)
+        or not _is_number(window.get("start_s"))
+        or not _is_number(window.get("end_s"))
+    ):
+        problem("capture.window must have start_s and end_s.")
+        return None
+    start, end = window["start_s"], window["end_s"]
+    sound = True
+    if not 0 <= start < end:
+        problem("the window must start at 0 or later and end after it starts.")
+        sound = False
+    elif end > duration + EPSILON:
+        problem(f"the window ends at {end} s, after the video ends ({duration} s).")
+        sound = False
+    if end - start > MAX_WINDOW_S + EPSILON:
+        problem(f"the window is {end - start:.1f} s long, the limit is {MAX_WINDOW_S:.0f} s.")
+        sound = False
+    if (
+        not isinstance(at, dict)
+        or not _is_number(at.get("start"))
+        or not _is_number(at.get("end"))
+        or not at["start"] < at["end"]
+    ):
+        problem("capture.quote_at_s must have a start and a later end.")
+    elif at["start"] < start - EPSILON or at["end"] > end + EPSILON:
+        problem("capture.quote_at_s is outside the window.")
+    return end - start if sound else None
+
+
+def _validate_video(
+    rnd: Round,
+    folder: Path,
+    item: dict[str, Any],
+    capture: dict[str, Any],
+    named: set[str],
+    problem,
+) -> None:
+    """Checks 1 to 3 of §4.6 for a `video` piece, as far as the tool can make them: the
+    details, the files, the window, the media, and the quote in the stored captions.
+    """
+    if not (isinstance(capture.get("video_id"), str) and VIDEO_ID.match(capture["video_id"])):
+        problem("capture.video_id must be 11 characters.")
+    if capture.get("licence") not in LICENCES:
+        problem(f"capture.licence must be one of: {', '.join(LICENCES)}.")
+    upload_date = capture.get("upload_date")
+    if upload_date is not None:
+        try:
+            if not (isinstance(upload_date, str) and DATE_TEXT.match(upload_date)):
+                raise ValueError
+            date.fromisoformat(upload_date)
+        except ValueError:
+            problem("capture.upload_date must be a date written YYYY-MM-DD, or null.")
+
+    usable = _video_files(rnd, folder, capture, named, problem)
+    length = _check_window(capture, problem)
+
+    if "media" in usable:
+        try:
+            probe = probe_video(usable["media"][0])
+        except Refused as error:
+            problem(str(error))
+        else:
+            if length is not None:
+                for text in media_problems(probe, length):
+                    problem(f"{usable['media'][0].name}: {text}.")
+            if capture.get("video_px") != [probe.width, probe.height]:
+                problem(
+                    f"video_px {capture.get('video_px')!r} is not the real size "
+                    f"[{probe.width}, {probe.height}]."
+                )
+
+    # Check 3: the quote is in the stored captions, where quote_at_s says.
+    quote = item.get("quote")
+    at = capture.get("quote_at_s")
+    if "captions" not in usable or not _is_text(quote):
+        return
+    if quote_word_count(str(quote)) < MIN_QUOTE_WORDS:
+        problem(f"the quote has fewer than {MIN_QUOTE_WORDS} words.")
+        return
+    if not isinstance(at, dict) or not _is_number(at.get("start")):
+        return
+    captions = parse_json3(json.loads(usable["captions"][1].decode("utf-8")))
+    matches = find_quote_in_captions(captions, str(quote), at["start"])
+    if not matches or abs(matches[0].start_s - at["start"]) > QUOTE_AT_TOLERANCE_S:
+        problem("the quote is not in the captions at the time quote_at_s says.")

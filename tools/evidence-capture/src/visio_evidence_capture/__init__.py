@@ -1,19 +1,19 @@
-"""Visio Studio evidence capture tool (EVD-004).
+"""Visio Studio evidence capture tool (EVD-004, SB-003).
 
-The only thing that makes screenshots and highlight rectangles (EV-5). It writes inside
-`results/<claim_id>/` of a research round and nowhere else.
+The only thing that makes screenshots, highlight rectangles (EV-5) and video windows. It writes
+inside `results/<claim_id>/` of a research round and nowhere else.
 """
 
 from typing import Final
 
 TOOL_NAME: Final = "visio-evidence-capture"
-TOOL_VERSION: Final = "1"
+# Version 2 (SB-003) adds the `video` command and the `video` kind.
+TOOL_VERSION: Final = "2"
 
 RESULT_SCHEMA: Final = "visio.evidence.result"
 RESULT_VERSION: Final = 1
 BRIEF_SCHEMA: Final = "visio.evidence.brief"
-# Version 2 (SB-001) adds `want` and `speaker` to each claim. The `video` command that reads
-# them is SB-003.
+# Version 2 (SB-001) adds `want` and `speaker` to each claim; the `video` command checks `want`.
 BRIEF_VERSIONS: Final = (1, 2)
 
 # Limits. The import (EVD-006) applies its own limits to what it finds.
@@ -27,11 +27,23 @@ QUOTE_MIN_CHARS: Final = 3
 QUOTE_MAX_CHARS: Final = 600
 MAX_REDIRECTS: Final = 5
 
+# Video (§4.5 of Sound_bite_implementation_phases.md).
+VIDEO_PAD_S: Final = 15.0  # the quote plus at least this much on each side
+MAX_WINDOW_S: Final = 90.0
+MAX_VIDEO_BYTES: Final = 150 * 1024 * 1024
+MAX_CAPTIONS_BYTES: Final = 5 * 1024 * 1024
+MAX_VIDEO_HEIGHT: Final = 1080
+VIDEO_DURATION_TOLERANCE_S: Final = 0.5
+# Share of the quote's words that must be found, in order, in the captions.
+QUOTE_MATCH_SHARE: Final = 0.8
+LICENCES: Final = ("standard", "creative_commons", "unknown")
+YOUTUBE_HOSTS: Final = ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be")
+
 # What the agent may say (§4.5).
 STATUSES: Final = ("found", "partial", "not_found", "contradicted", "blocked")
 RELATIONS: Final = ("supports", "partly_supports", "contradicts", "context")
 TIERS: Final = ("primary", "secondary", "other")
-KINDS: Final = ("web", "pdf")
+KINDS: Final = ("web", "pdf", "video")
 STATUSES_WITH_EVIDENCE: Final = ("found", "partial", "contradicted")
 
 # Viewports by orientation (§4.7). `image_px` is `viewport * device_scale`.
