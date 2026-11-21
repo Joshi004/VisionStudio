@@ -48,6 +48,7 @@ from app.services import (
 from app.services.duration_policy import DurationPolicy
 from app.services.frame_counts import H3_FPS
 from app.services.project_kinds import KIND_EXPLAINER
+from app.services.take_map import TakeMapError
 
 _logger = logging.getLogger(__name__)
 
@@ -213,17 +214,18 @@ def _plan_shot(plan: shot_plans.SceneEntry, shot_id: str) -> dict[str, Any] | No
 
 def _window_start(plan: shot_plans.SceneEntry, shot_id: str) -> float | None:
     """Where the window of a presenter shot starts inside the scene's take: the shot's start on
-    the timeline less the lead-in the take sits after (negative for the first shot when the
-    lead-in is above 0). None when the shot is not on the timeline.
+    the timeline taken back through the scene's time mapping (negative for the first shot when
+    the lead-in is above 0). None when the shot is not on the timeline.
     """
-    if plan.row is None or plan.timeline is None:
+    if plan.row is None or plan.timeline is None or plan.timeline.take_map is None:
         return None
     span = next((span for span in plan.timeline.shots if span.shot_id == shot_id), None)
-    cut_plan = plan.row.content.get(cut_planning_writer.CUT_PLAN_KEY)
-    lead_in = cut_plan.get("lead_in_s") if isinstance(cut_plan, dict) else None
-    if span is None or isinstance(lead_in, bool) or not isinstance(lead_in, int | float):
+    if span is None:
         return None
-    return round(span.start_s - float(lead_in), 3)
+    try:
+        return plan.timeline.take_map.to_take(span.start_s)
+    except TakeMapError:
+        return None
 
 
 def _cut_refusal(

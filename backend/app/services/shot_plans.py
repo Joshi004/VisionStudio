@@ -70,6 +70,7 @@ from app.services import (
     word_timings,
 )
 from app.services.projects import prompt_mode
+from app.services.take_map import NO_REPLACED, TakeMap, unit_words
 
 _logger = logging.getLogger(__name__)
 
@@ -1071,10 +1072,13 @@ def _evidence_reasons(
 
 
 def _claim_times(
-    loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock, lead_in_s: float
+    loaded: _Loaded,
+    item: dict[str, Any],
+    clock: take_timings.TakeClock,
+    take_map: TakeMap,
 ) -> list[evidence_cards.ClaimTime]:
     """The claims with evidence to show whose words are in this scene's take, placed on the
-    scene's timeline (`lead_in_s` after the start of the scene, like the shots)."""
+    scene's timeline by `take_map`, like the shots."""
     found: list[evidence_cards.ClaimTime] = []
     for claim in _scene_evidence(loaded, item, clock.words):
         positions = [position for position in claim["words"] if 0 <= position < len(clock.words)]
@@ -1089,8 +1093,8 @@ def _claim_times(
                 claim_id=str(claim["id"]),
                 text=str(claim["text"]),
                 pieces=tuple(claim["pieces"]),
-                first_s=round(lead_in_s + float(first), 3),
-                last_s=round(lead_in_s + float(last), 3),
+                first_s=take_map.to_scene(float(first)),
+                last_s=take_map.to_scene(float(last)),
             )
         )
     return found
@@ -1114,8 +1118,9 @@ def _evidence_overlays(
         return nothing
     if not cut_planning_writer.is_cut_plan(row.content):
         return nothing
-    lead_in = float(row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"])
-    claims = _claim_times(loaded, item, clock, lead_in)
+    if timeline.take_map is None:
+        return nothing
+    claims = _claim_times(loaded, item, clock, timeline.take_map)
     if not claims:
         return nothing
     spans = {span.shot_id: span for span in timeline.shots}
@@ -1172,6 +1177,7 @@ def _split_shots(
     ]
     if not mine or not shots:
         return {}
+    take_map = timeline.take_map or NO_REPLACED
     spans = {span.unit_id: span for span in clock.spans}
     units: dict[str, callout_render.CalloutUnit] = {}
     for placed in timeline.units:
@@ -1183,14 +1189,7 @@ def _split_shots(
             unit_id=placed.unit_id,
             start_ms=round(placed.start_s * 1000),
             end_ms=round(placed.end_s * 1000),
-            words=tuple(
-                (
-                    str(word["text"]),
-                    float(word["start"]) - span.start,
-                    float(word["end"]) - span.start,
-                )
-                for word in clock.words[span.first_word : span.last_word + 1]
-            ),
+            words=unit_words(clock.words, span.first_word, span.last_word, span.start, take_map),
         )
     total_ms = round(timeline.total_s * 1000)
     times: list[evidence_layout.CalloutAt] = []
@@ -1433,7 +1432,7 @@ def _timeline_of(
         return scene_timeline.build_cut_timeline(
             row.content["shots"],
             _cut_units(row, kinds_by_plan, clock),
-            float(row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"]),
+            TakeMap(lead_in_s=float(row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"])),
             policy,
         )
     infos = _unit_infos(row, kinds_by_plan)

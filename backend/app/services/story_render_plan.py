@@ -75,6 +75,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 from app.services import callout_render, caption_plan, font_metrics, frame_counts, render_commands
+from app.services.take_map import NO_REPLACED, TakeMap, TakeMapError
 
 # The shape of `job.input.timeline`. The job refuses a timeline it does not know. Version 2 adds
 # the music layers, the dip of the shot audio under a bed and the master loudness (MUSIC-012).
@@ -329,14 +330,15 @@ class UnitSource:
 @dataclass(frozen=True)
 class VoiceSource:
     """The voice take of a scene of a continuous explainer (FLOW-008). It plays from the scene's
-    start plus `lead_in_s`.
+    start plus the lead-in of `take_map`, which also says where its seconds go on the scene's
+    timeline (SB-002).
     """
 
     audio_id: int
     path: str
     seconds: float
     file_exists: bool
-    lead_in_s: float
+    take_map: TakeMap
 
 
 @dataclass(frozen=True)
@@ -583,11 +585,15 @@ def voice_pieces(
     clip_spans: Sequence[tuple[int, int]],
     fade_samples: int,
     total_samples: int,
+    take_map: TakeMap = NO_REPLACED,
+    rate: int = render_commands.SAMPLE_RATE,
 ) -> list[dict[str, int]]:
     """The pieces of one scene's take that are heard, sample-exact at 48 kHz. `take_start_sample`
     is where the take starts on the story's timeline, `take_samples` its length, and `clip_spans`
     the `(start, end)` samples, on the story's timeline, of the shots whose own voice is used: the
-    take is silent for exactly those spans.
+    take is silent for exactly those spans. `take_map` (at `rate` samples a second) says how far
+    later than `take_start_sample + in_sample` a piece plays, because of the clips that replace
+    parts of the take (none yet, SB-002).
 
     Each piece plays the part `in_sample` to `in_sample + length_samples` of the take at
     `start_sample` of the story. A piece that borders a clip span reaches `fade_samples` into it
@@ -600,7 +606,8 @@ def voice_pieces(
         return []
     spans: list[list[int]] = []
     for start, end in sorted(clip_spans):
-        low, high = max(0, start - take_start_sample), min(length, end - take_start_sample)
+        low = max(0, take_map.take_sample_at(start - take_start_sample, rate))
+        high = min(length, take_map.take_sample_at(end - take_start_sample, rate))
         if high <= low:
             continue
         if spans and low <= spans[-1][1]:
@@ -626,7 +633,9 @@ def voice_pieces(
         pieces.append(
             {
                 "in_sample": start,
-                "start_sample": take_start_sample + start,
+                "start_sample": take_start_sample
+                + start
+                + take_map.bite_shift_samples_at(start, rate),
                 "length_samples": end - start,
                 "fade_in_samples": min(fade_samples, gap_start - start) if has_before else 0,
                 "fade_out_samples": min(fade_samples, end - gap_end) if has_after else 0,
@@ -911,19 +920,23 @@ def _voice_entry(
     takes: list[dict[str, Any]] = []
     for scene in scenes:
         assert scene.voice is not None and scene.story_start_s is not None
-        start_ms = _ms(scene.story_start_s + scene.voice.lead_in_s)
+        take_map = scene.voice.take_map
+        start_ms = _ms(scene.story_start_s + take_map.lead_in_s)
         start_sample = start_ms * (rate // _MS_PER_S)
         length = round(scene.voice.seconds * rate)
         spans = clip_spans.get(scene.scene_id, [])
         for entry in shots:
             if entry["scene_id"] != scene.scene_id or entry["voice"] != VOICE_CLIP:
                 continue
-            low = max(0, render_commands.sample_count(entry["start_frame"], fps) - start_sample)
-            high = min(
-                length,
-                render_commands.sample_count(entry["start_frame"] + entry["frames"], fps)
-                - start_sample,
-            )
+            first = render_commands.sample_count(entry["start_frame"], fps)
+            last = render_commands.sample_count(entry["start_frame"] + entry["frames"], fps)
+            try:
+                low = max(0, take_map.take_sample_at(first - start_sample, rate))
+                high = min(length, take_map.take_sample_at(last - start_sample, rate))
+            except TakeMapError as exc:
+                raise RenderPlanError(
+                    f"The voice of shot {entry['shot_id']} overlaps a sound bite: {exc}"
+                ) from exc
             if high > low:
                 entry["voice_window"] = {
                     "start_s": round(low / rate, 6),
@@ -936,7 +949,9 @@ def _voice_entry(
                 "path": scene.voice.path,
                 "seconds": scene.voice.seconds,
                 "start_ms": start_ms,
-                "pieces": voice_pieces(start_sample, length, spans, fade, total_samples),
+                "pieces": voice_pieces(
+                    start_sample, length, spans, fade, total_samples, take_map, rate
+                ),
             }
         )
     return {"takes": takes}

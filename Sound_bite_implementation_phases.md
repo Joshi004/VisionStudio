@@ -272,7 +272,7 @@ Planning in SB-001 decides the names. The feature needs:
 | Id | Title | Kind | Hard dependencies | Status |
 |----|-------|------|-------------------|--------|
 | SB-001 | Tables, contracts and job type | Code | — | Completed (2026-11-21) |
-| SB-002 | One time mapping for every consumer | Code | — | Not Started |
+| SB-002 | One time mapping for every consumer | Code | — | Completed (2026-11-21) |
 | SB-003 | The capture tool's `video` command | Code (Mac) | — | Not Started |
 | SB-004 | The research skill for sound bites | Code (Mac) | SB-003 | Not Started |
 | SB-005 | Marking sound bites and the script rules | Code | SB-001 | Not Started |
@@ -292,7 +292,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 1 completed (SB-001).
+**Progress snapshot:** 2 completed (SB-001, SB-002).
 
 ---
 
@@ -347,7 +347,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-002 — One time mapping for every consumer
 
-**Status:** Not Started
+**Status:** Completed (2026-11-21)
 
 **Objective.** Every place that turns a take time into a scene or story time uses one shared mapping that can later hold replaced spans. No video changes.
 
@@ -372,13 +372,22 @@ Planning in SB-001 decides the names. The feature needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Mapping object
-- [ ] Every copy replaced (list them in the notes)
-- [ ] Captions and callouts word by word
-- [ ] Identical-output check on real projects
-- [ ] Standard checks
+- [x] Mapping object
+- [x] Every copy replaced (list them in the notes)
+- [x] Captions and callouts word by word
+- [x] Identical-output check on real projects
+- [x] Standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-21).
+- **The mapping** is `services/take_map.py`, a pure module that imports nothing from the app. `TakeMap(lead_in_s, replaced)` holds a tuple of `ReplacedSpan(take_start_s, take_end_s, scene_seconds)` that is **always empty** now; `to_scene`, `to_take`, `bite_shift_at`, `shift_at`, `elapsed_s` (seconds) and `bite_shift_samples_at`, `take_sample_at` (samples, for the voice) follow the formula of §4.7; `unit_words` gives a unit's words as offsets from its start. A time strictly inside a replaced span raises `TakeMapError` from `to_scene`, `to_take` and `take_sample_at`. It is built in one place, `shot_plans._timeline_of`, the only place that now reads the plan's `lead_in_s` for timing, and carried as `SceneTimeline.take_map` (`None` for a timeline that is not a cut plan's). The frozen timeline stays at version 6: nothing in it changed. `VoiceSource.lead_in_s` became `VoiceSource.take_map`.
+- **Every copy now uses it:** `scene_timeline.build_cut_timeline` (shots and units; takes the map instead of `lead_in_s`); `shot_plans._claim_times` (cards and source lines), `_evidence_overlays` and `_split_shots` (callout words via `unit_words`); `generation_requests._window_start` (H3 presenter window, `to_take`; a clip time gives "not on the timeline"); `shot_graphics._prepare` (`shift_s` through `shift_at`, `voice_offset_s` through `to_take`); `shot_graphic_brief_writer.timed_words` and `shot_graphic_briefs._material` (new `take_map` argument; `_map_of(plan)` falls back to `NO_REPLACED`); `story_renders._voice_units` (`unit_words`) and the `VoiceSource` it builds; `story_render_plan._voice_entry` (start and `voice_window` through `take_sample_at`) and `voice_pieces` (new `take_map` and `rate` arguments: clip spans to take samples, `start_sample` through `bite_shift_samples_at`); and `music_placement._voice_speech` (silences through `bite_shift_at`), a copy the survey of §2 had not listed. Left as they are, because they only add scene time to the story's offset: the unit loop of `story_render_plan._build`, `music_timeline._unit_entries`, `music_placement._layout` and `_timeline_hash`, `story_offsets` and `_shift_timeline`.
+- **Decision on captions and callouts.** Word times stay offsets from their unit's start (the shape `CalloutUnit`, `caption_plan` and the frozen timeline expect), but each offset now comes from the map (`elapsed_s`), so a clip between the unit's start and a word is counted word by word. Absolute times per word would round differently and could move a caption by a millisecond.
+- **Exactness.** Every rewritten expression keeps the old order of operations and rounding points, and the terms for replaced spans are `0.0`, so the numbers are bit for bit the old ones. That matters most for `generation_requests._take_window_reasons`, which compares the stored `window_start_s` with `!=`: a drift would put paid H3 requests, prompts and takes out of date.
+- **Identity check** (a one-off script, not kept): a `sqlite3` `.backup` of the real database taken from the running backend (nothing written to the real volume; the copy was already at `0100` because the owner had rebuilt), read in a throwaway container from the backend image with the working tree's code, the snapshot as `DATA_DIR` and the files folder read-only. It dumped, as sorted JSON, for all 13 projects (all continuous): the plans and timelines (62 scenes), cards (4), source lines (3), splits of evidence shots with callouts (6), the window starts of 205 shots next to the 125 stored `window_start_s` and the status and reasons of every H3 request, compiled prompt and take, 32 graphic shots (`resolved`, `resolved_sha256`, `voice_offset_s`) and their briefs' timed words, the render's speech units with their word offsets, and, where the story can be planned, the frozen timeline and the ASS document, and the music `timeline_sha256` and `timing_sha256`, layout and voice speech. Before and after, the dumps are **identical** apart from the new `take_map` field (empty, lead-in 0.0) in the dump of the timeline objects. No H3 request, prompt or take got a new out-of-date reason, and no section raised an error. The script ran twice before the edits with identical output.
+- **Coverage and what it did not cover.** Only project 81 (portrait, 4 scenes) could build the full render plan and the ASS file (version 6 timeline, captions and callouts); project 84 is the only landscape one and has the splits and cards, but its render plan is blocked by missing clips, so its frozen timeline came from the timing plan (`timing_sources`), which has no captions. No project has a lead-in other than 0.0 (the constant `LEAD_IN_S`), and none has a replaced span: a non-empty map is checked only by arithmetic on stand-in numbers (round trip of `to_scene` and `to_take`, the shifts of two spans, the samples), not by a render.
+- **For SB-008.** `voice_pieces` places pieces through the map but does not yet cut the take at a replaced span (a piece would still play the take under it), and `_voice_entry` takes `length` from the take as before; `_take_window`'s word test stays in take seconds (presenter windows never cover a bite); `shot_graphics.resolve_for_shot` adds one `shift_s` to every word of a shot, which is wrong for a graphic shot that holds a bite (SB-008 keeps bites out of graphic shots); the callers of `to_scene` in `shot_plans._claim_times` must drop a claim whose words are in a replaced span instead of raising.
+- **Checked** (2026-11-21): `ruff check` and `ruff format --check` pass. No API, schema or `DATABASE_STRUCTURE.md` change.
+- **Not done by the agent:** the real app was not rebuilt or touched (the image running now does not contain this phase's code; rebuild when no job is running; never `down -v`).
 
 ### SB-003 — The capture tool's `video` command
 
@@ -724,3 +733,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 |------|-------|--------|
 | 2026-11-21 | — | Document written. |
 | 2026-11-21 | SB-001 | Completed: migration `0100`, claim `want` and `speaker`, brief version 2, job type `transcribe_evidence_clip` (no handler), capture tool accepts brief versions 1 and 2. |
+| 2026-11-21 | SB-002 | Completed: `services/take_map.py` (`TakeMap`, replaced spans always empty), carried as `SceneTimeline.take_map`; every copy of the take clock uses it; identical output on a snapshot of all 13 real projects (frozen timeline, ASS, H3 window starts, graphic hashes, music hashes). |

@@ -47,6 +47,7 @@ from app.services import (
 from app.services import music_plan_writer as plan_writer
 from app.services.music_placer import Anchor
 from app.services.storage import StorageError, get_storage
+from app.services.take_map import NO_REPLACED
 
 JOB_TYPE: Final = "place_music"
 
@@ -396,11 +397,15 @@ async def _voice_speech(
             await _measure_file(session, audio.path, audio.sha256) if audio is not None else None
         )
         take_start = take["start_ms"] / 1000
+        take_map = scene.voice.take_map if scene.voice is not None else NO_REPLACED
         if measurement is None:
             unmeasured.append(f"the voice take of {music_timeline.scene_ref(scene.scene_id)}")
         else:
             silences = [
-                (take_start + float(item["start_s"]), take_start + float(item["end_s"]))
+                (
+                    take_start + float(item["start_s"]) + take_map.bite_shift_at(item["start_s"]),
+                    take_start + float(item["end_s"]) + take_map.bite_shift_at(item["end_s"]),
+                )
                 for item in measurement.get("silences") or []
             ]
         for unit in scene.units:

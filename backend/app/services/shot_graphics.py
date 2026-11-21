@@ -58,7 +58,6 @@ from app.db.models import Job, Project, ShotGraphic, ShotGraphicBrief, ShotGraph
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
-    cut_planning_writer,
     graphic_theme,
     graphics_lab,
     graphics_render,
@@ -69,6 +68,7 @@ from app.services import (
     take_timings,
 )
 from app.services.storage import media_url
+from app.services.take_map import TakeMapError
 
 COMPONENT: Final = "generated_component"
 BLOCKS: Final = "remotion_blocks"
@@ -399,15 +399,22 @@ def _prepare(
 ) -> tuple[_Prepared | None, str | None]:
     """The resolved brief of a shot and what the jobs need, or why it cannot be worked out."""
     span = _span_of(plan, shot["id"])
-    if span is None or plan.content is None:
+    if span is None or plan.content is None or plan.timeline is None:
+        return None, NO_TIMELINE_MESSAGE
+    take_map = plan.timeline.take_map
+    if take_map is None:
         return None, NO_TIMELINE_MESSAGE
     inputs = brief.inputs if isinstance(brief.inputs, dict) else {}
     words = inputs.get("words")
     context = inputs.get("context")
     if not isinstance(words, list) or not words or not isinstance(context, dict):
         return None, "This shot's brief did not record its words. Write it again."
-    lead_in_s = float(plan.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"])
-    shift_s = round(lead_in_s + float(shot["start_s"]) - span.start_s, 3)
+    shot_start_s = float(shot["start_s"])
+    shift_s = round(take_map.shift_at(shot_start_s) + shot_start_s - span.start_s, 3)
+    try:
+        voice_offset_s = take_map.to_take(span.start_s)
+    except TakeMapError as exc:
+        return None, str(exc)
     try:
         resolved = resolve_for_shot(
             brief=brief.content,
@@ -426,7 +433,7 @@ def _prepare(
             resolved=resolved,
             sha256=resolved_sha256(resolved),
             voice_path=audio.path if audio is not None and audio.path else None,
-            voice_offset_s=round(span.start_s - lead_in_s, 3),
+            voice_offset_s=voice_offset_s,
             material={
                 "line": " ".join(str(word["text"]) for word in words),
                 "context": str(context.get("text") or ""),

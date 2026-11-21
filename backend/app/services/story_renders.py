@@ -70,6 +70,7 @@ from app.services import (
 )
 from app.services.project_kinds import KIND_EXPLAINER
 from app.services.storage import StorageError, get_storage
+from app.services.take_map import unit_words
 
 _logger = logging.getLogger(__name__)
 
@@ -289,8 +290,9 @@ def _voice_units(
     """
     timeline = entry.timeline
     audio = clock.audio
-    if timeline is None or audio is None:
+    if timeline is None or timeline.take_map is None or audio is None:
         return []
+    take_map = timeline.take_map
     spans = {span.unit_id: span for span in clock.spans}
     exists = file_exists(audio.path)
     units: list[story_render_plan.UnitSource] = []
@@ -298,10 +300,7 @@ def _voice_units(
         span = spans.get(placed.unit_id)
         if span is None:
             continue
-        words = tuple(
-            (str(word["text"]), float(word["start"]) - span.start, float(word["end"]) - span.start)
-            for word in clock.words[span.first_word : span.last_word + 1]
-        )
+        words = unit_words(clock.words, span.first_word, span.last_word, span.start, take_map)
         units.append(
             story_render_plan.UnitSource(
                 unit_id=placed.unit_id,
@@ -582,15 +581,15 @@ async def scene_sources(
                 )
             if continuous:
                 assert clock is not None and clock.audio is not None and entry.row is not None
+                assert entry.timeline.take_map is not None
+                take_map = entry.timeline.take_map
                 units = _voice_units(entry, clock)
                 voice = story_render_plan.VoiceSource(
                     audio_id=clock.audio.id,
                     path=clock.audio.path,
                     seconds=float(clock.audio.duration_s or 0.0),
                     file_exists=file_exists(clock.audio.path),
-                    lead_in_s=float(
-                        entry.row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"]
-                    ),
+                    take_map=take_map,
                 )
             else:
                 units = await _unit_sources(session, entry, speech, timings)

@@ -44,6 +44,7 @@ from app.services.graphics_brief_writer import (
     phrase_starts,
 )
 from app.services.music_bible_writer import parse_answer as parse_answer
+from app.services.take_map import TakeMap
 from app.services.text_limits import length_rule
 
 __all__ = [
@@ -135,16 +136,23 @@ def context_of(
 
 
 def timed_words(
-    words: list[dict[str, Any]], start_word: int, last_word: int, start_s: float
+    words: list[dict[str, Any]],
+    start_word: int,
+    last_word: int,
+    start_s: float,
+    take_map: TakeMap,
 ) -> list[dict[str, Any]]:
     """The shot's words, each `{text, start, end}` with the times in seconds from the shot's
-    start (`word time - start_s`, never below 0), from the take's timed words.
+    start (the scene time that passes since `start_s`, never below 0), from the take's timed
+    words. `start_s` is in take seconds; `take_map` counts a clip played in between.
     """
     return [
         {
             "text": str(word["text"]),
-            "start": round(max(0.0, float(word["start"]) - start_s), _TIME_DECIMALS),
-            "end": round(max(0.0, float(word["end"]) - start_s), _TIME_DECIMALS),
+            "start": round(
+                max(0.0, take_map.elapsed_s(start_s, float(word["start"]))), _TIME_DECIMALS
+            ),
+            "end": round(max(0.0, take_map.elapsed_s(start_s, float(word["end"]))), _TIME_DECIMALS),
         }
         for word in words[start_word - 1 : last_word]
     ]

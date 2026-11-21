@@ -44,6 +44,7 @@ from app.services import (
     take_timings,
     user_feedback,
 )
+from app.services.take_map import NO_REPLACED, TakeMap
 
 JOB_TYPE: Final = "write_shot_graphic_brief"
 DEDUPE_KEY: Final = "shot_key"
@@ -120,10 +121,17 @@ class _Material:
     timing_id: int
 
 
-def _material(shot: dict[str, Any], clock: take_timings.TakeClock) -> _Material | None:
+def _map_of(plan: shot_plans.SceneEntry) -> TakeMap:
+    """The scene's time mapping, or one with no lead-in and no clip when it has no timeline."""
+    return plan.timeline.take_map if plan.timeline and plan.timeline.take_map else NO_REPLACED
+
+
+def _material(
+    shot: dict[str, Any], clock: take_timings.TakeClock, take_map: TakeMap
+) -> _Material | None:
     """The words, the context and the hashes of one graphic shot of a plan, or None when the
     shot's words are not in the take (the plan was made on another take). `clock` must be ready
-    (no `blocked_reason`).
+    (no `blocked_reason`). `take_map` is the scene's time mapping.
     """
     assert clock.audio is not None and clock.timing is not None
     if not 1 <= int(shot["start_word"]) <= int(shot["last_word"]) <= len(clock.words):
@@ -138,7 +146,11 @@ def _material(shot: dict[str, Any], clock: take_timings.TakeClock) -> _Material 
     return _Material(
         shot=shot,
         words=shot_graphic_brief_writer.timed_words(
-            clock.words, int(shot["start_word"]), int(shot["last_word"]), float(shot["start_s"])
+            clock.words,
+            int(shot["start_word"]),
+            int(shot["last_word"]),
+            float(shot["start_s"]),
+            take_map,
         ),
         context=context,
         skeleton_sha256=shot_graphic_brief_writer.skeleton_sha256(shot),
@@ -317,7 +329,7 @@ async def _queue(
         raise ShotGraphicBriefError(refusal)
     shot = _find_shot(loaded, scene_id, shot_id)
     plan = loaded.plan_by_scene[scene_id]
-    material = _material(shot, loaded.clocks[scene_id])
+    material = _material(shot, loaded.clocks[scene_id], _map_of(plan))
     if material is None:
         raise ShotGraphicBriefError(
             "The words of this shot are not in the scene's take. Plan the shots again first."
@@ -537,7 +549,7 @@ async def _build(
             job = jobs.get(key)
             active = job is not None and job.status in store.ACTIVE_STATUSES
             material = (
-                _material(shot, clock)
+                _material(shot, clock, _map_of(plan))
                 if clock is not None and clock.blocked_reason is None
                 else None
             )

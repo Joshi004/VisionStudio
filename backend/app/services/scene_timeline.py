@@ -42,6 +42,7 @@ from typing import Any, Final, Literal
 
 from app.services.duration_policy import DurationPolicy, longest_cut_shot_s
 from app.services.frame_counts import H3_FPS, H3_FRAMES_PER_STEP, h3_num_frames, target_frames
+from app.services.take_map import TakeMap
 
 # Time kept after a line of dialogue inside its shot, for the face to settle.
 DIALOGUE_SETTLE_S: Final = 0.5
@@ -135,6 +136,10 @@ class SceneTimeline:
     units: list[UnitSpan]
     total_s: float
     problems: list[TimelineProblem] = field(default_factory=list)
+    # Only on the timeline of a cut plan (SB-002): how the take's seconds map to this scene's.
+    # Everything that places something from the take's word times asks it. None for every other
+    # timeline.
+    take_map: TakeMap | None = None
 
     @property
     def has_blocking(self) -> bool:
@@ -357,17 +362,17 @@ class CutUnit:
 def build_cut_timeline(
     shots: list[dict[str, Any]],
     units: list[CutUnit],
-    lead_in_s: float,
+    take_map: TakeMap,
     policy: DurationPolicy,
 ) -> SceneTimeline:
     """The timeline of one scene of a continuous explainer (FLOW-006). Its shots are cut on the
     words of the scene's take (FLOW-005), so they are not laid one after another by length:
 
     - a shot starts and ends at its stored cut times (`start_s`, `end_s`, seconds from the start
-      of the take), moved by the lead-in. The first shot starts at 0, so the lead-in belongs to
-      it;
-    - the take sits at the scene's start plus the lead-in, so each unit sits at the lead-in plus
-      its place in the take. The units carried by a shot are the ones the plan lists;
+      of the take), moved by `take_map` (the lead-in, and later the sound bites). The first shot
+      starts at 0, so the lead-in belongs to it;
+    - the take sits at the scene's start plus the lead-in, so each unit sits where `take_map`
+      puts its place in the take. The units carried by a shot are the ones the plan lists;
     - each shot gets the length of the clip made for it (`ShotSpan.clip_frames`); a graphic shot
       (EXG-003) gets its own frames plus one spare frame;
     - the scene ends where its last shot ends;
@@ -381,8 +386,8 @@ def build_cut_timeline(
     problems: list[TimelineProblem] = []
     longest = longest_cut_shot_s(policy)
     for position, shot in enumerate(shots):
-        start = 0.0 if position == 0 else round(lead_in_s + float(shot["start_s"]), _DECIMALS)
-        end = round(lead_in_s + float(shot["end_s"]), _DECIMALS)
+        start = 0.0 if position == 0 else take_map.to_scene(float(shot["start_s"]))
+        end = take_map.to_scene(float(shot["end_s"]))
         frames = target_frames(start, end, H3_FPS)
         spans.append(
             ShotSpan(
@@ -422,15 +427,17 @@ def build_cut_timeline(
         UnitSpan(
             unit_id=unit.id,
             kind=unit.kind,
-            start_s=round(lead_in_s + unit.start_s, _DECIMALS),
-            end_s=round(lead_in_s + unit.end_s, _DECIMALS),
-            natural_start_s=round(lead_in_s + unit.start_s, _DECIMALS),
+            start_s=take_map.to_scene(unit.start_s),
+            end_s=take_map.to_scene(unit.end_s),
+            natural_start_s=take_map.to_scene(unit.start_s),
             shot_ids=[shot["id"] for shot in shots if unit.id in shot["speech_unit_ids"]],
         )
         for unit in units
     ]
     total = spans[-1].end_s if spans else 0.0
-    return SceneTimeline(shots=spans, units=placed, total_s=total, problems=problems)
+    return SceneTimeline(
+        shots=spans, units=placed, total_s=total, problems=problems, take_map=take_map
+    )
 
 
 def story_offsets(totals: list[float | None]) -> list[float | None]:
