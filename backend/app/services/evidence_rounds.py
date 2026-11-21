@@ -182,7 +182,8 @@ def pending_reasons(claims: Sequence[dict[str, Any]]) -> list[str]:
 
     A proposal of GLM that the owner has not decided on, and a claim whose words changed in the
     story, both need the owner. A proposal whose words changed is not asked about: it cannot be
-    kept.
+    kept. So does a sound bite whose quote no longer passes the rule of SB-005 (it carries
+    `soundbite_block`, as `evidence_claims.state()` gives it).
     """
     reasons: list[str] = []
     undecided = [
@@ -207,6 +208,21 @@ def pending_reasons(claims: Sequence[dict[str, Any]]) -> list[str]:
         reasons.append(
             f"The words of {len(changed)} claim{'s' if many else ''} changed in the story: mark "
             f"{'them' if many else 'it'} again or remove {'them' if many else 'it'}."
+        )
+    broken = [
+        claim
+        for claim in claims
+        if evidence_claims.is_active(claim)
+        and evidence_claims.is_soundbite(claim)
+        and not claim["words_changed"]
+        and claim.get("soundbite_block") is not None
+    ]
+    if broken:
+        many = len(broken) > 1
+        reasons.append(
+            f"The quote of {len(broken)} sound bite{'s' if many else ''} is no longer whole "
+            "sentences in quotation marks: fix the story or make "
+            f"{'them' if many else 'it'} ordinary evidence."
         )
     return reasons
 

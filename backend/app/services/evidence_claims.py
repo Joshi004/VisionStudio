@@ -6,6 +6,8 @@ provenance convention, DATABASE_STRUCTURE.md Section 2.1). `content` is `{next_i
 a claim is `{id, origin, start, end, text, hint, kind_hint, want, speaker, reason, kept}`
 (Section 5). `want` is `evidence` or `soundbite` (the owner's choice, SB-001) and `speaker` names
 who says a sound bite; a claim stored before they existed reads as `evidence` with no speaker.
+The script rules of a sound bite (`services/soundbite_rules`, SB-005) are worked out on every
+read by `with_soundbite_rules` and are never stored.
 
 - `origin` `owner`: marked by the owner. `reason` is empty and `kept` is true.
 - `origin` `glm`: proposed by the model. `kept` is null until the owner keeps (true) or drops
@@ -41,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import EvidenceClaimList, Job, Project
 from app.db.state_memo import memoized_state
 from app.jobs import store
-from app.services import explainer, projects
+from app.services import explainer, projects, soundbite_rules
 from app.services.number_words import numbers_in
 from app.services.script_ranges import nearest_occurrence, snap_to_words
 
@@ -180,6 +182,35 @@ def reanchor_claims(script: str | None, claims: Sequence[dict[str, Any]]) -> lis
         placed["words_changed"] = not ok
         found.append(placed)
     return sorted(found, key=lambda claim: claim["start"])
+
+
+def with_soundbite_rules(
+    script: str | None, claims: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The claims with the script rules of a sound bite (SB-005), worked out now and never
+    stored: `soundbite_block` (why the words cannot be a sound bite, or None) for every claim
+    whose words are in the story, and `soundbite_warnings` and `soundbite_hints` for the claims
+    that are sound bites. `claims` are as `reanchor_claims` gives them.
+    """
+    ruled: list[dict[str, Any]] = []
+    for claim in claims:
+        block: str | None = None
+        warnings: list[dict[str, Any]] = []
+        hints: list[str] = []
+        if script is not None and not claim["words_changed"]:
+            result = soundbite_rules.check(script, claim)
+            block = result.block
+            if is_soundbite(claim):
+                warnings, hints = result.warnings, result.hints
+        ruled.append(
+            {
+                **claim,
+                "soundbite_block": block,
+                "soundbite_warnings": warnings,
+                "soundbite_hints": hints,
+            }
+        )
+    return ruled
 
 
 def counting(claims: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -430,6 +461,9 @@ def _apply_want(
         raise EvidenceClaimsError(
             "A sound bite needs a claim that is kept and whose words are still in the story."
         )
+    problem = soundbite_rules.quote_problem(claim["text"])
+    if problem is not None:
+        raise EvidenceClaimsError(problem)
     if new_speaker is None:
         raise EvidenceClaimsError("Say who speaks the quote before choosing a sound bite.")
     changed["want"], changed["speaker"] = WANT_SOUNDBITE, new_speaker
@@ -448,7 +482,8 @@ async def update_claim(
 ) -> None:
     """Changes a claim's note, kind, `want` and `speaker` (SB-001), or (for a proposal of the
     model) whether it is kept, as a new `manual` version, and commits. A sound bite needs a
-    speaker and a claim that counts. Choosing `evidence` clears the speaker, and a speaker
+    speaker, a claim that counts and words that are whole sentences in quotation marks
+    (`soundbite_rules.quote_problem`). Choosing `evidence` clears the speaker, and a speaker
     for a claim that is not a sound bite is refused. A value left as None is not changed, and
     nothing is stored when nothing changes. Raises EvidenceClaimsError (ClaimNotFoundError for an
     unknown claim).
@@ -627,7 +662,9 @@ async def state(session: AsyncSession, project: Project) -> ClaimsState:
     row = await latest(session, project.id)
     return ClaimsState(
         latest=row,
-        claims=reanchor_claims(project.script_text, _stored_claims(row)),
+        claims=with_soundbite_rules(
+            project.script_text, reanchor_claims(project.script_text, _stored_claims(row))
+        ),
         job=await store.latest_job(session, project.id, JOB_TYPE),
         blocked_reason=blocked_reason(project),
         wanted=True,

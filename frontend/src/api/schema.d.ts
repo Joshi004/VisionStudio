@@ -9243,6 +9243,12 @@ export interface components {
             kept: boolean | null;
             /** Words Changed */
             words_changed: boolean;
+            /** Soundbite Block */
+            soundbite_block: string | null;
+            /** Soundbite Warnings */
+            soundbite_warnings: components["schemas"]["SoundbiteWarningOut"][];
+            /** Soundbite Hints */
+            soundbite_hints: string[];
         };
         /**
          * EvidenceClaimsJobOut
@@ -17473,6 +17479,18 @@ export interface components {
             instruments: string[];
             /** Avoid */
             avoid: string[];
+        };
+        /**
+         * SoundbiteWarningOut
+         * @description One script rule a sound bite breaks without being blocked (SB-005).
+         */
+        SoundbiteWarningOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Words */
+            words: string[];
         };
         /** SourceApprovalOut */
         SourceApprovalOut: {

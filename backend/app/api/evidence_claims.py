@@ -3,10 +3,12 @@
 
 - `GET ...` answers the claims as they stand in the story now, the newest job, and whether the
   project has claims at all. Marks that moved with an edit of the story, and claims whose words
-  are gone (`words_changed`), are worked out on every read.
+  are gone (`words_changed`), are worked out on every read. So are the script rules of a sound
+  bite (`soundbite_block`, `soundbite_warnings`, `soundbite_hints`, SB-005).
 - `POST .../marks` marks words of the saved story as a claim, with an optional note and kind.
 - `PATCH .../{claim_id}` changes a claim's note, kind, `want` or `speaker`, or keeps or drops a
-  proposal of GLM.
+  proposal of GLM. A sound bite is refused (422) unless the words are whole sentences in
+  quotation marks.
 - `DELETE .../{claim_id}` removes one of the owner's marks.
 - `POST .../suggest` starts the `suggest_evidence_claims` job: one model call proposes more claims.
 
@@ -54,6 +56,15 @@ Want = Literal["evidence", "soundbite"]
 # --- What the claims hold --------------------------------------------------------------------
 
 
+class SoundbiteWarningOut(BaseModel):
+    """One script rule a sound bite breaks without being blocked (SB-005)."""
+
+    code: str
+    message: str
+    # The offending words: shared words, the filler phrase, or the end of the lead-in. May be empty.
+    words: list[str]
+
+
 class EvidenceClaimOut(BaseModel):
     id: str
     origin: Origin
@@ -74,6 +85,14 @@ class EvidenceClaimOut(BaseModel):
     kept: bool | None
     # The words of the claim are no longer in the story, or no longer stand alone there.
     words_changed: bool
+    # Why the words cannot be (or no longer are) a sound bite: they must be whole sentences in
+    # quotation marks. Null when they can, and for a claim whose words changed. Worked out on
+    # every read (SB-005).
+    soundbite_block: str | None
+    # Script rules a sound bite breaks without being blocked. Empty for any other claim.
+    soundbite_warnings: list[SoundbiteWarningOut]
+    # Advice the owner judges alone. Empty for any other claim.
+    soundbite_hints: list[str]
 
 
 class EvidenceClaimsJobOut(BaseModel):

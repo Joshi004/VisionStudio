@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the visio-evidence skill for Cursor and Claude Code (EVD-005).
+# Installs the visio-evidence skill for Cursor and Claude Code (EVD-005; sound bite claims, SB-004).
 #
 # It copies tools/evidence-skill/visio-evidence/ to ~/.claude/skills/visio-evidence/ (Cursor and
 # Claude Code both read that folder) and writes the full command of the capture tool into the
@@ -55,6 +55,16 @@ fi
 echo "Setting up the capture tool (uv sync)..."
 uv sync --project "${CAPTURE_DIR}"
 
+# The video command (sound bite claims) needs ffmpeg and ffprobe. Only a warning: web and pdf
+# captures do not need them.
+MISSING_FFMPEG=""
+for media_tool in ffmpeg ffprobe; do
+  command -v "${media_tool}" >/dev/null 2>&1 || MISSING_FFMPEG="${MISSING_FFMPEG} ${media_tool}"
+done
+if [ -n "${MISSING_FFMPEG}" ]; then
+  echo "WARNING: not found on the PATH:${MISSING_FFMPEG}. Video captures need them: brew install ffmpeg" >&2
+fi
+
 TOOL_COMMAND="uv run --project ${CAPTURE_DIR} visio-evidence-capture"
 
 # --- Build the copy next to its final place, then swap it in ---------------------------------
@@ -86,5 +96,8 @@ echo "  ${TOOL_COMMAND}"
 echo
 echo "If you have not yet, install the browser the tool uses (about 100 MB, once):"
 echo "  (cd ${CAPTURE_DIR} && uv run playwright install chromium)"
+echo
+echo "Video captures (sound bite claims) need ffmpeg and ffprobe:"
+echo "  brew install ffmpeg"
 echo
 echo "Restart Cursor or Claude Code if a session is already open, so that it finds the skill."

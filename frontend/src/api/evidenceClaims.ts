@@ -83,7 +83,10 @@ export function useMarkEvidenceClaim(projectId: number) {
   });
 }
 
-/** Changes a claim's note or kind, or keeps or drops a proposal of GLM. */
+/**
+ * Changes a claim's note or kind, makes it a sound bite (`want` and `speaker`) or ordinary
+ * evidence again, or keeps or drops a proposal of GLM.
+ */
 export function useEditEvidenceClaim(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({

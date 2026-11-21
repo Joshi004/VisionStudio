@@ -22,11 +22,12 @@ import {
   useRemoveEvidenceClaim,
   useSuggestEvidenceClaims,
   type EvidenceClaim,
-  type EvidenceKind,
+  type EvidenceClaimEdit,
 } from "../../api/evidenceClaims";
 import { isJobActive } from "../../api/polling";
 import type { ProjectDetail } from "../../api/projects";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { SoundbiteControls } from "./SoundbiteControls";
 import { buildPositions, unitOffset, type Positions } from "./storyMarks";
 
 /** A part of the story: plain, or marked as a claim. `start` is a unit position. */
@@ -75,7 +76,7 @@ type CardProps = {
   active: boolean;
   busy: boolean;
   onSelect: () => void;
-  onEdit: (edit: { hint?: string; kind_hint?: EvidenceKind; kept?: boolean }) => void;
+  onEdit: (edit: EvidenceClaimEdit) => void;
   onRemove: () => void;
 };
 
@@ -105,6 +106,11 @@ function ClaimCard({ claim, active, busy, onSelect, onEdit, onRemove }: CardProp
             {dropped && (
               <Badge color="gray" variant="outline">
                 Dropped
+              </Badge>
+            )}
+            {claim.want === "soundbite" && !dropped && (
+              <Badge color="grape" variant="light">
+                Sound bite
               </Badge>
             )}
             <Text size="sm" fw={500} style={{ whiteSpace: "pre-wrap" }}>
@@ -186,6 +192,9 @@ function ClaimCard({ claim, active, busy, onSelect, onEdit, onRemove }: CardProp
               }}
             />
           </Group>
+        )}
+        {!dropped && !claim.words_changed && claim.kept !== null && (
+          <SoundbiteControls claim={claim} busy={busy} onEdit={onEdit} />
         )}
       </Stack>
     </Paper>
@@ -302,7 +311,8 @@ export function EvidenceClaims({ project, hasUnsavedStory }: Props) {
           Select the words that need proof on screen (a price, a figure from a report, something a
           person or a company said), then click Mark as claim. GLM can propose more claims, and
           you keep or drop each one. Your own marks are always kept. The research works from this
-          list.
+          list. A quote written as whole sentences in quotation marks can be made a sound bite: a
+          clip of the person saying it, which replaces the narrator&apos;s reading.
         </Text>
         {story === null ? (
           <Alert color="gray">Save the story first, then mark the claims here.</Alert>

@@ -129,7 +129,7 @@ The research is unanimous: the narrator **sets the clip up and does not say its 
 | The quote is one or more whole sentences in quotation marks | Blocks marking | Not replaceable: `in his words, the gaming cards "would carry the burden of CUDA"` |
 | Attribution comes before the quote | Warning | Good: `At a Stanford economics summit in 2024, Huang offered an unusual wish: "…"` |
 | The lead-in reads complete without the quote: it ends in a colon or a full stop, never in "that" or a dangling "said," | Warning | Bad: `Huang said that "…"` |
-| The lead-in shares no run of three or more content words with the quote | Warning | Bad: `He wished them pain and suffering: "I wish upon you ample doses of pain and suffering."` |
+| The lead-in shares fewer than three content words with the quote (counted anywhere, not as a run: SB-005) | Warning | Bad: `He wished them pain and suffering: "I wish upon you ample doses of pain and suffering."` |
 | No filler hand-offs ("had this to say", "said the following", "tells us more") | Warning | — |
 | Quote emotion, opinion or proof; numbers and facts belong to the narrator | Owner's judgement (shown as a hint) | Don't make "Revenue grew 200 %" a sound bite |
 | The sentence after the quote adds something; it may echo one word, never restate the clip | Owner's judgement | `Pain and suffering. He meant it.` |
@@ -274,8 +274,8 @@ Planning in SB-001 decides the names. The feature needs:
 | SB-001 | Tables, contracts and job type | Code | — | Completed (2026-11-21) |
 | SB-002 | One time mapping for every consumer | Code | — | Completed (2026-11-21) |
 | SB-003 | The capture tool's `video` command | Code (Mac) | — | Completed (2026-11-21) |
-| SB-004 | The research skill for sound bites | Code (Mac) | SB-003 | Not Started |
-| SB-005 | Marking sound bites and the script rules | Code | SB-001 | Not Started |
+| SB-004 | The research skill for sound bites | Code (Mac) | SB-003 | In Progress (Claude Code run pending) |
+| SB-005 | Marking sound bites and the script rules | Code | SB-001 | Completed (2026-11-22) |
 | SB-006 | Importing clips: transcription, fidelity, trim, flags | Code | SB-001, SB-003 | Not Started |
 | SB-007 | The review screen for sound bites | Code | SB-006 | Not Started |
 | SB-008 | Sound bite shots in the cut plan and the timeline | Code | SB-002, SB-007 | Not Started |
@@ -292,7 +292,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 3 completed (SB-001, SB-002, SB-003).
+**Progress snapshot:** 4 completed (SB-001, SB-002, SB-003, SB-005); 1 in progress (SB-004, Claude Code run pending).
 
 ---
 
@@ -438,7 +438,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-004 — The research skill for sound bites
 
-**Status:** Not Started
+**Status:** In Progress (skill written and installed; run in Cursor done; the run in Claude Code is the owner's)
 
 **Objective.** The agent finds the right, original clip, not a retelling.
 
@@ -461,15 +461,25 @@ Planning in SB-001 decides the names. The feature needs:
 **Verification criteria.** A round with four sound bite claims of Appendix A, run once in Cursor and once in Claude Code: every clip from an official channel or with a reason why not, recording dates given, no explainer channel used.
 
 **Completion checklist.**
-- [ ] `SKILL.md` and `reference.md`
-- [ ] Installed with `tools/evidence-skill/install.sh`
-- [ ] Owner's runs in Cursor and Claude Code
+- [x] `SKILL.md` and `reference.md`
+- [x] Installed with `tools/evidence-skill/install.sh`
+- [x] Run in Cursor (2026-11-21)
+- [ ] Run in Claude Code (owner)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-21, written before the owner's runs; the phase is not Completed until they are recorded).
+- **`SKILL.md`** (`tools/evidence-skill/visio-evidence/`): a new section "Sound bite claims" with seven rules (clip before any page; official footage only, never an explainer or retelling channel, compilation, re-upload, dubbed track or host reading; `TOOL video` with the claim's text as `--quote`; `--recorded` with how the date is known; context check from `e1.txt` and `capture.channel`; an optional web or PDF piece only after the clip search; the summary begins "Clip captured" or "No clip") and the status rules for these claims. The brief's `want` and `speaker` are described; `video` is added to rule 3's list of commands; the table at the end says whether a clip was captured; subagents are told to read "Sound bite claims" in `reference.md` and to be given that section of `SKILL.md` in full. **The safety rules did not change** and `allowed-tools` did not change (the `TOOL` pattern already covers `video`). The Import section is untouched.
+- **`reference.md`**: the `video` command with every option; a table of what the tool's messages mean (nearest caption text, several matches, quote over 15 s, `--recorded` later than the upload, automatic captions, blocked advice, a yt-dlp fault, missing ffmpeg); "Finding a sound bite" in eight steps (the event first, search by speaker, event and year, choose by channel, capture, read `e1.txt`, budget of 3 videos per claim and 3 tries per video, the optional page, report); `--tier` for video; five worked examples with invented names (found, only retellings, blocked, page only, context turns the point).
+- **Decisions of planning.** The optional web or PDF piece for the description is allowed after the clip search (Q-S4 answered, below). Status for a sound bite claim: `found` = a `supports` clip from an official channel; `partial` = a clip with a stated weakness, or a page without a clip, or a blocked video with a page kept (because `blocked` may not have evidence, `validate` rule); `not_found` and `blocked` as before. Budget: 3 videos per claim. The agent reads the captions of the window only after a capture (the tool reads YouTube's captions; the agent never fetches them), so a wrong moment costs another download of about 30 s.
+- **`install.sh`**: warns (does not fail) when `ffmpeg` or `ffprobe` is missing and says `brew install ffmpeg` at the end. Run on 2026-11-21: the installed copy has no `{{TOOL}}` placeholder.
+- **For the owner's runs.** Two throwaway rounds, `/tmp/visio-sb004/cursor/` and `/tmp/visio-sb004/claude/`, each with the same version 2 brief (`project.id` 9999, which does not exist) and four sound bite claims of Appendix A (rows 1, 2, 4 and 5). The tool accepts both briefs (`validate` runs and reports "no result yet" for each claim). Open each folder in the tool to be tested, run the skill and say **skip the import**: the import's `KINDS` is still `("web", "pdf")` until SB-006, so it would mark a video unusable, and there is no project 9999. Afterwards check: `TOOL validate` passes; each clip is from an official channel, or the reason why not is in the result; recording dates are given; no explainer channel was used. Write the findings per row into Appendix A and here, then mark this phase Completed and remove `/tmp/visio-sb004`.
+- **Run 1, in Cursor (2026-11-21, by the Cursor agent that also wrote the skill, so not an independent test)** in `/tmp/visio-sb004/cursor` with real YouTube and no import. `validate` passes. Results: **c1** (Appendix A row 1) `found`: SIEPR's own channel (`cEg8cOx7UZk`, 1080p), recorded 2024-03-01 from SIEPR's event page, the quote at 38:18 with a false start, the moderator's next words a new question. **c3** (row 4) `found`: Caltech's own channel (`-qXDdToZHzE`, the full ceremony, 1080p), recorded 2024-06-14; the words are the middle of a longer sentence and the audience laughs just before (flagged in the summary). **c4** (row 5) `partial`: only a re-upload by PodiumVC (`tdXqs_cHi6k`, 720p, uploaded 2024-09-14) of Oracle's earnings call of 2024-09-09; Oracle's own webcast is on its investor site, not YouTube; the spoken words are longer than the script's quote ("By the way, I got dinner" is in the middle). **c2** (row 2) `not_found`: the dishwasher line is only reported in print (Stephen Witt, The New Yorker, 27 Nov 2023, said to a waitress in September 2023); no video was found, and the New Yorker page and the book excerpt could not be captured. No explainer channel was used as evidence; two were listed as attempts.
+- **What the run taught.** (1) `--tier`, `--publisher` and `--what-it-says` are fixed before the tool says which channel the video is on, so the agent captured c1 and c4 with a guess and had to capture again; `reference.md` now says to run `video` again with the same id, and never to leave a guess in the text (skill reinstalled). (2) The claim's words are not always the contiguous spoken words (c4; c3 is mid-sentence); the tool's nearest-lines refusal found the real words at once, and the agent put the difference in `--what-it-says`. This matters for SB-005 (a quote may be whole sentences in the script and still not be whole sentences in the speech) and SB-006 (the fidelity class). (3) A recording date was found for all three clips, from an event page or a press release, never from YouTube's upload date. (4) Appendix A row 2 (the dishwasher joke) cannot be a sound bite from what exists online; it needs another clip or must stay narrator-read.
+- **Still to do (owner).** The same round in Claude Code (`/tmp/visio-sb004/claude`, tell it to skip the import), then mark this phase Completed and remove `/tmp/visio-sb004`. `/tmp/visio-sb004/cursor` holds Run 1's clips, so the owner can watch them first.
+- **Not done by the agent:** the Claude Code run. The skill's Import section still starts the import for a round with a video; until SB-006 the owner should tell the agent to skip it (or the import marks the clip unusable).
 
 ### SB-005 — Marking sound bites and the script rules
 
-**Status:** Not Started
+**Status:** Completed (2026-11-22)
 
 **Objective.** The owner can turn a quote claim into a sound bite and sees at once whether the script around it will work.
 
@@ -493,12 +503,22 @@ Planning in SB-001 decides the names. The feature needs:
 - Standard checks; the browser checked by the owner.
 
 **Completion checklist.**
-- [ ] Choice and speaker field
-- [ ] Script rules check
-- [ ] Warnings in the editor
-- [ ] Standard checks
+- [x] Choice and speaker field
+- [x] Script rules check
+- [x] Warnings in the editor
+- [x] Standard checks
+- [ ] Owner: the claims panel checked in the browser (after a rebuild; the agent did not touch the real app)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-22).
+- **The rules** are `services/soundbite_rules.py`, pure (imports only `number_words` and `speech_chunks.sentences`). `quote_problem(text)` is the blocking rule; `check(script, claim)` returns `SoundbiteCheck(block, warnings, hints)`, each warning `{code, message, words}` with codes `lead_in_incomplete`, `no_attribution`, `parroting`, `filler_hand_off`. Straight and curly double quotes count; single quotes do not.
+- **Blocking rule** (on the claim's own text, so it never changes while the claim keeps its place): starts with an opening mark; ends with the closing mark, optionally followed by one of `. ! ? …`; holds no other double quotation mark; its first letter or digit is a capital or a digit; and the quoted words end in `. ! ? …` before the closing mark or right after it. One pair of marks may hold several sentences. Selections are widened to whole words by `snap_to_words`, so the marks and punctuation attached to the words are always in the claim.
+- **Warnings.** The lead-in is the words of the quote's sentence before the opening mark (else the sentence before). `lead_in_incomplete`: the lead-in does not end in `: . ! ?`; the message says whether it ends in "that" or a comma. `no_attribution`: no word of the speaker's name (3 letters or more) is in the lead-in or the sentence before it. `parroting`: the lead-in shares **3 or more content words** with the quote (counted anywhere, not as a run: §4.2's wording was changed, because the doc's own bad example only fails this way; words are lowercased tokens of 3 letters or more, not in a stop-word list, with a crude stem for `ing`, `ed`, `es`, `s`). `filler_hand_off`: "had/has/have this to say", "said/says/say the following", "tells/told us more", "here is/here's what", "take a listen", "listen to this", "let's hear". The word lists are constants at the top of the module. **Hint:** a number in the quote (`numbers_in`) says that numbers and facts belong to the narrator; the card also always shows the tip about the sentence after the quote.
+- **On read, not stored** (like `words_changed`): `evidence_claims.with_soundbite_rules` adds `soundbite_block` (every claim whose words are in the story), `soundbite_warnings` and `soundbite_hints` (sound bites only) in `state()`. Nothing new is stored, no migration, no change to `DATABASE_STRUCTURE.md`. `update_claim` (PATCH `want`) refuses with the block sentence (422) whenever the result would be a sound bite, including a change of speaker on one already broken; switching to `evidence` is always allowed. The API has `SoundbiteWarningOut` and the three fields on `EvidenceClaimOut` (`schema.d.ts` regenerated from the app's own OpenAPI document).
+- **Planning decisions (owner's).** No dismissal of warnings (nothing stored). A sound bite that breaks the blocking rule stays a sound bite, shows a red alert, and `evidence_rounds.pending_reasons` adds a sentence so the brief is refused (and the step waits) until the story is fixed or the claim is made ordinary evidence again. No change to GLM's prompt.
+- **What can break a sound bite.** The rule depends only on the claim's own words, so an edit of the story cannot break it: an edit that changes the words makes the claim `words_changed` (already refused by the brief), and one that changes the lead-in only changes the warnings. The case the new brief refusal covers is **a sound bite made before this phase** (SB-001 did not check the quote). It was verified by writing such a claim into a throwaway database.
+- **UI.** `components/story/SoundbiteControls.tsx`, shown on every kept claim whose words are in the story: "Who says it" and "Make sound bite" (disabled while the speaker is empty or the quote is blocked; the block sentence is shown for claims of kind Quote and as the button's title), or for a sound bite: a "Sound bite" badge in the card header, an editable speaker, "Make ordinary evidence", the red alert, the warnings with their words in quotation marks, the hints and the tip. A GLM proposal that is not yet kept does not show the controls.
+- **Checked** (2026-11-22). A one-off script on `check` gave: §4.2 "not replaceable" blocked; the "good" example clean; "Huang said that" the lead-in warning; "said," the comma warning; "He wished them pain and suffering:" the parroting warning (wished, pain, suffering); "had this to say" the filler warning; a number in a quote the hint. Nvidia line 95 as written today (the quote up to the comma) is blocked; line 97 as written today is blocked both ways (the part up to the comma, and "there are also no competitors." starting in lower case); the Appendix A rewrite of line 95 with speaker Jensen Huang is clean. Through the app on a throwaway `DATA_DIR` migrated to `0100`: PATCH to a sound bite on today's line 95 gave 422 with the block sentence; the rewrite was stored with no block, warnings or hints; changing "wish:" to "wish that" in the story gave the lead-in warning; a legacy sound bite on "Pain and suffering." showed the block, `pending` and the refusal of the brief carried the new sentence, and `want: evidence` cleared both. `ruff check`, `ruff format --check`, `eslint` and `tsc` pass. **Not checked:** the panel in a browser (owner), and the warnings on every kind of script beyond these examples (the stop words and stems are crude: a lead-in such as "doses" against "dose" does not count as shared).
+- **Not done by the agent:** the real app was not rebuilt or touched.
 
 ### SB-006 — Importing clips: transcription, fidelity, trim, flags
 
@@ -706,7 +726,7 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 | Q-S1 | Should a sound bite be allowed in a scene that a presenter shot on its clip's own voice also covers? | No: the planner keeps them apart. |
 | Q-S2 | How many sound bites per video? | Warning above 4 per 10 minutes (§4.7); no hard limit. |
 | Q-S3 | When the clip's words are `near`, must the script be edited before rendering? | No; the review shows the differences and the clip's own words are captioned. |
-| Q-S4 | Should a sound bite claim also get a web or PDF piece for the description? | Optional; the agent may add one. |
+| Q-S4 | Should a sound bite claim also get a web or PDF piece for the description? | Answered in SB-004: optional, only after the clip search; the agent may add one within the claim's evidence limit. |
 | Q-S5 | Do `yt-dlp`'s JavaScript challenge and its remote solver need to be allowed? | Decided in SB-003 after a week of use. |
 
 ### 8.2 Risks
@@ -727,11 +747,11 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 
 | # | Script line | Quote | Notes |
 |---|-------------|-------|-------|
-| 1 | 95 | "I wish upon you ample doses of pain and suffering." | Stanford SIEPR Economic Summit, March 2024. In the audio it follows a false start; trim at the clean restart. Today's line cannot be replaced (the quote runs into "because…"). Rewrite, for example: *At a Stanford economics summit in 2024, Huang told his audience that character comes from setbacks, and then offered them an unusual wish: "I wish upon you ample doses of pain and suffering."* |
-| 2 | 15 | "I used to be a dishwasher here. …" | Said at a Denny's; find the official video. The quote is a joke: check that it plays as one. |
+| 1 | 95 | "I wish upon you ample doses of pain and suffering." | **SB-004 run 1: found** on SIEPR's own channel (`cEg8cOx7UZk`), recorded 2024-03-01. Stanford SIEPR Economic Summit, March 2024. In the audio it follows a false start; trim at the clean restart. Today's line cannot be replaced (the quote runs into "because…"). Rewrite, for example: *At a Stanford economics summit in 2024, Huang told his audience that character comes from setbacks, and then offered them an unusual wish: "I wish upon you ample doses of pain and suffering."* |
+| 2 | 15 | "I used to be a dishwasher here. …" | **SB-004 run 1: not_found.** Only reported in print (The New Yorker, Nov 2023); no video found. Said at a Denny's; find the official video. The quote is a joke: check that it plays as one. |
 | 3 | 39 | "Our company is thirty days from going out of business." | The script presents it as a staff-meeting sentence; a clip of Huang recounting it needs a lead-in that says so. |
-| 4 | 97 | "Where there are no customers, there are also no competitors." | Today embedded mid-sentence ("he says"); rewrite as a whole sentence after the lead-in. |
-| 5 | 87 | Larry Ellison: "me and Elon begging Jensen for GPUs. …" | Find the original event; check the full context (it is a joke). |
+| 4 | 97 | "Where there are no customers, there are also no competitors." | **SB-004 run 1: found** on Caltech's own channel (`-qXDdToZHzE`, commencement of 2024-06-14); in the speech it is mid-sentence, with laughter before it. Today embedded mid-sentence ("he says"); rewrite as a whole sentence after the lead-in. |
+| 5 | 87 | Larry Ellison: "me and Elon begging Jensen for GPUs. …" | **SB-004 run 1: partial.** Oracle's earnings call of 2024-09-09; only a re-upload (PodiumVC, `tdXqs_cHi6k`) on YouTube; the spoken words are longer than the script's. Find the original event; check the full context (it is a joke). |
 | — | 71 | Sutskever: "and it felt like a miracle" | Partial quote: not replaceable unless rewritten. |
 | — | 29 | Irimajiri's words | Said in Japanese: no interpreted or dubbed audio (§4.6); stays narrator-read. |
 | — | 105 | The resignation | No clips (§8.2). |
@@ -746,3 +766,5 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | 2026-11-21 | SB-001 | Completed: migration `0100`, claim `want` and `speaker`, brief version 2, job type `transcribe_evidence_clip` (no handler), capture tool accepts brief versions 1 and 2. |
 | 2026-11-21 | SB-002 | Completed: `services/take_map.py` (`TakeMap`, replaced spans always empty), carried as `SceneTimeline.take_map`; every copy of the take clock uses it; identical output on a snapshot of all 13 real projects (frozen timeline, ASS, H3 window starts, graphic hashes, music hashes). |
 | 2026-11-21 | SB-003 | Completed: `video` command of the capture tool (`youtube.py`, `video.py`), `yt-dlp[default]` locked, `validate` for `video`, tool version 2; three real clips captured and validated, start frame checked, refusals and validate failures tried. |
+| 2026-11-21 | SB-004 | In progress: `SKILL.md` and `reference.md` handle sound bite claims, `install.sh` warns about ffmpeg, skill installed, two throwaway rounds in `/tmp/visio-sb004`. Run 1 in Cursor done: c1 and c3 found on official channels, c4 partial (re-upload), c2 not_found; `validate` passes. The run in Claude Code is pending. |
+| 2026-11-22 | SB-005 | Completed: `services/soundbite_rules.py` (block on whole sentences in quotation marks; warnings for lead-in, attribution, parroting, filler; number hint), worked out on read in `evidence_claims.state()`, enforced in `update_claim`, a broken sound bite holds back the brief; "Sound bite" controls on the claim card. No migration. |
