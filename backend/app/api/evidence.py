@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import EvidenceItem, Project
+from app.db.models import EvidenceItem, Job, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.services import (
@@ -44,6 +44,7 @@ from app.services import (
     evidence_import,
     evidence_review,
     evidence_rounds,
+    soundbite_clips,
 )
 from app.services.storage import media_url
 
@@ -416,6 +417,95 @@ class PreviewOut(BaseModel):
     caption_bottom: float
 
 
+class SoundbiteWindowOut(BaseModel):
+    """A stretch of the video, in seconds of the source video."""
+
+    start_s: float
+    end_s: float
+
+
+class SoundbiteQuoteAtOut(BaseModel):
+    """Where the captions put the quote in the source video, a first guess only."""
+
+    start: float
+    end: float
+
+
+class SoundbiteWordOut(BaseModel):
+    """A word Parakeet heard, in seconds from the start of the downloaded window."""
+
+    text: str
+    start: float
+    end: float
+
+
+class SoundbiteDiffOut(BaseModel):
+    """One difference between the claim's words and the heard words (normalised words)."""
+
+    op: Literal["replace", "delete", "insert"]
+    script: str
+    heard: str
+
+
+class SoundbiteMatchOut(BaseModel):
+    """Where the claim's words are among the heard words: positions in `heard.words`, both
+    included."""
+
+    first: int
+    last: int
+    percent: float
+    missing: int
+    extra: int
+    diff: list[SoundbiteDiffOut]
+
+
+class SoundbiteHeardOut(BaseModel):
+    text: str
+    words: list[SoundbiteWordOut]
+    match: SoundbiteMatchOut | None
+
+
+class SoundbiteTrimOut(BaseModel):
+    """The proposed in and out points, seconds from the start of the downloaded window. A point
+    is clean when a quiet gap was found next to the word there."""
+
+    in_s: float
+    out_s: float
+    in_clean: bool
+    out_clean: bool
+
+
+class SoundbiteFlagOut(BaseModel):
+    code: str
+    message: str
+
+
+class SoundbiteTranscriptionOut(BaseModel):
+    """Whether the app has heard the clip yet. `failed` says why and can be asked again."""
+
+    status: Literal["none", "in_progress", "failed", "done"]
+    error: str | None
+    job_id: int | None
+
+
+class SoundbiteOut(BaseModel):
+    """What the app knows about an imported clip of a `video` piece (SB-006). Shown read-only
+    until the sound bite review (SB-007)."""
+
+    video_url: str | None
+    video_id: str | None
+    channel: str | None
+    upload_date: str | None
+    licence: Literal["standard", "creative_commons", "unknown"] | None
+    window: SoundbiteWindowOut | None
+    quote_at_s: SoundbiteQuoteAtOut | None
+    transcription: SoundbiteTranscriptionOut
+    heard: SoundbiteHeardOut | None
+    fidelity: Literal["exact", "near", "paraphrase", "mismatch"] | None
+    proposed_trim: SoundbiteTrimOut | None
+    flags: list[SoundbiteFlagOut]
+
+
 class ReviewItemOut(BaseModel):
     item_key: str
     evidence_id: str
@@ -423,7 +513,7 @@ class ReviewItemOut(BaseModel):
     # Why a piece is not usable, one sentence per failed check. Empty for a usable piece.
     reasons: list[str]
     warnings: list[str]
-    kind: Literal["web", "pdf"] | None
+    kind: Literal["web", "pdf", "video"] | None
     relation: Literal["supports", "partly_supports", "contradicts", "context"] | None
     source_tier: Literal["primary", "secondary", "other"] | None
     source: ReviewSourceOut | None
@@ -446,6 +536,8 @@ class ReviewItemOut(BaseModel):
     readability: ReadabilityOut | None
     # Null until a preview was asked for.
     preview: PreviewOut | None
+    # Only for a `video` piece (SB-006): what the app heard in the clip, and how it compares.
+    soundbite: SoundbiteOut | None
 
 
 class ReviewAttemptOut(BaseModel):
@@ -559,14 +651,110 @@ def _preview_out(preview: evidence_clips.Preview | None) -> PreviewOut | None:
     )
 
 
+def _number_or_none(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _soundbite_out(item: EvidenceItem, job: Job | None) -> SoundbiteOut:
+    """The read-only view of a clip: its capture details, its transcription status and what the
+    analysis stored. Every stored value is read defensively and sent as plain data."""
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    window = capture.get("window") if isinstance(capture.get("window"), dict) else None
+    at = capture.get("quote_at_s") if isinstance(capture.get("quote_at_s"), dict) else None
+    window_out = (
+        SoundbiteWindowOut(start_s=window["start_s"], end_s=window["end_s"])
+        if window is not None
+        and _number_or_none(window.get("start_s")) is not None
+        and _number_or_none(window.get("end_s")) is not None
+        else None
+    )
+    at_out = (
+        SoundbiteQuoteAtOut(start=at["start"], end=at["end"])
+        if at is not None
+        and _number_or_none(at.get("start")) is not None
+        and _number_or_none(at.get("end")) is not None
+        else None
+    )
+    state, error = soundbite_clips.transcription_status(item, job)
+    heard = item.heard_words if isinstance(item.heard_words, dict) else None
+    heard_out = None
+    if heard is not None:
+        words = [
+            SoundbiteWordOut(text=word.text, start=word.start, end=word.end)
+            for word in soundbite_clips.words_of(heard)
+        ]
+        raw = heard.get("match")
+        match_out = None
+        if isinstance(raw, dict):
+            match_out = SoundbiteMatchOut(
+                first=int(raw.get("first", 0)),
+                last=int(raw.get("last", 0)),
+                percent=float(raw.get("percent", 0.0)),
+                missing=int(raw.get("missing", 0)),
+                extra=int(raw.get("extra", 0)),
+                diff=[
+                    SoundbiteDiffOut(op=entry["op"], script=entry["script"], heard=entry["heard"])
+                    for entry in raw.get("diff", [])
+                    if isinstance(entry, dict)
+                    and entry.get("op") in ("replace", "delete", "insert")
+                    and isinstance(entry.get("script"), str)
+                    and isinstance(entry.get("heard"), str)
+                ],
+            )
+        heard_out = SoundbiteHeardOut(
+            text=_text(heard.get("text")) or "", words=words, match=match_out
+        )
+    trim = item.proposed_trim if isinstance(item.proposed_trim, dict) else None
+    trim_out = (
+        SoundbiteTrimOut(
+            in_s=trim["in_s"],
+            out_s=trim["out_s"],
+            in_clean=trim.get("in_clean") is True,
+            out_clean=trim.get("out_clean") is True,
+        )
+        if trim is not None
+        and _number_or_none(trim.get("in_s")) is not None
+        and _number_or_none(trim.get("out_s")) is not None
+        else None
+    )
+    return SoundbiteOut(
+        video_url=media_url(item.video_path) if item.usable and item.video_path else None,
+        video_id=_text(capture.get("video_id")),
+        channel=_text(capture.get("channel")),
+        upload_date=_text(capture.get("upload_date")),
+        licence=cast(Any, capture.get("licence")),
+        window=window_out,
+        quote_at_s=at_out,
+        transcription=SoundbiteTranscriptionOut(
+            status=state, error=error, job_id=job.id if job is not None else None
+        ),
+        heard=heard_out,
+        fidelity=cast(Any, item.fidelity),
+        proposed_trim=trim_out,
+        flags=[
+            SoundbiteFlagOut(code=entry["code"], message=entry["message"])
+            for entry in (item.flags if isinstance(item.flags, list) else [])
+            if isinstance(entry, dict)
+            and isinstance(entry.get("code"), str)
+            and isinstance(entry.get("message"), str)
+        ],
+    )
+
+
 def _item_out(
     item: EvidenceItem,
     verdict: str | None,
     frame: tuple[int, int],
     preview: evidence_clips.Preview | None,
+    job: Job | None,
 ) -> ReviewItemOut:
     capture = item.capture if isinstance(item.capture, dict) else {}
-    readable = evidence_clip_layout.readability(capture, *frame) if item.usable else None
+    is_video = item.kind == "video"
+    readable = (
+        evidence_clip_layout.readability(capture, *frame) if item.usable and not is_video else None
+    )
     raw_rects = capture.get("rects")
     parsed = [_numbers(entry, 4) for entry in (raw_rects if isinstance(raw_rects, list) else [])]
     rects = [rect for rect in parsed if rect is not None]
@@ -593,7 +781,8 @@ def _item_out(
         page=page if isinstance(page, int) and not isinstance(page, bool) else None,
         verdict=cast(Any, verdict) if item.usable else None,
         readability=ReadabilityOut(**readable) if readable is not None else None,
-        preview=_preview_out(preview) if item.usable else None,
+        preview=_preview_out(preview) if item.usable and not is_video else None,
+        soundbite=_soundbite_out(item, job) if is_video else None,
     )
 
 
@@ -601,6 +790,7 @@ def _claim_out(
     claim: evidence_review.ReviewClaim,
     frame: tuple[int, int],
     previews: dict[str, evidence_clips.Preview],
+    jobs: dict[int, Job],
 ) -> ReviewClaimOut:
     entry, result = claim.entry, claim.result
     problems = [text for text in result.get("problems", []) if isinstance(text, str)]
@@ -627,7 +817,11 @@ def _claim_out(
         warnings=[text for text in result.get("warnings", []) if isinstance(text, str)],
         items=[
             _item_out(
-                item, claim.decision.verdicts.get(item.item_key), frame, previews.get(item.item_key)
+                item,
+                claim.decision.verdicts.get(item.item_key),
+                frame,
+                previews.get(item.item_key),
+                jobs.get(item.id),
             )
             for item in claim.items
         ],
@@ -644,6 +838,9 @@ async def _review_out(
     frame = (project.out_width, project.out_height)
     keys = [item.item_key for claim in view.claims for item in claim.items if item.usable]
     previews = await evidence_clips.previews_for(session, project, keys)
+    jobs = await soundbite_clips.jobs_of(
+        session, [item for claim in view.claims for item in claim.items if item.kind == "video"]
+    )
     return EvidenceReviewOut(
         round_id=view.round_id,
         import_version=view.import_version,
@@ -652,14 +849,16 @@ async def _review_out(
         editable=view.editable,
         blocked_reason=view.blocked_reason,
         undecided=view.undecided,
-        claims=[_claim_out(claim, frame, previews) for claim in view.claims],
+        claims=[_claim_out(claim, frame, previews, jobs) for claim in view.claims],
     )
 
 
 def _review_refusal(exc: evidence_review.EvidenceReviewError) -> HTTPException:
     if isinstance(exc, evidence_review.ClaimNotInRoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
-    if isinstance(exc, evidence_review.ImportRunningError):
+    if isinstance(
+        exc, evidence_review.ImportRunningError | evidence_review.TranscriptionRunningError
+    ):
         return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
@@ -735,6 +934,28 @@ async def preview_evidence_item(
     project = await load_project(session, project_id)
     try:
         job = await evidence_clips.queue_preview(session, project, item_key)
+    except evidence_review.EvidenceReviewError as exc:
+        raise _review_refusal(exc) from exc
+    dispatcher.nudge()
+    return EvidenceBriefRun(job_id=job.id)
+
+
+@router.post(
+    "/projects/{project_id}/evidence/review/items/{item_key}/transcribe",
+    response_model=EvidenceBriefRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_REVIEW_REFUSED,
+)
+async def transcribe_evidence_item(
+    project_id: int, item_key: str, session: SessionDep
+) -> EvidenceBriefRun:
+    """Queues the transcription of a sound bite clip again (SB-006), when it failed. 422 when the
+    piece is not a clip of the newest import that has no heard words, 409 while it is already
+    being transcribed or an import runs.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await evidence_review.retry_transcription(session, project, item_key)
     except evidence_review.EvidenceReviewError as exc:
         raise _review_refusal(exc) from exc
     dispatcher.nudge()

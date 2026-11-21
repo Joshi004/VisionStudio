@@ -41,18 +41,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import EvidenceImport, EvidenceItem, EvidenceRound, Job, Project
 from app.jobs import store
-from app.services import evidence_claims, evidence_rounds
+from app.services import evidence_claims, evidence_rounds, ffmpeg, soundbite_clips
 from app.services.evidence_checks import (
     DEFAULT_MAX_EVIDENCE,
     MAX_RESULT_BYTES,
     PLAIN_NAME,
-    SLOTS,
     ClaimCheck,
     FileProblem,
     FileRead,
     PieceCheck,
     check_claim,
+    mark_unusable,
     no_result,
+    slots_for,
 )
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -64,7 +65,16 @@ JOB_TYPE: Final = "import_evidence"
 MAX_ROUND_BYTES: Final = 1024 * 1024 * 1024
 _MAX_FOLDER_ENTRIES: Final = 1000
 # The extension a stored file gets, by slot.
-_EXTENSIONS: Final = {"image": "png", "context": "png", "text": "txt", "pdf": "pdf"}
+_EXTENSIONS: Final = {
+    "image": "png",
+    "context": "png",
+    "text": "txt",
+    "pdf": "pdf",
+    "video": "mp4",
+    "captions": "json",
+}
+# The slots an earlier import stored, with the item columns that hold their path and hash.
+_STORED_SLOTS: Final = ("image", "context", "text", "pdf", "video", "captions")
 
 NO_ROUND_MESSAGE: Final = "There is no research round yet. Write the brief first."
 BRIEF_RUNNING_MESSAGE: Final = "A brief is being written. Import when it is done."
@@ -155,7 +165,7 @@ def _named_files(result: dict[str, Any], max_evidence: int) -> list[str]:
         capture = item.get("capture") if isinstance(item, dict) else None
         if not isinstance(capture, dict):
             continue
-        for key, _slot, _kind, _limit in SLOTS:
+        for key, _slot, _kind, _limit in slots_for(item.get("kind")):
             name = capture.get(key)
             if isinstance(name, str) and PLAIN_NAME.match(name) and name not in names:
                 names.append(name)
@@ -170,7 +180,7 @@ def _slot_limit(result: dict[str, Any], name: str) -> int:
     for item in evidence if isinstance(evidence, list) else []:
         capture = item.get("capture") if isinstance(item, dict) else None
         if isinstance(capture, dict):
-            for key, _slot, _kind, slot_limit in SLOTS:
+            for key, _slot, _kind, slot_limit in slots_for(item.get("kind")):
                 if capture.get(key) == name:
                     limit = max(limit, slot_limit)
     return limit
@@ -236,6 +246,59 @@ def has_results(project_id: int, round_no: int, claim_ids: Sequence[str]) -> boo
         if path.is_file() and not path.is_symlink():
             return True
     return False
+
+
+# --- The media of a video (SB-006) -------------------------------------------------------------
+
+# A video's real length may differ from its window by this much (the capture tool's limit).
+VIDEO_DURATION_TOLERANCE_S: Final = 0.5
+MAX_VIDEO_HEIGHT: Final = 1080
+
+
+def media_problems(probe: ffmpeg.VideoProbe, capture: dict[str, Any]) -> list[str]:
+    """Why a video is not what the capture tool makes and the render reads, as sentences. Pure.
+    `capture` is the tidied capture of the piece (the window and the size the tool wrote)."""
+    problems: list[str] = []
+    if probe.codec_name != "h264":
+        problems.append(f"The video codec is {probe.codec_name!r}, not h264.")
+    if probe.audio is None:
+        problems.append("The video has no sound.")
+    window = capture["window"]
+    expected = window["end_s"] - window["start_s"]
+    if probe.duration_s is None or abs(probe.duration_s - expected) > VIDEO_DURATION_TOLERANCE_S:
+        shown = "unknown" if probe.duration_s is None else f"{probe.duration_s:.2f} s"
+        problems.append(
+            f"The video lasts {shown}, but its window is {expected:.2f} s "
+            f"(more than {VIDEO_DURATION_TOLERANCE_S} s apart)."
+        )
+    if probe.height is not None and probe.height > MAX_VIDEO_HEIGHT:
+        problems.append(f"The video is {probe.height} px high, the limit is {MAX_VIDEO_HEIGHT}.")
+    if [probe.width, probe.height] != capture["video_px"]:
+        problems.append(
+            f"The video is {probe.width}x{probe.height}, but video_px says {capture['video_px']}."
+        )
+    return problems
+
+
+async def _media_problem(data: bytes, capture: dict[str, Any]) -> str | None:
+    """Probes and decodes a video's bytes (through a temp file that is removed again) and says
+    what is wrong with it, or None. ffprobe and ffmpeg read it as the render will."""
+    storage = get_storage()
+    temp_path = await anyio.to_thread.run_sync(storage.new_temp_path, "mp4")
+    try:
+        await anyio.to_thread.run_sync(_write_new, temp_path, data)
+        probe = await ffmpeg.probe_video(temp_path)
+        if probe is None:
+            return "The video cannot be read (ffprobe found no picture in it)."
+        problems = media_problems(probe, capture)
+        if problems:
+            return " ".join(problems)
+        decode = await ffmpeg.decode_problem(temp_path)
+        if decode is not None:
+            return f"The video does not play to the end: {decode}"
+        return None
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 # --- Starting an import ------------------------------------------------------------------------
@@ -330,15 +393,17 @@ async def _earlier_files(session: AsyncSession, round_id: int) -> dict[tuple[str
             EvidenceItem.text_sha256,
             EvidenceItem.pdf_path,
             EvidenceItem.pdf_sha256,
+            EvidenceItem.video_path,
+            EvidenceItem.video_sha256,
+            EvidenceItem.captions_path,
+            EvidenceItem.captions_sha256,
         )
         .join(EvidenceImport, EvidenceImport.id == EvidenceItem.import_id)
         .where(EvidenceImport.round_id == round_id)
     )
     found: dict[tuple[str, str], str] = {}
     for row in (await session.execute(statement)).all():
-        for slot, path, sha in zip(
-            ("image", "context", "text", "pdf"), row[0::2], row[1::2], strict=True
-        ):
+        for slot, path, sha in zip(_STORED_SLOTS, row[0::2], row[1::2], strict=True):
             if path is not None and sha is not None:
                 found[(_EXTENSIONS[slot], sha)] = path
     return found
@@ -465,6 +530,17 @@ async def make_import(
                     folder_problem=read.folder_problem,
                 )
             )
+        for piece in check.pieces:
+            if piece.usable and piece.kind == "video" and piece.capture is not None:
+                video_bytes = read.files[piece.files["video"][0]]
+                assert isinstance(video_bytes, bytes)
+                problem = await _media_problem(video_bytes, piece.capture)
+                if problem is not None:
+                    mark_unusable(claim_id, piece, "media", problem)
+        if check.pieces and not any(piece.usable for piece in check.pieces):
+            sentence = "No piece of evidence for this claim passed the checks."
+            if sentence not in check.warnings:
+                check.warnings.append(sentence)
         checks[claim_id] = check
         copied: list[tuple[PieceCheck, dict[str, tuple[str, str]]]] = []
         for piece in check.pieces:
@@ -493,10 +569,19 @@ async def make_import(
     )
     session.add(record)
     await session.flush()
+    soundbite_claims = {claim["id"] for claim in claims if claim.get("want") == "soundbite"}
+    clips: list[EvidenceItem] = []
     for claim_id, pairs in stored.items():
         for piece, paths in pairs:
-            session.add(_item_row(project_id, record.id, claim_id, piece, paths))
+            row_item = _item_row(project_id, record.id, claim_id, piece, paths)
+            session.add(row_item)
+            if piece.usable and piece.kind == "video" and claim_id in soundbite_claims:
+                clips.append(row_item)
     await session.flush()
+    # The clips of sound bite claims are transcribed (SB-006). A video kept as context for an
+    # ordinary claim is only imported.
+    for clip in clips:
+        await soundbite_clips.queue(session, clip)
     return record
 
 
@@ -535,6 +620,10 @@ def _item_row(
         text_sha256=sha_of("text"),
         pdf_path=path_of("pdf"),
         pdf_sha256=sha_of("pdf"),
+        video_path=path_of("video"),
+        video_sha256=sha_of("video"),
+        captions_path=path_of("captions"),
+        captions_sha256=sha_of("captions"),
         usable=piece.usable,
         checks=piece.checks,
         warnings=piece.warnings,

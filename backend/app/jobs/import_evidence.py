@@ -13,6 +13,9 @@ round is no longer the newest, or no longer has the claims that count, nothing i
 job fails with the reason. If saving fails, the files this job copied are removed again; a file
 an earlier import stored is never removed.
 
+The transcription of each clip of a sound bite claim is queued with the rows
+(`transcribe_evidence_clip`, SB-006); this job only makes them.
+
 A local job with `start_again`: after a restart it runs from the start. Files copied by a run
 that was cut off by a restart stay in the media folder unused.
 """
@@ -24,7 +27,7 @@ from typing import Final
 
 from app.db.models import Project
 from app.db.session import SessionLocal
-from app.jobs import phase_writer, phases, store
+from app.jobs import dispatcher, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.services import evidence_import
 from app.services.storage import StorageError
@@ -76,6 +79,8 @@ class ImportEvidenceHandler(JobHandler):
                     await evidence_import.discard_files(new_paths)
                     return
                 await session.commit()
+                # Clips of sound bite claims were queued for transcription with the rows.
+                dispatcher.nudge()
             except evidence_import.EvidenceImportError as exc:
                 await session.rollback()
                 await evidence_import.discard_files(new_paths)

@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 from PIL import Image, UnidentifiedImageError
 
@@ -42,7 +43,7 @@ TOOL_NAME: Final = "visio-evidence-capture"
 
 STATUSES: Final = ("found", "partial", "not_found", "contradicted", "blocked")
 STATUSES_WITH_EVIDENCE: Final = ("found", "partial", "contradicted")
-KINDS: Final = ("web", "pdf")
+KINDS: Final = ("web", "pdf", "video")
 RELATIONS: Final = ("supports", "partly_supports", "contradicts", "context")
 TIERS: Final = ("primary", "secondary", "other")
 
@@ -78,6 +79,33 @@ SLOTS: Final = (
     ("source_copy", "pdf", "pdf", MAX_PDF_BYTES),
 )
 SLOT_ORDER: Final = tuple(slot for _, slot, _, _ in SLOTS)
+
+# The files of a `video` piece (SB-006): the downloaded window, YouTube's caption track and the
+# captions' plain text. The slot names are the ones the import stores them under; the text copy
+# is the same `text` slot a web page has.
+MAX_VIDEO_BYTES: Final = 150 * 1024 * 1024
+MAX_CAPTIONS_BYTES: Final = 5 * 1024 * 1024
+VIDEO_SLOTS: Final = (
+    ("media", "video", "mp4", MAX_VIDEO_BYTES),
+    ("captions", "captions", "json", MAX_CAPTIONS_BYTES),
+    ("context_text", "text", "text", MAX_TEXT_BYTES),
+)
+VIDEO_SLOT_ORDER: Final = tuple(slot for _, slot, _, _ in VIDEO_SLOTS)
+
+# The limits of the capture tool for a video (`visio_evidence_capture`), so that a clip which
+# passes its `validate` imports.
+MAX_WINDOW_S: Final = 90.0
+VIDEO_DURATION_TOLERANCE_S: Final = 0.5
+MAX_VIDEO_HEIGHT: Final = 1080
+LICENCES: Final = ("standard", "creative_commons", "unknown")
+VIDEO_ID: Final = re.compile(r"^[A-Za-z0-9_-]{11}$")
+YOUTUBE_HOSTS: Final = ("youtube.com", "youtu.be")
+
+
+def slots_for(kind: object) -> tuple[tuple[str, str, str, int], ...]:
+    """The file slots of a kind of evidence: result key, short slot name, kind of file, limit."""
+    return VIDEO_SLOTS if kind == "video" else SLOTS
+
 
 PLAIN_NAME: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 EVIDENCE_ID: Final = re.compile(r"^e\d{1,2}$")
@@ -366,6 +394,8 @@ def _check_piece(
     if tier is None:
         shape(f"source_tier must be one of: {', '.join(TIERS)}.")
     source = _tidy_source(item.get("source"), shape)
+    if kind == "video" and source is not None:
+        _check_youtube_source(source, shape)
     quote = _tidy_quote(item.get("quote"), shape)
     what_it_says = item.get("what_it_says")
     if not _is_text(what_it_says):
@@ -392,19 +422,23 @@ def _check_piece(
     # Check 2: files.
     if folder_problem is not None:
         file_problems(folder_problem)
-    data, named = _check_files(capture, files, file_problems)
+    slots = slots_for(kind)
+    data, named = _check_files(capture, files, file_problems, slots)
     image_size = _check_image(data.get("image"), capture, file_problems)
     context_box = None
     if "context_image" in data:
         context_box = _check_context_box(capture.get("context_box"), file_problems)
+    if kind == "video":
+        _check_video_capture(capture, file_problems)
 
-    # Check 3: the quote is in the source.
+    # Check 3: the quote is in the source. For a video the words are proved by the app's own
+    # transcription of the clip (SB-006), not here.
     page = None
-    if quote is not None:
+    if quote is not None and kind != "video":
         page = _check_quote(kind, quote, capture, data, quote_problems)
 
-    # Check 4: rectangles.
-    rects = _check_rects(capture.get("rects"), rect_problems)
+    # Check 4: rectangles. A video has none.
+    rects = None if kind == "video" else _check_rects(capture.get("rects"), rect_problems)
 
     checks = {
         "shape": shape.result(),
@@ -430,7 +464,7 @@ def _check_piece(
                 }
             )
 
-    hashes = {slot: _sha(data.get(key)) for key, slot, _, _ in SLOTS}
+    hashes = {slot: _sha(data.get(key)) for key, slot, _, _ in slots}
     values = {
         "kind": kind,
         "relation": relation,
@@ -461,11 +495,27 @@ def _check_piece(
     if usable:
         piece.files = {
             slot: (named[key], hashes[slot] or "")
-            for key, slot, _, _ in SLOTS
+            for key, slot, _, _ in slots
             if key in named and hashes[slot] is not None
         }
-        piece.capture = _tidy_capture(capture, kind, image_size, context_box, page, rects)
+        if kind == "video":
+            piece.capture = _tidy_video_capture(capture)
+        else:
+            piece.capture = _tidy_capture(capture, kind, image_size, context_box, page, rects)
     return piece
+
+
+def mark_unusable(claim_id: str, piece: PieceCheck, check: str, reason: str) -> None:
+    """Makes a piece that passed the checks unusable for a reason found later (the media check of
+    a video, which needs ffprobe). Its files are not copied, and its key becomes the key of an
+    unusable piece, as for a duplicate."""
+    label = f"evidence {piece.evidence_id}" if not piece.evidence_id.startswith("?") else "evidence"
+    piece.usable = False
+    piece.files = {}
+    piece.capture = None
+    piece.checks[check] = {"ok": False, "reason": reason}
+    piece.reasons.append(f"{label}: {reason}")
+    piece.item_key = _item_key(claim_id, piece_values={}, unusable_id=piece.evidence_id)
 
 
 def _sha(content: bytes | None) -> str | None:
@@ -529,6 +579,15 @@ def _tidy_source(source: object, shape: _Reasons) -> dict[str, Any] | None:
     return out if ok else None
 
 
+def _check_youtube_source(source: dict[str, Any], shape: _Reasons) -> None:
+    """A video piece comes from YouTube only (SB-5): its two addresses must be on a YouTube
+    host."""
+    for key in ("url", "final_url"):
+        host = (urlsplit(source[key]).hostname or "").lower() if key in source else ""
+        if not any(host == name or host.endswith(f".{name}") for name in YOUTUBE_HOSTS):
+            shape(f"source.{key} must be a YouTube address for a video.")
+
+
 def _tidy_quote(quote: object, shape: _Reasons) -> str | None:
     if not _is_text(quote):
         shape("quote is missing.")
@@ -551,6 +610,13 @@ def _file_type_ok(kind: str, content: bytes) -> bool:
         return content.startswith(PNG_SIGNATURE)
     if kind == "pdf":
         return b"%PDF-" in content[:1024]
+    if kind == "mp4":
+        return content[4:8] == b"ftyp"
+    if kind == "json":
+        try:
+            return isinstance(json.loads(content.decode("utf-8")), dict)
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            return False
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -559,7 +625,10 @@ def _file_type_ok(kind: str, content: bytes) -> bool:
 
 
 def _check_files(
-    capture: dict[str, Any], files: dict[str, FileRead], problem: _Reasons
+    capture: dict[str, Any],
+    files: dict[str, FileRead],
+    problem: _Reasons,
+    slots: tuple[tuple[str, str, str, int], ...] = SLOTS,
 ) -> tuple[dict[str, bytes], dict[str, str]]:
     """Checks the files a capture names. Returns the bytes of those read as the right type, by
     result key, and the names the capture gave, by result key.
@@ -571,11 +640,13 @@ def _check_files(
     data: dict[str, bytes] = {}
     named: dict[str, str] = {}
     used: set[str] = set()
-    for key, _slot, kind, limit in SLOTS:
+    # A web page or PDF must name its image; a video must name all of its three files.
+    required = {key for key, _slot, _kind, _limit in slots} if slots is VIDEO_SLOTS else {"image"}
+    for key, _slot, kind, limit in slots:
         name = capture.get(key)
         if name is None:
-            if key == "image":
-                problem("capture.image is missing.")
+            if key in required:
+                problem(f"capture.{key} is missing.")
             continue
         if not isinstance(name, str) or not PLAIN_NAME.match(name):
             problem(f"capture.{key}: the file name {shown(name)} is not a plain name.")
@@ -736,7 +807,96 @@ def _check_rects(rects: object, problem: _Reasons) -> list[list[float]] | None:
     return good if valid else None
 
 
+# --- A video's own details (SB-006) -------------------------------------------------------------
+
+
+def _check_video_capture(capture: dict[str, Any], problem: _Reasons) -> None:
+    """The details the capture tool wrote for a video, as its `validate` checks them: the video
+    id, the licence, the dates, the window in the video, where the quote is in it, and the size.
+    The media itself (codec, streams, length) is probed by the import (`evidence_import`).
+    """
+    video_id = capture.get("video_id")
+    if not (isinstance(video_id, str) and VIDEO_ID.match(video_id)):
+        problem("capture.video_id must be 11 characters.")
+    if capture.get("licence") not in LICENCES:
+        problem(f"capture.licence must be one of: {', '.join(LICENCES)}.")
+    upload_date = capture.get("upload_date")
+    if upload_date is not None:
+        try:
+            if not (isinstance(upload_date, str) and DATE_TEXT.match(upload_date)):
+                raise ValueError
+            date.fromisoformat(upload_date)
+        except ValueError:
+            problem("capture.upload_date must be a date written YYYY-MM-DD, or null.")
+    for key in ("channel", "channel_id"):
+        value = capture.get(key)
+        if value is not None and not (isinstance(value, str) and len(value) <= 200):
+            problem(f"capture.{key} is not text or is too long.")
+
+    duration = capture.get("duration_s")
+    window = capture.get("window")
+    if not _is_number(duration) or duration <= 0:
+        problem("capture.duration_s must be a number above 0.")
+        return
+    if (
+        not isinstance(window, dict)
+        or not _is_number(window.get("start_s"))
+        or not _is_number(window.get("end_s"))
+    ):
+        problem("capture.window must have start_s and end_s.")
+        return
+    start, end = window["start_s"], window["end_s"]
+    if not 0 <= start < end:
+        problem("the window must start at 0 or later and end after it starts.")
+        return
+    if end > duration + EPSILON:
+        problem(f"the window ends at {end} s, after the video ends ({duration} s).")
+    if end - start > MAX_WINDOW_S + EPSILON:
+        problem(f"the window is {end - start:.1f} s long, the limit is {MAX_WINDOW_S:.0f} s.")
+    at = capture.get("quote_at_s")
+    if (
+        not isinstance(at, dict)
+        or not _is_number(at.get("start"))
+        or not _is_number(at.get("end"))
+        or not at["start"] < at["end"]
+    ):
+        problem("capture.quote_at_s must have a start and a later end.")
+    elif at["start"] < start - EPSILON or at["end"] > end + EPSILON:
+        problem("capture.quote_at_s is outside the window.")
+    size = capture.get("video_px")
+    if (
+        not isinstance(size, list)
+        or len(size) != 2
+        or not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in size)
+    ):
+        problem("capture.video_px must be [width, height].")
+    elif size[1] > MAX_VIDEO_HEIGHT:
+        problem(f"the video is {size[1]} px high, the limit is {MAX_VIDEO_HEIGHT}.")
+
+
 # --- The stored values -------------------------------------------------------------------------
+
+
+def _tidy_video_capture(capture: dict[str, Any]) -> dict[str, Any]:
+    """The `capture` block of a video as stored: what the review (SB-007) and the render (SB-009)
+    draw from. File names and hashes are left out (they are columns of the item).
+    """
+    window = capture["window"]
+    at = capture["quote_at_s"]
+    version = capture.get("tool_version")
+    return {
+        "tool": TOOL_NAME,
+        "tool_version": version if isinstance(version, str) and len(version) <= 20 else None,
+        "video_id": capture["video_id"],
+        "channel": capture.get("channel"),
+        "channel_id": capture.get("channel_id"),
+        "upload_date": capture.get("upload_date"),
+        "licence": capture["licence"],
+        "duration_s": float(capture["duration_s"]),
+        "window": {"start_s": float(window["start_s"]), "end_s": float(window["end_s"])},
+        "quote_at_s": {"start": float(at["start"]), "end": float(at["end"])},
+        "video_px": list(capture["video_px"]),
+    }
 
 
 def _tidy_capture(
@@ -779,6 +939,9 @@ def _item_key(claim_id: str, *, piece_values: dict[str, Any], unusable_id: str |
     rects = piece_values.get("rects")
     quote = piece_values.get("quote")
     hashes = piece_values.get("hashes") or {}
+    # The slots of a web page or PDF are the same list as before sound bites, so the key of
+    # such a piece (and the owner's decisions that name it) does not change.
+    order = VIDEO_SLOT_ORDER if piece_values.get("kind") == "video" else SLOT_ORDER
     payload: dict[str, Any] = {
         "claim": claim_id,
         "kind": piece_values.get("kind"),
@@ -786,7 +949,7 @@ def _item_key(claim_id: str, *, piece_values: dict[str, Any], unusable_id: str |
         "quote": evidence_text.normalise(quote) if isinstance(quote, str) else None,
         "page": piece_values.get("page"),
         "rects": [[round(v, 6) for v in rect] for rect in rects] if rects else None,
-        "files": [hashes.get(slot) for slot in SLOT_ORDER],
+        "files": [hashes.get(slot) for slot in order],
     }
     if unusable_id is not None:
         payload["unusable"] = unusable_id

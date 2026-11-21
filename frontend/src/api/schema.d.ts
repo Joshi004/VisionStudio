@@ -826,6 +826,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence/review/items/{item_key}/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transcribe Evidence Item
+         * @description Queues the transcription of a sound bite clip again (SB-006), when it failed. 422 when the
+         *     piece is not a clip of the newest import that has no heard words, 409 while it is already
+         *     being transcribed or an import runs.
+         */
+        post: operations["transcribe_evidence_item_api_projects__project_id__evidence_review_items__item_key__transcribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -14949,7 +14971,7 @@ export interface components {
             /** Warnings */
             warnings: string[];
             /** Kind */
-            kind: ("web" | "pdf") | null;
+            kind: ("web" | "pdf" | "video") | null;
             /** Relation */
             relation: ("supports" | "partly_supports" | "contradicts" | "context") | null;
             /** Source Tier */
@@ -14977,6 +14999,7 @@ export interface components {
             verdict: ("accepted" | "rejected") | null;
             readability: components["schemas"]["ReadabilityOut"] | null;
             preview: components["schemas"]["PreviewOut"] | null;
+            soundbite: components["schemas"]["SoundbiteOut"] | null;
         };
         /**
          * ReviewOut
@@ -17481,6 +17504,121 @@ export interface components {
             avoid: string[];
         };
         /**
+         * SoundbiteDiffOut
+         * @description One difference between the claim's words and the heard words (normalised words).
+         */
+        SoundbiteDiffOut: {
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "replace" | "delete" | "insert";
+            /** Script */
+            script: string;
+            /** Heard */
+            heard: string;
+        };
+        /** SoundbiteFlagOut */
+        SoundbiteFlagOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /** SoundbiteHeardOut */
+        SoundbiteHeardOut: {
+            /** Text */
+            text: string;
+            /** Words */
+            words: components["schemas"]["SoundbiteWordOut"][];
+            match: components["schemas"]["SoundbiteMatchOut"] | null;
+        };
+        /**
+         * SoundbiteMatchOut
+         * @description Where the claim's words are among the heard words: positions in `heard.words`, both
+         *     included.
+         */
+        SoundbiteMatchOut: {
+            /** First */
+            first: number;
+            /** Last */
+            last: number;
+            /** Percent */
+            percent: number;
+            /** Missing */
+            missing: number;
+            /** Extra */
+            extra: number;
+            /** Diff */
+            diff: components["schemas"]["SoundbiteDiffOut"][];
+        };
+        /**
+         * SoundbiteOut
+         * @description What the app knows about an imported clip of a `video` piece (SB-006). Shown read-only
+         *     until the sound bite review (SB-007).
+         */
+        SoundbiteOut: {
+            /** Video Url */
+            video_url: string | null;
+            /** Video Id */
+            video_id: string | null;
+            /** Channel */
+            channel: string | null;
+            /** Upload Date */
+            upload_date: string | null;
+            /** Licence */
+            licence: ("standard" | "creative_commons" | "unknown") | null;
+            window: components["schemas"]["SoundbiteWindowOut"] | null;
+            quote_at_s: components["schemas"]["SoundbiteQuoteAtOut"] | null;
+            transcription: components["schemas"]["SoundbiteTranscriptionOut"];
+            heard: components["schemas"]["SoundbiteHeardOut"] | null;
+            /** Fidelity */
+            fidelity: ("exact" | "near" | "paraphrase" | "mismatch") | null;
+            proposed_trim: components["schemas"]["SoundbiteTrimOut"] | null;
+            /** Flags */
+            flags: components["schemas"]["SoundbiteFlagOut"][];
+        };
+        /**
+         * SoundbiteQuoteAtOut
+         * @description Where the captions put the quote in the source video, a first guess only.
+         */
+        SoundbiteQuoteAtOut: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+        };
+        /**
+         * SoundbiteTranscriptionOut
+         * @description Whether the app has heard the clip yet. `failed` says why and can be asked again.
+         */
+        SoundbiteTranscriptionOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "in_progress" | "failed" | "done";
+            /** Error */
+            error: string | null;
+            /** Job Id */
+            job_id: number | null;
+        };
+        /**
+         * SoundbiteTrimOut
+         * @description The proposed in and out points, seconds from the start of the downloaded window. A point
+         *     is clean when a quiet gap was found next to the word there.
+         */
+        SoundbiteTrimOut: {
+            /** In S */
+            in_s: number;
+            /** Out S */
+            out_s: number;
+            /** In Clean */
+            in_clean: boolean;
+            /** Out Clean */
+            out_clean: boolean;
+        };
+        /**
          * SoundbiteWarningOut
          * @description One script rule a sound bite breaks without being blocked (SB-005).
          */
@@ -17491,6 +17629,28 @@ export interface components {
             message: string;
             /** Words */
             words: string[];
+        };
+        /**
+         * SoundbiteWindowOut
+         * @description A stretch of the video, in seconds of the source video.
+         */
+        SoundbiteWindowOut: {
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+        };
+        /**
+         * SoundbiteWordOut
+         * @description A word Parakeet heard, in seconds from the start of the downloaded window.
+         */
+        SoundbiteWordOut: {
+            /** Text */
+            text: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
         };
         /** SourceApprovalOut */
         SourceApprovalOut: {
@@ -21876,6 +22036,56 @@ export interface operations {
         };
     };
     preview_evidence_item_api_projects__project_id__evidence_review_items__item_key__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    transcribe_evidence_item_api_projects__project_id__evidence_review_items__item_key__transcribe_post: {
         parameters: {
             query?: never;
             header?: never;

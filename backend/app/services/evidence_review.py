@@ -33,9 +33,9 @@ from typing import Any, Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import EvidenceItem, EvidenceReview, Project
+from app.db.models import EvidenceItem, EvidenceReview, Job, Project
 from app.jobs import store
-from app.services import evidence_import, evidence_rounds
+from app.services import evidence_import, evidence_rounds, soundbite_clips
 
 ACCEPTED: Final = "accepted"
 REJECTED: Final = "rejected"
@@ -56,6 +56,10 @@ class ClaimNotInRoundError(EvidenceReviewError):
 
 class ImportRunningError(EvidenceReviewError):
     """An import is going on, so the pieces to decide on are about to change."""
+
+
+class TranscriptionRunningError(EvidenceReviewError):
+    """The clip's transcription is already queued or running."""
 
 
 # --- Decisions (pure) ----------------------------------------------------------------------
@@ -272,8 +276,14 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded | EvidenceRe
         by_claim.setdefault(item.claim_id, []).append(item)
     entries = _brief_claims(row.brief)
     claim_ids = [entry["id"] for entry in entries]
+    # A video clip (SB-006) is shown but gets no verdict until the sound bite review exists
+    # (SB-007): it is left out of the pieces a decision may name.
     keys = {
-        claim_id: [item.item_key for item in by_claim.get(claim_id, []) if item.usable]
+        claim_id: [
+            item.item_key
+            for item in by_claim.get(claim_id, [])
+            if item.usable and item.kind != "video"
+        ]
         for claim_id in claim_ids
     }
     latest = await latest_review(session, row.id)
@@ -496,3 +506,34 @@ async def finish_review(session: AsyncSession, project: Project) -> ReviewView:
     if not _unchanged(loaded, content, done=True):
         await _add_version(session, project, row.id, loaded.import_id, content, done=True)
     return await view(session, project)
+
+
+async def retry_transcription(session: AsyncSession, project: Project, item_key: str) -> Job:
+    """Queues the transcription of a sound bite clip again ("Transcribe again"). Only for a usable
+    clip of the newest import that has no heard words and no active job. Commits. Raises
+    TranscriptionRunningError (a job is active) or EvidenceReviewError.
+    """
+    loaded = await _load(session, project)
+    if isinstance(loaded, EvidenceReviewError):
+        raise loaded
+    if loaded.refusal is not None:
+        raise loaded.refusal
+    item = next(
+        (
+            entry
+            for claim in loaded.view.claims
+            for entry in claim.items
+            if entry.item_key == item_key
+        ),
+        None,
+    )
+    if item is None or not item.usable or item.kind != "video":
+        raise EvidenceReviewError("This is not a usable clip of the newest import.")
+    if item.transcribe_job_id is None:
+        raise EvidenceReviewError("This clip is not for a sound bite, so it is not transcribed.")
+    if item.heard_words is not None:
+        raise EvidenceReviewError("This clip is transcribed already.")
+    job = (await soundbite_clips.jobs_of(session, [item])).get(item.id)
+    if job is not None and job.status in store.ACTIVE_STATUSES:
+        raise TranscriptionRunningError("The clip is being transcribed. Wait for it to finish.")
+    return await soundbite_clips.queue(session, item, commit=True)

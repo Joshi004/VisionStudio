@@ -26,6 +26,7 @@ import {
   type EvidenceReviewItem,
 } from "../../api/evidence";
 import { EvidencePreview, ReadabilityWarning } from "./EvidencePreview";
+import { SoundbiteClipPanel } from "./SoundbiteClipPanel";
 import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
 
 type EvidenceReviewProps = {
@@ -141,6 +142,7 @@ function SourceLine({ item }: { item: EvidenceReviewItem }) {
 }
 
 type PieceProps = {
+  projectId: number;
   item: EvidenceReviewItem;
   shown: boolean;
   disabled: boolean;
@@ -151,6 +153,7 @@ type PieceProps = {
 };
 
 function PieceCard({
+  projectId,
   item,
   shown,
   disabled,
@@ -160,6 +163,8 @@ function PieceCard({
   onPreview,
 }: PieceProps) {
   const [contextOpen, setContextOpen] = useState(false);
+  // Until the sound bite review (SB-007) a clip is only shown, never decided on.
+  const isClip = item.kind === "video";
   return (
     <Paper withBorder p="sm" radius="md">
       <Stack gap="xs">
@@ -177,7 +182,7 @@ function PieceCard({
               {TIER_LABEL[item.source_tier] ?? item.source_tier}
             </Badge>
           )}
-          {item.usable && item.verdict === null && (
+          {item.usable && !isClip && item.verdict === null && (
             <Badge size="sm" color="yellow" variant="light">
               Undecided
             </Badge>
@@ -249,7 +254,9 @@ function PieceCard({
 
         <ReadabilityWarning item={item} />
 
-        {item.usable && (
+        {isClip && <SoundbiteClipPanel item={item} projectId={projectId} disabled={disabled} />}
+
+        {item.usable && !isClip && (
           <Group gap="sm">
             <Button
               size="xs"
@@ -281,7 +288,7 @@ function PieceCard({
           </Group>
         )}
 
-        {item.usable && item.verdict === "accepted" && (
+        {item.usable && !isClip && item.verdict === "accepted" && (
           <EvidencePreview
             item={item}
             disabled={disabled}
@@ -335,6 +342,7 @@ function decisionOf(claim: EvidenceReviewClaim): EvidenceClaimDecision {
 }
 
 function ClaimCard({
+  projectId,
   claim,
   editable,
   saving,
@@ -342,6 +350,7 @@ function ClaimCard({
   previewingKey,
   onPreview,
 }: {
+  projectId: number;
   claim: EvidenceReviewClaim;
   editable: boolean;
   saving: boolean;
@@ -351,7 +360,7 @@ function ClaimCard({
 }) {
   const key = claim.status ?? claim.result_state;
   const disabled = !editable || saving;
-  const usable = claim.items.filter((item) => item.usable);
+  const usable = claim.items.filter((item) => item.usable && item.kind !== "video");
   const save = (decision: EvidenceClaimDecision) => onSave(claim.claim_id, decision);
 
   const setVerdict = (itemKey: string, verdict: "accepted" | "rejected") => {
@@ -464,6 +473,7 @@ function ClaimCard({
         {claim.items.map((item) => (
           <PieceCard
             key={item.item_key}
+            projectId={projectId}
             item={item}
             shown={claim.shown.includes(item.item_key)}
             disabled={disabled}
@@ -509,7 +519,7 @@ function ClaimCard({
           label="No proof on screen"
           description={
             usable.length === 0
-              ? "This claim has no usable evidence. It stays in the script without an evidence shot."
+              ? "This claim has no usable evidence to show as a screenshot. It stays in the script without an evidence shot."
               : "The claim stays in the script without an evidence shot, even if a piece is accepted."
           }
           checked={claim.no_proof_on_screen}
@@ -562,6 +572,7 @@ export function EvidenceReview({ projectId }: EvidenceReviewProps) {
 
       {data?.claims.map((claim) => (
         <ClaimCard
+          projectId={projectId}
           key={claim.claim_id}
           claim={claim}
           editable={data.editable}
