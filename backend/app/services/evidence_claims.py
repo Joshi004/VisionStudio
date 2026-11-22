@@ -60,6 +60,11 @@ KINDS: Final = ("number", "quote", "statement", "event", "other")
 WANT_EVIDENCE: Final = "evidence"
 WANT_SOUNDBITE: Final = "soundbite"
 WANTS: Final = (WANT_EVIDENCE, WANT_SOUNDBITE)
+# Who last chose `want` for a claim: the owner (the controls on the claim card) or the model (when
+# it proposed claims, SB-015). The model never changes a claim whose `want` the owner chose. A
+# claim nobody chose for has None.
+WANT_BY_OWNER: Final = "owner"
+WANT_BY_GLM: Final = "glm"
 # The longest name an owner may give for who says a sound bite.
 SPEAKER_MAX_CHARS: Final = 100
 # The longest note an owner may add to a claim.
@@ -77,11 +82,12 @@ _CLAIM_FIELDS: Final = (
     "kind_hint",
     "want",
     "speaker",
+    "want_by",
     "reason",
     "kept",
 )
-# What a claim stored before sound bites reads as.
-_CLAIM_DEFAULTS: Final = {"want": WANT_EVIDENCE, "speaker": None}
+# What a claim stored before sound bites (or before the model chose them) reads as.
+_CLAIM_DEFAULTS: Final = {"want": WANT_EVIDENCE, "speaker": None, "want_by": None}
 
 OFF_MESSAGE: Final = (
     "Evidence is only for an explainer with a continuous voice and evidence switched on, and "
@@ -430,6 +436,7 @@ async def add_mark(
             "kind_hint": kind,
             "want": WANT_EVIDENCE,
             "speaker": None,
+            "want_by": None,
             "reason": "",
             "kept": True,
         }
@@ -456,6 +463,8 @@ def _apply_want(
         if speaker is not None and new_speaker is not None:
             raise EvidenceClaimsError("Only a sound bite has a speaker. Choose sound bite first.")
         changed["want"], changed["speaker"] = WANT_EVIDENCE, None
+        if claim["want"] != WANT_EVIDENCE:
+            changed["want_by"] = WANT_BY_OWNER
         return
     if changed["kept"] is False or claim["words_changed"]:
         raise EvidenceClaimsError(
@@ -467,6 +476,8 @@ def _apply_want(
     if new_speaker is None:
         raise EvidenceClaimsError("Say who speaks the quote before choosing a sound bite.")
     changed["want"], changed["speaker"] = WANT_SOUNDBITE, new_speaker
+    if claim["want"] != WANT_SOUNDBITE or claim["speaker"] != new_speaker:
+        changed["want_by"] = WANT_BY_OWNER
 
 
 async def update_claim(
@@ -569,14 +580,23 @@ async def save_ai_version(
     based_on_version: int | None,
     script_hash: str,
     proposals: Sequence[dict[str, Any]],
-) -> EvidenceClaimList:
+    soundbites: Sequence[dict[str, str]] = (),
+) -> tuple[EvidenceClaimList, list[dict[str, str]]]:
     """Adds the next version with the model's proposals (`source` is `ai`). Flushes but does not
-    commit: the job commits it together with finishing itself.
+    commit: the job commits it together with finishing itself. Answers the version and the sound
+    bite choices of the model that were not applied, as `[{claim, why}]`.
 
-    `proposals` are `{start, end, text, kind_hint, reason}`, already found in the story as it was
-    when the job was queued. The claims the owner has decided on stay; the proposals the owner
-    has not decided on are replaced (one with the same words and place keeps its id). Raises
-    EvidenceClaimsError when the story or the claims are no longer what the job started from.
+    `proposals` are `{start, end, text, kind_hint, reason}` (and `soundbite`, `speaker` when the
+    model chose a sound bite), already found in the story as it was when the job was queued.
+    `soundbites` are the model's choices among the claims already marked, `{id, speaker}`. The
+    claims the owner has decided on stay; the proposals the owner has not decided on are replaced
+    (one with the same words and place keeps its id). Raises EvidenceClaimsError when the story
+    or the claims are no longer what the job started from.
+
+    **The model's sound bite choices** (SB-015) are applied only when the code rules allow:
+    a speaker is named and the words pass `soundbite_rules.quote_problem`; for a claim already
+    marked, also that it counts, is still in the story, is ordinary evidence now and that the
+    owner never chose its `want`. A choice that is applied is stored with `want_by` `glm`.
     """
     script = project.script_text
     if script is None or script_sha256(script) != script_hash:
@@ -592,12 +612,34 @@ async def save_ai_version(
     }
     next_id = _next_id(row)
     stay = [claim for claim in claims if not is_undecided(claim)]
+    not_applied: list[dict[str, str]] = []
+    marked_by_id = {claim["id"]: claim for claim in stay}
+    for choice in soundbites:
+        claim = marked_by_id.get(choice["id"])
+        label = claim["text"][:80] if claim is not None else choice["id"]
+        why = _marked_refusal(claim, choice["speaker"])
+        if why is not None:
+            not_applied.append({"claim": label, "why": why})
+            continue
+        assert claim is not None
+        claim["want"], claim["speaker"], claim["want_by"] = (
+            WANT_SOUNDBITE,
+            choice["speaker"],
+            WANT_BY_GLM,
+        )
     for proposal in proposals:
         key = (proposal["start"], proposal["end"], proposal["text"])
         claim_id = old_ids.get(key)
         if claim_id is None:
             claim_id = f"c{next_id}"
             next_id += 1
+        want, speaker, want_by = WANT_EVIDENCE, None, None
+        if proposal.get("soundbite"):
+            why = _soundbite_refusal(proposal["text"], proposal.get("speaker"))
+            if why is None:
+                want, speaker, want_by = WANT_SOUNDBITE, proposal["speaker"], WANT_BY_GLM
+            else:
+                not_applied.append({"claim": proposal["text"][:80], "why": why})
         stay.append(
             {
                 "id": claim_id,
@@ -607,13 +649,14 @@ async def save_ai_version(
                 "text": proposal["text"],
                 "hint": "",
                 "kind_hint": proposal["kind_hint"],
-                "want": WANT_EVIDENCE,
-                "speaker": None,
+                "want": want,
+                "speaker": speaker,
+                "want_by": want_by,
                 "reason": proposal["reason"],
                 "kept": None,
             }
         )
-    return await _add_version(
+    version = await _add_version(
         session,
         project,
         source=SOURCE_AI,
@@ -622,6 +665,29 @@ async def save_ai_version(
         claims=stay,
         next_id=next_id,
     )
+    return version, not_applied
+
+
+def _soundbite_refusal(text: str, speaker: str | None) -> str | None:
+    """Why the model may not make words a sound bite, or None when it may: the words must be
+    whole sentences in quotation marks and a speaker must be named.
+    """
+    if not speaker:
+        return "no speaker was named"
+    return soundbite_rules.quote_problem(text)
+
+
+def _marked_refusal(claim: dict[str, Any] | None, speaker: str) -> str | None:
+    """Why the model may not make an already marked claim a sound bite, or None."""
+    if claim is None:
+        return "no such marked claim"
+    if not is_active(claim) or claim["words_changed"]:
+        return "the claim is dropped or its words are no longer in the story"
+    if claim["want_by"] == WANT_BY_OWNER:
+        return "the owner chose what this claim wants"
+    if is_soundbite(claim):
+        return "it is a sound bite already"
+    return _soundbite_refusal(claim["text"], speaker)
 
 
 # --- Reading the state ---------------------------------------------------------------------

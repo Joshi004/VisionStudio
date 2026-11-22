@@ -51,6 +51,7 @@ _INVALID = {
 Origin = Literal["owner", "glm"]
 Kind = Literal["number", "quote", "statement", "event", "other"]
 Want = Literal["evidence", "soundbite"]
+WantBy = Literal["owner", "glm"]
 
 
 # --- What the claims hold --------------------------------------------------------------------
@@ -78,6 +79,9 @@ class EvidenceClaimOut(BaseModel):
     want: Want
     # Who says a sound bite; null for any other claim.
     speaker: str | None
+    # Who last chose `want`: the owner, or GLM when it proposed claims (SB-015). Null when nobody
+    # chose it. GLM never changes a claim whose `want` the owner chose.
+    want_by: WantBy | None
     # GLM's reason; empty for the owner's marks.
     reason: str
     # True for the owner's marks. For a proposal: null until the owner decides, then true (kept)

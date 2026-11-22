@@ -110,7 +110,7 @@ function ClaimCard({ claim, active, busy, onSelect, onEdit, onRemove }: CardProp
             )}
             {claim.want === "soundbite" && !dropped && (
               <Badge color="grape" variant="light">
-                Sound bite
+                {claim.want_by === "glm" ? "Sound bite · GLM" : "Sound bite"}
               </Badge>
             )}
             <Text size="sm" fw={500} style={{ whiteSpace: "pre-wrap" }}>
@@ -150,6 +150,12 @@ function ClaimCard({ claim, active, busy, onSelect, onEdit, onRemove }: CardProp
         {claim.reason !== "" && (
           <Text size="xs" c="dimmed">
             {claim.reason}
+          </Text>
+        )}
+        {claim.want === "soundbite" && claim.kept === null && !dropped && (
+          <Text size="xs" c="dimmed">
+            GLM chose this as a sound bite{claim.speaker ? `, said by ${claim.speaker}` : ""}. Keep
+            the claim to change the speaker or make it ordinary evidence.
           </Text>
         )}
         {claim.words_changed && !dropped && (

@@ -9282,6 +9282,8 @@ export interface components {
             want: "evidence" | "soundbite";
             /** Speaker */
             speaker: string | null;
+            /** Want By */
+            want_by: ("owner" | "glm") | null;
             /** Reason */
             reason: string;
             /** Kept */

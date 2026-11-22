@@ -86,7 +86,7 @@ What does not exist: anything that downloads video; a `video` result; a transcri
 |---|----------|
 | SB-1 | Sound bites are **evidence of kind `video`**, for the projects the evidence layer serves (continuous-voice explainers, EV-1) and only with the evidence switch on. There is no separate project switch. |
 | SB-2 | **Replace mode only** in this document. The narrator's reading of the quote is cut out of the take at render time and the clip plays in its place. When no clip is accepted, nothing is cut: the narrator's reading is the fallback. Clip-first patterns (cold open, tease and back-ID, montage) need an insert mode and are later work (SB-011). |
-| SB-3 | A sound bite is a **claim the owner marks as a sound bite** (`want: soundbite`). Its words must be one or more whole sentences inside quotation marks. GLM may propose quotes; only the owner turns a claim into a sound bite. |
+| SB-3 | A sound bite is a **claim the owner marks as a sound bite** (`want: soundbite`). Its words must be one or more whole sentences inside quotation marks. **Amended by SB-015:** when GLM proposes claims it also chooses sound bites (new proposals and claims already marked) and names the speaker; code applies the choice only when the quote rule passes and a speaker is named. The claim records who chose (`want_by`), the owner can always undo it ("Make ordinary evidence"), and GLM never changes a claim whose `want` the owner chose. |
 | SB-4 | **Script rules** (§4.2) are checked when a claim is marked and when the script changes. Only "the quote is whole sentences in quotation marks" blocks marking, because the cut needs it. The others (lead-in reads complete without the quote, no parroting, no filler hand-off, attribution before the quote) are warnings the owner sees. |
 | SB-5 | **Research stays manual on the Mac** (EV-4, EV-11). The capture tool gets a `video` command that downloads only a padded window of the video. No cookies, no logins, no account. A video the tool cannot fetch is `blocked`. |
 | SB-6 | **The app proves the words.** On import, the backend transcribes every clip with Parakeet and compares the heard words with the claim. The agent's quote and YouTube's captions only find the moment. Each clip gets a **fidelity class**: `exact`, `near`, `paraphrase`, `mismatch`. Only `exact` and `near` can be shown. |
@@ -285,6 +285,7 @@ Planning in SB-001 decides the names. The feature needs:
 | SB-012 | A quote card for the narrator's fallback | Code, later | SB-010 | Deferred |
 | SB-013 | Face tracking for portrait | Code, later | SB-010 | Deferred |
 | SB-014 | Sharper edges: forced alignment and speaker change | Code, later | SB-010 | Deferred |
+| SB-015 | GLM chooses the sound bites | Code | SB-005 | Completed (2026-11-23) |
 
 **Tracks that can run at the same time:**
 
@@ -292,7 +293,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 8 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008, SB-009); 1 in progress (SB-004, Claude Code run pending).
+**Progress snapshot:** 9 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008, SB-009, SB-015); 1 in progress (SB-004, Claude Code run pending).
 
 ---
 
@@ -761,6 +762,23 @@ A smoothed crop that follows the speaker's face instead of a window on a blurred
 
 Re-align only the two edge words with a forced aligner (about 20 ms against Parakeet's ~80 ms), and run speaker diarisation to flag another voice inside or next to the clip. Both as flags, never as decisions.
 
+### SB-015 — GLM chooses the sound bites
+
+**Status:** Completed (2026-11-23)
+
+**Objective.** The owner no longer marks every sound bite by hand: when GLM proposes claims, it also chooses which claims should be a clip of the person saying the quote, and names the speaker.
+
+**What was built.**
+
+- **One call, no new job.** The `suggest_evidence_claims` call (`services/evidence_claims_writer.py`) gets the sound bite rules of §4.2 in its prompt and may answer `soundbite: true` and `speaker` on a proposal, and `soundbites: [{id, speaker}]` for claims already marked. The marked claims are now sent as `{id, text, want, owner_chose}`. `check_answer` returns an `Answer` (`proposals`, `soundbites`); a wrong type is refused, so the corrected retry applies.
+- **Code decides.** `evidence_claims.save_ai_version` applies a choice only when a speaker is named and `soundbite_rules.quote_problem` passes; for a marked claim also when it counts, its words are in the story, it is ordinary evidence and the owner did not choose its `want`. The refused choices go to `job.output.soundbites_left_out` as `[{claim, why}]`; `job.output.soundbites` counts the applied ones.
+- **`want_by`.** A new claim field (`owner`, `glm` or null; JSON, no migration; old claims read null). `update_claim` sets it to `owner` whenever the owner really changes `want` or the speaker. It is not part of the round's claim keys: a change of `want` already makes a round out of date.
+- **UI.** The badge reads "Sound bite · GLM"; an undecided proposal that GLM chose shows the speaker and a line saying how to change it. `want_by` is in the API model and `schema.d.ts`.
+
+**What does not change.** The brief, the skill, the capture tool, the import, the review and the render. Nothing reaches the video without the owner's review (SB-8).
+
+**Limits.** GLM cannot know whether a recording exists; a wrong choice costs one research attempt and the narrator's reading is the fallback. A quote that breaks the cut rule is still refused: the app never rewrites the script (SB-9).
+
 ---
 
 ## 7. Progress tracking
@@ -824,3 +842,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | 2026-11-22 | SB-007 | Completed: the review of a sound bite clip (`SoundbiteClipPanel.tsx`, `SoundbitePlayer.tsx`): player with the cut marked, word-by-word trim whose cut the server finds in the clip's audio (`trim_for`, `GET .../review/items/{item_key}/trim`), lower third fields, confirmed recording date, flags to tick, rights note; `evidence_review.check_clip` and the `soundbite` object in `evidence_review.content`; clips are left out of `shown_claims` until SB-008. No migration. Verified on a throwaway app with real clips and made-up word times. |
 | 2026-11-22 | SB-008 | Completed: `soundbite` shot type (fixed in the planner's request, refused otherwise), `shown_soundbites`, `inputs.soundbites_sha256`, replaced spans filled from the clips' cut lengths, `take_map.place_s`, the take cut at each bite in `voice_pieces`, narrator captions and callouts dropped under a bite, scene render placeholder for the bite, `ShotType` literals and `schema.d.ts`, plans panel lines. No migration. Verified on throwaway scripts (pure functions); the identity check on a real snapshot is pending the owner's go-ahead. |
 | 2026-11-22 | SB-009 | Completed: the sound bite in the render. `evidence_clip` `soundbite` (clip cut on the accepted points, fitted full or over a blurred copy, motion overlay with lower third and credit, own sound kept) and the review's rendered preview, both through `render_evidence_clip`; the bite shot plays the clip with a static gain against the narrator, a deeper music duck or the per-bite music drop, speaker-coloured captions (ASS, YTT), `?t=` link in the description, out-of-date rules, `music_drop` in the decision. No migration. Verified on throwaway scripts with a throwaway motion service; the identity check on a real snapshot is pending the owner's go-ahead. |
+| 2026-11-23 | SB-015 | Completed: GLM chooses sound bites when it proposes claims (prompt, `Answer` with `soundbite`/`speaker` and `soundbites`, code gate in `save_ai_version`, `want_by` on claims, `job.output.soundbites` and `soundbites_left_out`, "Sound bite · GLM" badge). No migration. SB-3 amended. |

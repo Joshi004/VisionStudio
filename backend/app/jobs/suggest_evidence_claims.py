@@ -17,9 +17,11 @@ The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so t
 moment it arrives, and a restart queues it again (`never_rerun`).
 
 `job.output`: `{calls: {claims: <record of the call>}, usage, claim_list_id, version, proposed,
-dropped, seconds}`. `proposed` is how many proposals were saved, and `dropped` is
-`[{phrase, why}]`: what the model proposed that code left out. Logs hold the job id, what each
-attempt did and its token counts, never the story or the answers.
+dropped, soundbites, soundbites_left_out, seconds}`. `proposed` is how many proposals were saved,
+and `dropped` is `[{phrase, why}]`: what the model proposed that code left out. The model also
+chooses sound bites (SB-015): `soundbites` is how many claims of the saved version are sound
+bites it chose, and `soundbites_left_out` is `[{claim, why}]`: the choices code refused. Logs hold
+the job id, what each attempt did and its token counts, never the story or the answers.
 """
 
 from __future__ import annotations
@@ -87,7 +89,7 @@ def _stays(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _answer_reader() -> llm_call.ReadAnswer:
     """Reads the model's answer: the proposals, or why the answer cannot be used."""
 
-    def read(result: llm.ChatResult) -> tuple[str | None, list[dict[str, str]] | None]:
+    def read(result: llm.ChatResult) -> tuple[str | None, writer.Answer | None]:
         if result.finish_reason == "length":
             return _TOO_LONG, None
         try:
@@ -143,12 +145,14 @@ class SuggestEvidenceClaimsHandler(JobHandler):
             _answer_reader(),
             timeout_s=REQUEST_TIMEOUT_S,
         )
-        proposals: list[dict[str, str]] | None = outcome.value
-        if proposals is None:
+        answer: writer.Answer | None = outcome.value
+        if answer is None:
             await self._fail(job_id, f"The claims could not be proposed: {outcome.failure}")
             return
 
-        located, dropped = writer.locate_proposals(task.script, _stays(task.claims), proposals)
+        located, dropped = writer.locate_proposals(
+            task.script, _stays(task.claims), answer.proposals
+        )
 
         await self._phase(job_id, phases.SAVING_EVIDENCE_CLAIMS)
         async with SessionLocal() as session:
@@ -157,13 +161,14 @@ class SuggestEvidenceClaimsHandler(JobHandler):
                 await store.fail_job(session, job_id, "The project no longer exists.")
                 return
             try:
-                row = await evidence_claims.save_ai_version(
+                row, soundbites_left_out = await evidence_claims.save_ai_version(
                     session,
                     project,
                     job_id=job_id,
                     based_on_version=task.based_on_version,
                     script_hash=task.script_sha256,
                     proposals=located,
+                    soundbites=answer.soundbites,
                 )
             except evidence_claims.EvidenceClaimsError as exc:
                 await session.rollback()
@@ -176,6 +181,12 @@ class SuggestEvidenceClaimsHandler(JobHandler):
                 "version": row.version,
                 "proposed": len(located),
                 "dropped": dropped,
+                "soundbites": sum(
+                    1
+                    for claim in row.content["claims"]
+                    if claim.get("want_by") == evidence_claims.WANT_BY_GLM
+                ),
+                "soundbites_left_out": soundbites_left_out,
                 "seconds": round(time.monotonic() - started, 1),
             }
             if not await store.finish_job(session, job_id, output):
