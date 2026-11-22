@@ -179,7 +179,23 @@ def _header(
     ]
 
 
+def _whole_group_event(group: CaptionGroup) -> list[str]:
+    """A group with a colour (a sound bite's, SB-009): one event for the whole group, all in its
+    colour, with no highlighted word."""
+    assert group.colour is not None
+    text = " ".join(part for part in (_clean(word.text) for word in group.words) if part)
+    start, end = _centiseconds(group.start_ms), _centiseconds(group.end_ms)
+    if not text or end <= start:
+        return []
+    return [
+        f"Dialogue: {_LAYER_CAPTION},{_clock(start)},{_clock(end)},{STYLE_NAME},,0,0,0,,"
+        f"{{\\c{_bgr(group.colour)}}}{text}"
+    ]
+
+
 def _group_events(group: CaptionGroup, style: CaptionStyle) -> list[str]:
+    if group.colour is not None:
+        return _whole_group_event(group)
     words = [_clean(word.text) for word in group.words]
     highlight, normal = _bgr(style.highlight_colour), _bgr(style.text_colour)
     events: list[str] = []

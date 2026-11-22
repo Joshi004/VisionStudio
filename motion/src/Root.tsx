@@ -11,6 +11,7 @@ import { readScene } from "./blocks/scene";
 import { Evidence } from "./evidence/Evidence";
 import { fontsLoaded } from "./fonts";
 import { Generated } from "./generated/Generated";
+import { SoundbiteOverlay } from "./soundbite/SoundbiteOverlay";
 import { TestCard } from "./TestCard";
 import { Templates } from "./templates/Templates";
 import type { GraphicInput, Resolved } from "./types";
@@ -102,6 +103,22 @@ const placeholderCallout = {
   look: {},
 };
 
+// A sound bite overlay's own brief, so that Remotion Studio can open the composition (SB-009).
+const placeholderSoundbite = {
+  accent: "#4DA3FF",
+  fonts: { display: "Montserrat ExtraBold", text: "Inter Medium" },
+  lower_third: {
+    box: [96, 700, 1100, 151],
+    name: "Speaker Name",
+    detail: "Role · Venue, March 2024",
+    start_frame: 10,
+    end_frame: 120,
+    fade_frames: 6,
+  },
+  credit: "Video: Channel",
+  credit_box: [1000, 54, 824, 54],
+};
+
 const defaults = (engine: string): GraphicInput => ({
   engine,
   width: 1920,
@@ -177,6 +194,20 @@ export function Root() {
         fps={24}
         durationInFrames={144}
         defaultProps={defaults("evidence_clip")}
+        calculateMetadata={metadata}
+      />
+      <Composition
+        id="SoundbiteOverlay"
+        component={SoundbiteOverlay}
+        width={1920}
+        height={1080}
+        fps={24}
+        durationInFrames={144}
+        defaultProps={{
+          ...defaults("soundbite_overlay"),
+          frames: 144,
+          resolved: placeholderSoundbite as unknown as Resolved,
+        }}
         calculateMetadata={metadata}
       />
       <Composition

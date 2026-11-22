@@ -142,6 +142,17 @@ class Placeholder:
 
 
 @dataclass(frozen=True)
+class BiteShot:
+    """A sound bite shot's clip (SB-009): the clip plays its own sound, brought to the level the
+    narrator's take has over `take_window`, the stretch of the take it replaced (None outside a
+    continuous explainer). `music_drop` is the owner's choice for the music under it."""
+
+    clip_id: int
+    music_drop: bool
+    take_window: VoiceWindow | None
+
+
+@dataclass(frozen=True)
 class Shot:
     scene_id: str
     scene_index: int
@@ -167,11 +178,17 @@ class Shot:
     fade_in_s: float | None = None
     fade_out_s: float | None = None
     evidence_clip_id: int | None = None
+    # A sound bite shot with its clip (SB-009): no take either, and the clip has sound.
+    soundbite: BiteShot | None = None
 
     @property
     def is_drawn(self) -> bool:
-        """A graphic or an evidence shot: a video drawn by code, no take, no sound."""
-        return self.graphic_id is not None or self.evidence_clip_id is not None
+        """A graphic, an evidence or a sound bite shot: a video made by code, no take."""
+        return (
+            self.graphic_id is not None
+            or self.evidence_clip_id is not None
+            or self.soundbite is not None
+        )
 
     @property
     def label(self) -> str:
@@ -246,6 +263,8 @@ class MusicSound:
     duck_db: float | None
     dips: tuple[tuple[float, float], ...]
     bumps: tuple[tuple[float, float], ...]
+    # Only a sound that a sound bite touches has them (SB-009).
+    bite_ducks: tuple[render_commands.BiteDuck, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -307,6 +326,10 @@ class Timeline:
     # Evidence cards and source lines (EVD-011, EVD-012); a timeline made before has none.
     cards: tuple[EvidenceCard, ...] = ()
     source_lines: tuple[caption_ass.SourceLineEvent, ...] = ()
+    # The sound bite values (SB-009). A timeline without a bite does not record them, and one
+    # that is older than the phase has none either: they read as the plan's own values.
+    bite_max_boost_db: float = story_render_plan.BITE_MAX_BOOST_DB
+    bite_clip_fade_s: float = story_render_plan.BITE_CLIP_FADE_S
 
     @property
     def total_samples(self) -> int:
@@ -321,6 +344,17 @@ def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
+
+
+def _optional_number(values: dict[str, Any], key: str, default: float) -> float:
+    """A constant a timeline may not have: `default` when it is missing, and a refusal when it is
+    there and is not a positive number."""
+    if key not in values:
+        return default
+    value = _number(values[key])
+    if value is None or value <= 0:
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return value
 
 
 def _parse_fade(entry: dict[str, Any], key: str) -> float | None:
@@ -395,6 +429,7 @@ def _parse_sound(entry: object) -> MusicSound:
     ):
         raise RenderFailed(_CHANGED_MESSAGE)
     fade_in, fade_out = _fade(entry.get("fade_in")), _fade(entry.get("fade_out"))
+    bite_ducks = _parse_bite_ducks(entry.get("bite_ducks"))
     return MusicSound(
         item_id=item_id,
         cue_id=cue_id,
@@ -412,7 +447,38 @@ def _parse_sound(entry: object) -> MusicSound:
         duck_db=_number(duck_db),
         dips=dips,
         bumps=bumps,
+        bite_ducks=bite_ducks,
     )
+
+
+def _parse_bite_ducks(raw: object) -> tuple[render_commands.BiteDuck, ...]:
+    """The ducks a sound bite makes under a music sound, or none when the key is missing."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    ducks: list[render_commands.BiteDuck] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        windows = _windows(entry.get("windows"))
+        depth, attack, release = (
+            _number(entry.get("db")),
+            _number(entry.get("attack_s")),
+            _number(entry.get("release_s")),
+        )
+        if (
+            windows is None
+            or depth is None
+            or depth >= 0
+            or attack is None
+            or attack <= 0
+            or release is None
+            or release <= 0
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        ducks.append(render_commands.BiteDuck(windows, depth, attack, release))
+    return tuple(ducks)
 
 
 def _parse_music(raw: object) -> Music | None:
@@ -623,6 +689,19 @@ def _parse_placeholder(raw: object) -> Placeholder | None:
     return Placeholder(reason, position, count, description, seconds)
 
 
+def _parse_bite(raw: object) -> BiteShot | None:
+    """A sound bite shot's clip, or None for a shot that has no `soundbite` entry or one without a
+    clip (a placeholder's)."""
+    if not isinstance(raw, dict) or "clip_id" not in raw:
+        return None
+    clip_id, drop = _whole(raw.get("clip_id")), raw.get("music_drop", False)
+    window = raw.get("take_window")
+    parsed = _parse_voice_window(window) if window is not None else None
+    if clip_id is None or not isinstance(drop, bool) or (window is not None and parsed is None):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return BiteShot(clip_id, drop, parsed)
+
+
 def parse_timeline(recorded: object) -> Timeline:
     """Reads `job.input` (or a `{"timeline": ...}` made in memory) back into a timeline. Raises
     `RenderFailed` for anything the handler does not understand, instead of rendering something
@@ -698,7 +777,17 @@ def parse_timeline(recorded: object) -> Timeline:
             take_id is not None or number is not None or graphic_id is not None
         ):
             raise RenderFailed(_CHANGED_MESSAGE)
-        drawn = graphic_id is not None or evidence_id is not None
+        # A sound bite shot with its clip (SB-009): the `soundbite` entry has the clip's id. A
+        # placeholder's entry has the same key without one.
+        bite = None if placeholder is not None else _parse_bite(entry.get("soundbite"))
+        if bite is not None and (
+            take_id is not None
+            or number is not None
+            or graphic_id is not None
+            or evidence_id is not None
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        drawn = graphic_id is not None or evidence_id is not None or bite is not None
         if (
             frames is None
             or frames < 1
@@ -734,6 +823,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 fade_in,
                 fade_out,
                 evidence_clip_id=evidence_id,
+                soundbite=bite,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -816,6 +906,12 @@ def parse_timeline(recorded: object) -> Timeline:
         swell_ramp_s=known("swell_ramp_s"),
         bed_shot_duck_db=known("bed_shot_duck_db"),
         bed_shot_ramp_s=known("bed_shot_ramp_s"),
+        bite_max_boost_db=_optional_number(
+            constants, "bite_max_boost_db", story_render_plan.BITE_MAX_BOOST_DB
+        ),
+        bite_clip_fade_s=_optional_number(
+            constants, "bite_clip_fade_s", story_render_plan.BITE_CLIP_FADE_S
+        ),
         master_lufs=goals["target_lufs"] or 0.0,
         master_true_peak_db=goals["true_peak_db"] or 0.0,
         master_lra=goals["lra"] or 0.0,
@@ -957,7 +1053,14 @@ class RenderStoryHandler(JobHandler):
             )
             sounds.append(
                 _ShotSound(
-                    label=_sound_label(shot, audio),
+                    label=_sound_label(shot, audio)
+                    + (
+                        " (boost capped)"
+                        if bite_boost_capped(
+                            timeline, shot, shot_lufs[number - 1], matches.get(number - 1)
+                        )
+                        else ""
+                    ),
                     loudness_lufs=shot_lufs[number - 1],
                     gain_db=None if audio is None else audio.gain_db,
                 )
@@ -1141,6 +1244,11 @@ class RenderStoryHandler(JobHandler):
                         if shot.evidence_clip_id is not None
                         else {}
                     ),
+                    **(
+                        {"soundbite_clip_id": shot.soundbite.clip_id}
+                        if shot.soundbite is not None
+                        else {}
+                    ),
                     **({"placeholder": True} if shot.placeholder is not None else {}),
                     "sound": sound.label,
                     "loudness_lufs": _tenth(sound.loudness_lufs),
@@ -1320,6 +1428,11 @@ async def probe_shot(storage: Storage, shot: Shot) -> Source:
             f"The evidence clip of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Draw the evidence shots again."
         )
+    if shot.soundbite is not None and short_by > 1:
+        raise RenderFailed(
+            f"The sound bite clip of shot {shot.label} has {probe.frame_count} frames; the shot "
+            f"needs {shot.source_frames}. Make the evidence clips again."
+        )
     if not shot.is_drawn and short_by > 0:
         raise RenderFailed(
             f"The clip of shot {shot.label} has {probe.frame_count} frames; the shot "
@@ -1447,6 +1560,28 @@ def clip_audio(
     if shot.voice == story_render_plan.VOICE_TAKE:
         return None
     audio = source.probe.audio
+    if shot.soundbite is not None:
+        if audio is None:
+            raise RenderFailed(
+                f"The sound bite clip of shot {shot.label} has no sound. Make the evidence "
+                "clips again."
+            )
+        # Heard whole and not ducked: the take is cut out under it, and the music is lowered in
+        # the lanes. Brought to the level the take has over the span it replaced.
+        match = match or VoiceMatch(None, 0.0)
+        return render_commands.ClipAudio(
+            channels=audio.channels,
+            duration_s=audio.duration_s,
+            gain_db=story_render_plan.voice_match_gain(
+                lufs,
+                match.take_span_lufs,
+                match.take_gain_db,
+                timeline.shot_target_lufs,
+                timeline.bite_max_boost_db,
+            ),
+            fade_in_s=timeline.bite_clip_fade_s,
+            fade_out_s=timeline.bite_clip_fade_s,
+        )
     if shot.voice == story_render_plan.VOICE_CLIP:
         if audio is None:
             raise RenderFailed(
@@ -1484,6 +1619,16 @@ def clip_audio(
         fade_in_s=shot.fade_in_s if shot.fade_in_s is not None else render_commands.FADE_S,
         fade_out_s=shot.fade_out_s if shot.fade_out_s is not None else render_commands.FADE_S,
     )
+
+
+def bite_boost_capped(
+    timeline: Timeline, shot: Shot, lufs: float | None, match: VoiceMatch | None
+) -> bool:
+    """Whether a sound bite clip is too quiet to reach the narrator's level within the boost the
+    timeline allows (SB-009): the render's record says so, and the owner can listen to it."""
+    if shot.soundbite is None or lufs is None or match is None or match.take_span_lufs is None:
+        return False
+    return match.take_gain_db + match.take_span_lufs - lufs > timeline.bite_max_boost_db
 
 
 # --- Building the layers --------------------------------------------------------------------
@@ -1579,19 +1724,20 @@ async def voice_matches(
     levels: dict[str, VoiceLevel],
     numbers: Sequence[int],
 ) -> dict[int, VoiceMatch]:
-    """For each shot (by its position, from `numbers`) that uses its clip's own voice, what its
-    loudness is matched to: the loudness of the scene's take over the shot's span, and the take's
-    gain.
+    """For each shot (by its position, from `numbers`) that uses its clip's own voice, and each
+    sound bite, what its loudness is matched to: the loudness of the scene's take over the shot's
+    span (a bite's: the stretch of the take it replaced), and the take's gain.
     """
     by_scene = {take.scene_id: (path, channels) for take, path, channels in files}
     matches: dict[int, VoiceMatch] = {}
     for number in numbers:
         shot = timeline.shots[number]
-        if shot.voice != story_render_plan.VOICE_CLIP:
+        if shot.voice != story_render_plan.VOICE_CLIP and shot.soundbite is None:
             continue
         level = levels.get(shot.scene_id)
         found = by_scene.get(shot.scene_id)
-        window = shot.voice_window
+        # A sound bite is matched to the take over the stretch it replaced.
+        window = shot.voice_window if shot.soundbite is None else shot.soundbite.take_window
         span_lufs: float | None = None
         if found is not None and window is not None:
             span_lufs = await ffmpeg.measure_loudness(
@@ -1627,6 +1773,7 @@ def _lane_sound(
         bump_windows=sound.bumps,
         bump_db=timeline.swell_db,
         bump_ramp_s=timeline.swell_ramp_s,
+        bite_ducks=sound.bite_ducks,
     )
 
 
@@ -1729,6 +1876,8 @@ def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
         return "dropped (the take is the voice)"
     if shot.voice == story_render_plan.VOICE_CLIP:
         return "clip voice"
+    if shot.soundbite is not None:
+        return "sound bite"
     if shot.graphic_id is not None:
         return "none (a graphic)"
     if shot.evidence_clip_id is not None:

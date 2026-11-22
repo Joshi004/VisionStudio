@@ -17572,6 +17572,11 @@ export interface components {
              * @default
              */
             rights_note: string;
+            /**
+             * Music Drop
+             * @default false
+             */
+            music_drop: boolean;
         };
         /**
          * SoundbiteDecisionOut

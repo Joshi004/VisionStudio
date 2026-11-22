@@ -131,6 +131,24 @@ BITE_EDGE_FADE_S: Final = 0.01
 VOICE_TAKE: Final = "take"
 VOICE_CLIP: Final = "clip"
 
+# --- The sound bite in the mix (SB-009). Starting values, untested by ear. ----------------------
+# A sound bite's own sound is brought to the level of the narrator's take over the span it
+# replaced, boosted by at most this much (a quiet interview can need more than a presenter clip).
+BITE_MAX_BOOST_DB: Final = 12.0
+# The clip's sound fades over this long at each end, inside the clip's own length.
+BITE_CLIP_FADE_S: Final = 0.02
+# The music (score and beds) under a sound bite: a deeper duck than the one under the narrator,
+# down before the clip starts and back up after it ends.
+BITE_MUSIC_DUCK_DB: Final = -26.0
+BITE_DUCK_ATTACK_S: Final = 0.2
+BITE_DUCK_RELEASE_S: Final = 0.45
+# With "music off under this clip" the music goes to (nearly) silence instead, slower in and out.
+BITE_DROP_DB: Final = -90.0
+BITE_DROP_ATTACK_S: Final = 0.5
+BITE_DROP_RELEASE_S: Final = 0.6
+# A story with more music drops than this per ten minutes gets a warning.
+BITE_MAX_DROPS_PER_10_MIN: Final = 3
+
 LANE_SCORE: Final = "score"
 LANE_BED: Final = "bed"
 LANE_SOUNDS: Final = "sounds"
@@ -154,6 +172,8 @@ CAPTION_TIMING_ESTIMATED: Final = "caption_timing_estimated"
 SHOT_PLACEHOLDER: Final = "shot_placeholder"
 # The narrator's words under a sound bite's clip are left out of the captions (SB-008).
 SOUNDBITE_CAPTIONS_DROPPED: Final = "soundbite_captions_dropped"
+# Too many sound bites switch the music off for the length of the story (SB-009).
+SOUNDBITE_MUSIC_DROPS: Final = "soundbite_music_drops"
 DIALOGUE_NOT_HEARD: Final = "dialogue_not_heard"
 SCENE_START_UNKNOWN: Final = "scene_start_unknown"
 
@@ -164,13 +184,15 @@ PLACEHOLDER_NO_GRAPHIC: Final = "No graphic yet"
 PLACEHOLDER_GRAPHIC_FILE_MISSING: Final = "Graphic file missing"
 PLACEHOLDER_NO_EVIDENCE: Final = "No evidence clip yet"
 PLACEHOLDER_EVIDENCE_FILE_MISSING: Final = "Evidence clip file missing"
-# A sound bite shot (SB-008) has no clip made for it yet: SB-009 makes it.
+# A sound bite shot has no clip made for it yet (the evidence clips step makes it, SB-009).
 PLACEHOLDER_NO_SOUNDBITE: Final = "Sound bite clip not made yet"
+PLACEHOLDER_SOUNDBITE_FILE_MISSING: Final = "Sound bite clip file missing"
 # Only in the timing timeline of a provisional music placement (SCN-011): a clip that is shorter
 # than its shot counts as missing there, so the placement can still be made.
 PLACEHOLDER_CLIP_TOO_SHORT: Final = "Clip too short"
 PLACEHOLDER_GRAPHIC_TOO_SHORT: Final = "Graphic too short"
 PLACEHOLDER_EVIDENCE_TOO_SHORT: Final = "Evidence clip too short"
+PLACEHOLDER_SOUNDBITE_TOO_SHORT: Final = "Sound bite clip too short"
 # An evidence card (EVD-011) with no clip is left out of a scene render, with this warning code.
 CARD_WITHOUT_CLIP: Final = "card_without_clip"
 
@@ -274,13 +296,33 @@ class SourceLineSource:
 
 
 @dataclass(frozen=True)
+class SoundbiteClipSource:
+    """The clip of a sound bite shot (SB-009): the newest ready clip made for it, with the lower
+    third and the credit in the picture and the cut's own sound. `take_window` is the stretch of
+    the narrator's take the clip replaces, in the take's own seconds (None outside a continuous
+    explainer), and `words` the cut's words, `(text, start_s, end_s)` from the clip's start, for
+    the captions in the speaker's `colour`."""
+
+    clip_id: int
+    path: str
+    frame_count: int | None
+    file_exists: bool
+    music_drop: bool = False
+    colour: str | None = None
+    words: tuple[tuple[str, float, float], ...] = ()
+    take_window: tuple[float, float] | None = None
+
+
+@dataclass(frozen=True)
 class SoundbiteSource:
     """The clip a sound bite shot plays (SB-008): the claim, the clip's item key and how long it
-    plays in the scene, in seconds (the owner's cut moved to whole frames)."""
+    plays in the scene, in seconds (the owner's cut moved to whole frames). `clip` is None while
+    the shot has no clip (SB-009)."""
 
     claim_id: str
     item_key: str
     seconds: float
+    clip: SoundbiteClipSource | None = None
 
 
 @dataclass(frozen=True)
@@ -303,8 +345,8 @@ class ShotSource:
     evidence: EvidenceSource | None = None
     # The plan's one-sentence description of the shot, shown on its placeholder (SCN-003).
     description: str | None = None
-    # A sound bite shot (SB-008) plays a real person's clip, which SB-009 makes: until then it
-    # has no video, so a scene render shows a placeholder and a full render is refused.
+    # A sound bite shot (SB-008) plays a real person's clip (SB-009 makes it): until it has one, a
+    # scene render shows a placeholder and a full render is refused.
     is_soundbite: bool = False
     soundbite: SoundbiteSource | None = None
 
@@ -314,8 +356,10 @@ class ShotSource:
         return self.is_graphic or self.is_evidence or self.is_soundbite
 
     @property
-    def drawn(self) -> GraphicSource | EvidenceSource | None:
+    def drawn(self) -> GraphicSource | EvidenceSource | SoundbiteClipSource | None:
         """The video of a drawn shot, or None while it has none."""
+        if self.is_soundbite:
+            return self.soundbite.clip if self.soundbite is not None else None
         return self.graphic if self.is_graphic else self.evidence
 
 
@@ -515,6 +559,7 @@ def scene_edge_fades(
                 entry.get("voice") is not None
                 or entry.get("graphic") is not None
                 or entry.get("evidence") is not None
+                or entry.get("soundbite") is not None
                 or entry.get("placeholder") is not None
                 or not entry.get("has_audio")
             ):
@@ -588,6 +633,22 @@ def constants(mix: MixSettings | None = None) -> dict[str, float]:
         "master_lufs": float(mix.loudness_lufs),
         "master_true_peak_db": float(mix.true_peak_db),
         "master_lra": MASTER_LRA,
+    }
+
+
+def bite_constants() -> dict[str, float]:
+    """The values of the sound bite in the mix (SB-009), recorded on a timeline that has one. A
+    timeline without a bite does not have them, so it does not change; the render reads a missing
+    one as the value it has here."""
+    return {
+        "bite_max_boost_db": BITE_MAX_BOOST_DB,
+        "bite_clip_fade_s": BITE_CLIP_FADE_S,
+        "bite_music_duck_db": BITE_MUSIC_DUCK_DB,
+        "bite_duck_attack_s": BITE_DUCK_ATTACK_S,
+        "bite_duck_release_s": BITE_DUCK_RELEASE_S,
+        "bite_drop_db": BITE_DROP_DB,
+        "bite_drop_attack_s": BITE_DROP_ATTACK_S,
+        "bite_drop_release_s": BITE_DROP_RELEASE_S,
     }
 
 
@@ -745,9 +806,14 @@ def _music_timeline(
     speech_spans: Sequence[tuple[float, float]],
     dialogue_spans: Sequence[tuple[float, float]],
     total_samples: int,
+    bite_windows: Sequence[tuple[float, float, bool]] = (),
 ) -> tuple[dict[str, Any], list[tuple[float, float]]]:
     """The `music` part of the timeline, and the spans of the story (seconds) in which a bed
     plays. Raises RenderPlanError for a placement this version cannot read.
+
+    `bite_windows` are the sound bite clips, `(start_s, end_s, music_drop)` on the story: the score
+    and the beds are lowered much deeper under each one, or switched off with `music_drop`
+    (SB-009). A sound that no bite touches, and a render with no bite, have no `bite_ducks`.
     """
     content = music.content
     rate = content.get("sample_rate")
@@ -817,6 +883,22 @@ def _music_timeline(
             bumps = _windows_of(
                 [(a, b) for a, b in swells if start_s <= a <= end_s], start_s, end_s, SWELL_RAMP_S
             )
+        bite_ducks: list[dict[str, Any]] = []
+        if musical:
+            for drop, depth, attack, release in (
+                (False, BITE_MUSIC_DUCK_DB, BITE_DUCK_ATTACK_S, BITE_DUCK_RELEASE_S),
+                (True, BITE_DROP_DB, BITE_DROP_ATTACK_S, BITE_DROP_RELEASE_S),
+            ):
+                around = _windows_of(
+                    [(a, b) for a, b, dropped in bite_windows if dropped == drop],
+                    start_s,
+                    end_s,
+                    max(attack, release),
+                )
+                if around:
+                    bite_ducks.append(
+                        {"windows": around, "db": depth, "attack_s": attack, "release_s": release}
+                    )
         sounds.append(
             {
                 "item_id": str(placed["item_id"]),
@@ -834,6 +916,7 @@ def _music_timeline(
                 "duck_db": duck_db,
                 "dips": dip,
                 "bumps": bumps,
+                **({"bite_ducks": bite_ducks} if bite_ducks else {}),
             }
         )
 
@@ -897,8 +980,12 @@ def placeholder_reason(shot: ShotSource) -> str | None:
     its clip, or the video of its graphic, is there.
     """
     if shot.is_soundbite:
-        # SB-009 makes the clip. Until then the shot always has none.
-        return PLACEHOLDER_NO_SOUNDBITE
+        clip = shot.soundbite.clip if shot.soundbite is not None else None
+        if clip is None:
+            return PLACEHOLDER_NO_SOUNDBITE
+        if not clip.file_exists:
+            return PLACEHOLDER_SOUNDBITE_FILE_MISSING
+        return None
     if shot.is_graphic:
         if shot.graphic is None:
             return PLACEHOLDER_NO_GRAPHIC
@@ -931,13 +1018,18 @@ def _check_takes(scenes: list[SceneSource], *, placeholders: bool = False) -> No
     without_evidence: list[str] = []
     missing_evidence: list[str] = []
     without_soundbite: list[str] = []
+    missing_soundbite: list[str] = []
     for scene in scenes:
         for shot in scene.shots:
             if placeholders and placeholder_reason(shot) is not None:
                 continue
             label = f"{shot.shot_id} of scene {scene.index}"
             if shot.is_soundbite:
-                without_soundbite.append(label)
+                clip = shot.soundbite.clip if shot.soundbite is not None else None
+                if clip is None:
+                    without_soundbite.append(label)
+                elif not clip.file_exists:
+                    missing_soundbite.append(label)
             elif shot.is_graphic:
                 if shot.graphic is None:
                     without_graphic.append(label)
@@ -954,9 +1046,14 @@ def _check_takes(scenes: list[SceneSource], *, placeholders: bool = False) -> No
                 missing_file.append(label)
     if without_soundbite:
         raise RenderPlanError(
-            f"These sound bite shots have no clip yet: {_named(without_soundbite)}. The clip of "
-            "a sound bite is made in a later step; until then only a scene render, which shows a "
-            "placeholder for it, can be made."
+            f"These sound bite shots have no clip yet: {_named(without_soundbite)}. Make the "
+            "evidence clips first (the step makes the sound bite clips too); until then only a "
+            "scene render, which shows a placeholder for it, can be made."
+        )
+    if missing_soundbite:
+        raise RenderPlanError(
+            f"The clip file of these sound bite shots is missing: {_named(missing_soundbite)}. "
+            "Make the evidence clips again."
         )
     if without_clip:
         raise RenderPlanError(
@@ -1227,6 +1324,7 @@ def _build(
     too_short: list[str] = []
     graphics_too_short: list[str] = []
     evidence_too_short: list[str] = []
+    bites_too_short: list[str] = []
     # The graphic and the evidence shots, in ms: no callout is on screen over them. The evidence
     # shots drawn split (EVD-016) are apart: a callout may start in them.
     graphic_spans: list[tuple[int, int]] = []
@@ -1234,6 +1332,8 @@ def _build(
     # The sound bite shots (SB-008): no callout is on screen over a real person's clip either, but
     # the warning for a callout left out says so in its own words.
     bite_spans: list[tuple[int, int]] = []
+    # The same shots with their clip played (SB-009): `(start_s, end_s, music_drop)`, story seconds.
+    bite_windows_story: list[tuple[float, float, bool]] = []
     warned_bites: set[str] = set()
     narration: list[dict[str, Any]] = []
     narration_spans: list[tuple[float, float]] = []
@@ -1295,6 +1395,8 @@ def _build(
                         if shot.is_graphic
                         else PLACEHOLDER_EVIDENCE_TOO_SHORT
                         if shot.is_evidence
+                        else PLACEHOLDER_SOUNDBITE_TOO_SHORT
+                        if shot.is_soundbite
                         else PLACEHOLDER_CLIP_TOO_SHORT
                     )
             if shot.shot_id in stand_ins:
@@ -1365,8 +1467,67 @@ def _build(
                     if shot.is_graphic
                     else evidence_too_short
                     if shot.is_evidence
+                    else bites_too_short
+                    if shot.is_soundbite
                     else too_short
                 ).append(f"{label} has {have} frames, needs {needed}")
+            if shot.is_soundbite:
+                # A real person's clip with its own sound (SB-009). The narrator's take is cut out
+                # under it (SB-008), so nothing is ducked: the clip is heard whole, brought to the
+                # narrator's level by the render, and the music is made room for below.
+                assert shot.soundbite is not None and shot.soundbite.clip is not None
+                clip = shot.soundbite.clip
+                bite_windows_story.append(
+                    (
+                        start_ms / _MS_PER_S,
+                        end_ms / _MS_PER_S,
+                        clip.music_drop,
+                    )
+                )
+                if captions is not None and clip.words:
+                    timed_units.append(
+                        caption_plan.TimedUnit(
+                            scene_id=scene.scene_id,
+                            unit_id=f"soundbite:{shot.shot_id}",
+                            audio_id=clip.clip_id,
+                            start_ms=start_ms,
+                            words=clip.words,
+                            colour=clip.colour,
+                        )
+                    )
+                shots.append(
+                    {
+                        "scene_id": scene.scene_id,
+                        "shot_id": shot.shot_id,
+                        "scene_index": scene.index,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "start_frame": start_frame,
+                        "frames": frames,
+                        "take_id": None,
+                        "take_number": None,
+                        "path": clip.path,
+                        "source_frames": needed,
+                        "has_audio": True,
+                        "voice": None,
+                        "voice_window": None,
+                        "duck": [],
+                        "bed_duck": [],
+                        "soundbite": {
+                            "clip_id": clip.clip_id,
+                            "claim_id": shot.soundbite.claim_id,
+                            "item_key": shot.soundbite.item_key,
+                            "seconds": shot.soundbite.seconds,
+                            "music_drop": clip.music_drop,
+                            "take_window": (
+                                None
+                                if clip.take_window is None
+                                else {"start_s": clip.take_window[0], "end_s": clip.take_window[1]}
+                            ),
+                        },
+                    }
+                )
+                continue
             if shot.is_evidence:
                 # Like a graphic: no sound and no take, the voice take plays over it, and callouts
                 # stay off it (EVD-009).
@@ -1617,6 +1778,11 @@ def _build(
             f"An evidence clip is shorter than its shot: {_named(evidence_too_short)}. Plan the "
             "shots again, then draw the evidence shots again."
         )
+    if bites_too_short:
+        raise RenderPlanError(
+            f"A sound bite clip is shorter than its shot: {_named(bites_too_short)}. Make the "
+            "evidence clips again."
+        )
     if unplaced:
         raise RenderPlanError(
             f"The speech of these narration units is missing: {_named(unplaced)}. Make it again."
@@ -1624,8 +1790,8 @@ def _build(
 
     windows = duck_windows([*narration_spans, *voice_spans], dialogue_spans, DUCK_MERGE_GAP_S)
     for shot_entry in shots:
-        if shot_entry["voice"] is not None:
-            continue  # a presenter shot's sound is dropped, or is the voice itself
+        if shot_entry["voice"] is not None or "soundbite" in shot_entry:
+            continue  # a presenter shot's sound is dropped, or is the voice itself, or a bite
         shot_entry["duck"] = slice_windows(
             windows,
             shot_entry["start_frame"] / fps,
@@ -1647,12 +1813,23 @@ def _build(
             [*narration_spans, *voice_spans, *dialogue_spans],
             dialogue_spans,
             render_commands.sample_count(cursor, fps),
+            bite_windows_story,
         )
+        drops = sum(1 for _start, _end, dropped in bite_windows_story if dropped)
+        if not placeholders and drops * 600 > BITE_MAX_DROPS_PER_10_MIN * cursor / fps:
+            warnings.append(
+                {
+                    "code": SOUNDBITE_MUSIC_DROPS,
+                    "message": f"The music is switched off under {drops} sound bites in "
+                    f"{cursor / fps / 60:.1f} minutes. More than {BITE_MAX_DROPS_PER_10_MIN} "
+                    "in ten minutes can feel choppy.",
+                }
+            )
         if mix.bed_shot_duck_db < 0:
             # The video model's own sound is lowered under a bed, but never in a line of dialogue.
             lowered = subtract_spans(bed_spans, dialogue_spans)
             for shot_entry in shots:
-                if shot_entry["voice"] is not None:
+                if shot_entry["voice"] is not None or "soundbite" in shot_entry:
                     continue
                 shot_entry["bed_duck"] = slice_windows(
                     lowered,
@@ -1745,7 +1922,7 @@ def _build(
         **({"evidence_cards": card_entries} if card_entries else {}),
         **({"source_lines": source_line_entries} if source_line_entries else {}),
         "master": master(mix),
-        "constants": constants(mix),
+        "constants": {**constants(mix), **(bite_constants() if bite_windows_story else {})},
         "warnings": warnings,
     }
     return RenderPlan(timeline=timeline, warnings=warnings)

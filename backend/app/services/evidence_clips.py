@@ -55,6 +55,7 @@ from app.services import (
     graphics_lab,
     scene_timeline,
     shot_plans,
+    soundbite_render,
 )
 
 JOB_TYPE: Final = "render_evidence_clip"
@@ -73,6 +74,12 @@ PURPOSE_CARD: Final = "card"
 # The layout of an evidence shot drawn together with a callout (EVD-016); the others are full.
 LAYOUT_SPLIT: Final = "split"
 CARD_DEDUPE_KEY: Final = "card_clip_ref"
+# The clip of a sound bite shot (SB-009): the owner's cut of the downloaded video, at the output
+# size, with its own sound, the lower third and the source credit. Its job's input is
+# `{evidence_clip_id, soundbite_clip_ref}`, and two presses on one shot make one job. The review's
+# preview of a sound bite clip is the same clip with `purpose` `preview`.
+PURPOSE_SOUNDBITE: Final = "soundbite"
+SOUNDBITE_DEDUPE_KEY: Final = "soundbite_clip_ref"
 # Recorded on every clip. A change to the composition or the layout rules that changes how a clip
 # looks raises it, so the previews made before read as out of date.
 CLIP_VERSION: Final = 1
@@ -87,6 +94,8 @@ SOURCE_DEFAULT: Final = "default"
 NOT_ACCEPTED_MESSAGE: Final = "Only an accepted piece of evidence can be previewed."
 UNKNOWN_ITEM_MESSAGE: Final = "There is no such piece of evidence in the newest import."
 NO_PICTURE_MESSAGE: Final = "This piece of evidence has no picture to draw."
+NO_VIDEO_MESSAGE: Final = "This clip has no video file."
+NO_SOUNDBITE_DETAILS_MESSAGE: Final = "Accept the clip with its details first."
 
 _COLOUR: Final = re.compile(r"#[0-9A-Fa-f]{6}")
 _MONTHS: Final = (
@@ -285,11 +294,84 @@ async def current_look(
     }
 
 
-_LOOK_KEYS: Final = ("width", "height", "fps", "frames", "accent", "clip_version", "frame")
+_SOUNDBITE_LOOK_KEYS: Final = (
+    "in_s",
+    "out_s",
+    "speaker",
+    "role",
+    "venue",
+    "recorded",
+    "channel",
+    "video_sha256",
+)
+_LOOK_KEYS: Final = (
+    "width",
+    "height",
+    "fps",
+    "frames",
+    "accent",
+    "clip_version",
+    "frame",
+    # Only in the look of a sound bite clip and of the preview of one (SB-009): the cut, the
+    # lower third's words and the file the cut is made from.
+    *_SOUNDBITE_LOOK_KEYS,
+)
 # The layout of a split shot (EVD-016) is compared whether or not the look has it: a clip drawn
 # split is out of date once its shot is not split any more, and the other way round. A clip made
 # before the layout existed has neither, which equals a look without.
 _LAYOUT_KEYS: Final = ("layout", "panel")
+
+
+# --- The look of a sound bite clip (SB-009) ---------------------------------------------------
+
+
+def soundbite_frames(details: dict[str, Any]) -> int:
+    """The frames of a sound bite clip made from the owner's cut: the cut's length on the frame
+    grid, and one spare frame as for any drawn shot. A plan's shot has the same count
+    (`ShotSpan.clip_frames`); this is for the preview, which has no shot."""
+    return round((float(details["out_s"]) - float(details["in_s"])) * FPS) + 1
+
+
+def soundbite_look_keys(item: EvidenceItem, details: dict[str, Any]) -> dict[str, Any]:
+    """What a sound bite clip is made from besides the frame: the cut, the lower third's words,
+    the channel of the credit and the file of the video. A stored clip that differs is out of
+    date."""
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    return {
+        "in_s": float(details["in_s"]),
+        "out_s": float(details["out_s"]),
+        "speaker": details["speaker"],
+        "role": details["role"],
+        "venue": details["venue"],
+        "recorded": details["recorded"],
+        "channel": capture.get("channel"),
+        "video_sha256": item.video_sha256,
+    }
+
+
+def soundbite_inputs(item_key: str, claim_id: str, details: dict[str, Any]) -> dict[str, Any]:
+    """The `inputs` of a sound bite clip that are not part of its look: which clip, which claim,
+    and the positions of the cut's words among the heard words."""
+    return {
+        "item_key": item_key,
+        "claim_id": claim_id,
+        "first_word": details["first_word"],
+        "last_word": details["last_word"],
+    }
+
+
+async def soundbite_look(
+    session: AsyncSession,
+    project: Project,
+    item: EvidenceItem,
+    details: dict[str, Any],
+    frames: int,
+) -> dict[str, Any]:
+    """What a sound bite clip of `frames` frames made now would be made with."""
+    return {
+        **await current_look(session, project, frames),
+        **soundbite_look_keys(item, details),
+    }
 
 
 # --- Starting a preview --------------------------------------------------------------------
@@ -316,13 +398,24 @@ async def queue_preview(session: AsyncSession, project: Project, item_key: str) 
     claim, item = found
     if not item.usable or claim.decision.verdicts.get(item_key) != evidence_review.ACCEPTED:
         raise evidence_review.EvidenceReviewError(NOT_ACCEPTED_MESSAGE)
-    if not item.image_path:
+    details: dict[str, Any] | None = None
+    if item.kind == "video":
+        # A sound bite clip (SB-009): its preview is the clip as the render will play it.
+        details = claim.decision.soundbites.get(item_key)
+        if details is None:
+            raise evidence_review.EvidenceReviewError(NO_SOUNDBITE_DETAILS_MESSAGE)
+        if not item.video_path:
+            raise evidence_review.EvidenceReviewError(NO_VIDEO_MESSAGE)
+    elif not item.image_path:
         raise evidence_review.EvidenceReviewError(NO_PICTURE_MESSAGE)
     import_job = await store.latest_job(session, project.id, evidence_import.JOB_TYPE)
     if import_job is not None and import_job.status in store.ACTIVE_STATUSES:
         raise evidence_review.ImportRunningError(evidence_review.IMPORT_RUNNING_MESSAGE)
 
-    look = await current_look(session, project)
+    if details is not None:
+        look = await soundbite_look(session, project, item, details, soundbite_frames(details))
+    else:
+        look = await current_look(session, project)
     # The job first: when one for this piece is already active it is the answer, and nothing else
     # is written. The clip's id is put in the job's input once the clip exists, in the same
     # transaction, so the dispatcher never sees a job without it.
@@ -345,7 +438,12 @@ async def queue_preview(session: AsyncSession, project: Project, item_key: str) 
             "items": [item_key],
             "item_ids": [item.id],
             "orientation": project.orientation,
-            "length_s": evidence_clip_layout.PREVIEW_S,
+            "length_s": (
+                evidence_clip_layout.PREVIEW_S
+                if details is None
+                else round(look["frames"] / FPS, 3)
+            ),
+            **({} if details is None else soundbite_inputs(item_key, claim.entry["id"], details)),
             **look,
         },
     )
@@ -394,9 +492,14 @@ def _is_out_of_date(clip: EvidenceClip, look: dict[str, Any]) -> bool:
 
 
 async def previews_for(
-    session: AsyncSession, project: Project, item_keys: list[str]
+    session: AsyncSession,
+    project: Project,
+    item_keys: list[str],
+    clips: dict[str, tuple[EvidenceItem, dict[str, Any]]] | None = None,
 ) -> dict[str, Preview]:
-    """The newest preview of each piece that has one, by `item_key`."""
+    """The newest preview of each piece that has one, by `item_key`. `clips` holds, for each
+    accepted sound bite clip (SB-009), its row and the owner's details: a clip's preview is out of
+    date when its cut, its lower third or its video is not the one the preview was made from."""
     if not item_keys:
         return {}
     statement = (
@@ -420,6 +523,14 @@ async def previews_for(
             continue
         if job_status is None:
             job_status = "succeeded" if clip.media_path else "failed"
+        expected = look
+        if clips is not None and item_key in clips:
+            item, details = clips[item_key]
+            expected = {
+                **look,
+                "frames": soundbite_frames(details),
+                **soundbite_look_keys(item, details),
+            }
         found[item_key] = Preview(
             clip_id=clip.id,
             job_id=clip.render_job_id,
@@ -427,7 +538,7 @@ async def previews_for(
             error=clip.last_error or job_error,
             media_path=clip.media_path if job_status == "succeeded" else None,
             warnings=_warning_messages(clip.warnings),
-            out_of_date=_is_out_of_date(clip, look),
+            out_of_date=_is_out_of_date(clip, expected),
             width=int(clip.inputs.get("width", look["width"])),
             height=int(clip.inputs.get("height", look["height"])),
         )
@@ -944,6 +1055,225 @@ async def queue_card_clip(
     session.add(clip)
     await session.flush()
     job.input = {CLIP_KEY: clip.id, CARD_DEDUPE_KEY: found.ref}
+    clip.render_job_id = job.id
+    await session.commit()
+    return job
+
+
+# --- The clips of the sound bite shots (SB-009) ----------------------------------------------
+
+UNKNOWN_SOUNDBITE_MESSAGE: Final = "There is no such sound bite shot in the newest shot plan."
+SOUNDBITE_ALREADY_MADE_MESSAGE: Final = "The clip of this sound bite is already made."
+SOUNDBITE_GONE_MESSAGE: Final = (
+    "This sound bite clip is not accepted and shown any more. Plan the shots again."
+)
+
+
+def soundbite_ref(scene_id: str, shot_id: str) -> str:
+    return f"{scene_id}/{shot_id}"
+
+
+@dataclass(frozen=True)
+class SoundbiteClipEntry:
+    """One sound bite shot of a scene's newest plan and where its clip stands."""
+
+    shot: dict[str, Any]
+    plan_id: int
+    claim_id: str
+    item_key: str
+    # The accepted clip and the owner's details, or None when it is not shown any more.
+    clip_info: evidence_review.SoundbiteClip | None
+    # The clip's length: the shot's frames on the timeline, or None when it has no timeline.
+    frames: int | None
+    status: ShotClipStatus
+    clip: EvidenceClip | None
+    job: Job | None
+    last_error: str | None
+    blocked_reason: str | None
+
+    @property
+    def done(self) -> bool:
+        return self.status == "ready"
+
+    @property
+    def ref(self) -> str:
+        return soundbite_ref(self.shot["scene_id"], self.shot["id"])
+
+
+@dataclass(frozen=True)
+class SceneSoundbiteClips:
+    """The sound bite shots of one scene, in the plan's order. Only scenes that have some."""
+
+    item: dict[str, Any]
+    shots: list[SoundbiteClipEntry]
+
+
+@dataclass(frozen=True)
+class SoundbiteClipsState:
+    """What the `evidence_clips` step reads for sound bites. `wanted` is False for a project
+    without evidence. `colours` is the caption colour of each speaker of the story, by
+    `soundbite_render.speaker_key`."""
+
+    wanted: bool
+    entries: list[SceneSoundbiteClips]
+    colours: dict[str, str]
+
+
+async def _newest_soundbite_clips(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], tuple[EvidenceClip, Job | None]]:
+    """The newest clip of each sound bite shot of the project, by `(scene_id, shot_id)`."""
+    statement = (
+        select(EvidenceClip, Job)
+        .outerjoin(Job, EvidenceClip.render_job_id == Job.id)
+        .where(EvidenceClip.project_id == project.id, EvidenceClip.purpose == PURPOSE_SOUNDBITE)
+        .order_by(EvidenceClip.id.desc())
+        .execution_options(populate_existing=True)
+    )
+    found: dict[tuple[str, str], tuple[EvidenceClip, Job | None]] = {}
+    for clip, job in (await session.execute(statement)).all():
+        if clip.scene_id is None or clip.shot_id is None:
+            continue
+        found.setdefault((clip.scene_id, clip.shot_id), (clip, job))
+    return found
+
+
+def _soundbite_blocked(
+    entry: shot_plans.SceneEntry,
+    info: evidence_review.SoundbiteClip | None,
+    frames: int | None,
+) -> str | None:
+    if entry.status != "planned":
+        return SHOT_PLAN_OUT_OF_DATE_MESSAGE
+    if info is None:
+        return SOUNDBITE_GONE_MESSAGE
+    if not info.item.video_path:
+        return NO_VIDEO_MESSAGE
+    if frames is None:
+        return NO_LENGTH_MESSAGE
+    return None
+
+
+def speaker_colours(clips: list[evidence_review.SoundbiteClip]) -> dict[str, str]:
+    """The caption colour of each speaker among `clips` (in story order), by speaker key."""
+    return soundbite_render.assign_colours([str(clip.details["speaker"]) for clip in clips])
+
+
+@memoized_state
+async def soundbite_state(session: AsyncSession, project: Project) -> SoundbiteClipsState:
+    """The clips of the sound bite shots of the newest plans, scene by scene. Worked out on every
+    read; nothing here is stored but the clips."""
+    if not evidence_claims.wanted(project):
+        return SoundbiteClipsState(wanted=False, entries=[], colours={})
+    plans = await shot_plans.state(session, project)
+    shown = await evidence_review.shown_soundbite_clips(session, project)
+    infos = {(clip.id, clip.item_key): clip for clip in shown}
+    newest = await _newest_soundbite_clips(session, project)
+    looks: dict[tuple[int, str], dict[str, Any]] = {}
+
+    scenes: list[SceneSoundbiteClips] = []
+    for entry in plans.entries:
+        if entry.row is None or not isinstance(entry.row.content, dict):
+            continue
+        shots: list[SoundbiteClipEntry] = []
+        for shot in entry.row.content.get("shots", []):
+            if shot.get("type") != scene_timeline.SOUNDBITE_SHOT_TYPE:
+                continue
+            about = shot.get("soundbite")
+            if not isinstance(about, dict):
+                continue
+            claim_id, item_key = str(about.get("claim_id")), str(about.get("item_key"))
+            info = infos.get((claim_id, item_key))
+            frames = _span_frames(entry, shot["id"])
+            clip, job = newest.get((entry.item["id"], shot["id"]), (None, None))
+            look: dict[str, Any] = {}
+            if frames is not None and info is not None:
+                key = (frames, item_key)
+                if key not in looks:
+                    looks[key] = await soundbite_look(
+                        session, project, info.item, info.details, frames
+                    )
+                look = looks[key]
+            status, error = _clip_status(clip, job, item_key, look) if look else ("none", None)
+            shots.append(
+                SoundbiteClipEntry(
+                    shot={**shot, "scene_id": entry.item["id"]},
+                    plan_id=entry.row.id,
+                    claim_id=claim_id,
+                    item_key=item_key,
+                    clip_info=info,
+                    frames=frames,
+                    status=status,
+                    clip=clip,
+                    job=job,
+                    last_error=error,
+                    blocked_reason=_soundbite_blocked(entry, info, frames),
+                )
+            )
+        if shots:
+            scenes.append(SceneSoundbiteClips(item=entry.item, shots=shots))
+    return SoundbiteClipsState(wanted=True, entries=scenes, colours=speaker_colours(shown))
+
+
+async def queue_soundbite_clip(
+    session: AsyncSession, project: Project, scene_id: str, shot_id: str
+) -> Job:
+    """Queues the clip of one sound bite shot, at the shot's exact length, and commits. A clip
+    that is already waiting or running gives its job. Raises EvidenceClipError (with the reason)
+    when the clip cannot be made now or is already made."""
+    state = await soundbite_state(session, project)
+    found = next(
+        (
+            shot
+            for scene in state.entries
+            for shot in scene.shots
+            if shot.shot["scene_id"] == scene_id and shot.shot["id"] == shot_id
+        ),
+        None,
+    )
+    if found is None:
+        raise EvidenceClipError(UNKNOWN_SOUNDBITE_MESSAGE)
+    if found.status == "working" and found.job is not None:
+        return found.job
+    if found.status == "ready":
+        raise EvidenceClipError(SOUNDBITE_ALREADY_MADE_MESSAGE)
+    if found.blocked_reason is not None:
+        raise EvidenceClipError(found.blocked_reason)
+    assert found.clip_info is not None and found.frames is not None  # the refusal made sure
+
+    info = found.clip_info
+    look = await soundbite_look(session, project, info.item, info.details, found.frames)
+    job, created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="local",
+        input={SOUNDBITE_DEDUPE_KEY: found.ref},
+        commit=False,
+        dedupe_key=SOUNDBITE_DEDUPE_KEY,
+    )
+    if not created:
+        return job
+    clip = EvidenceClip(
+        project_id=project.id,
+        purpose=PURPOSE_SOUNDBITE,
+        item_id=info.item.id,
+        scene_id=scene_id,
+        shot_id=shot_id,
+        shot_plan_id=found.plan_id,
+        attempt=(found.clip.attempt + 1) if found.clip is not None else 1,
+        inputs={
+            "items": [found.item_key],
+            "item_ids": [info.item.id],
+            "orientation": project.orientation,
+            "length_s": round(found.frames / FPS, 3),
+            **soundbite_inputs(found.item_key, found.claim_id, info.details),
+            **look,
+        },
+    )
+    session.add(clip)
+    await session.flush()
+    job.input = {CLIP_KEY: clip.id, SOUNDBITE_DEDUPE_KEY: found.ref}
     clip.render_job_id = job.id
     await session.commit()
     return job

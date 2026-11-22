@@ -644,6 +644,8 @@ class SoundbiteDecisionIn(BaseModel):
     recorded: str = Field(max_length=10)
     acknowledged_flags: list[Annotated[str, Field(max_length=40)]] = Field(max_length=20)
     rights_note: str = Field(default="", max_length=evidence_review.RIGHTS_NOTE_MAX_CHARS)
+    # Switch the music off under the clip, instead of only lowering it (SB-009).
+    music_drop: bool = False
 
 
 class ItemVerdictIn(BaseModel):
@@ -717,7 +719,7 @@ def _preview_out(preview: evidence_clips.Preview | None) -> PreviewOut | None:
 
 def _soundbite_details(body: SoundbiteDecisionIn) -> dict[str, Any]:
     """The owner's details as the review keeps them, without the cut (the review finds it) and
-    with the text trimmed. Switching the music off under the clip is SB-009's."""
+    with the text trimmed. `music_drop` is the owner's choice for the music under the clip."""
     return {
         "first_word": body.first_word,
         "last_word": body.last_word,
@@ -727,7 +729,7 @@ def _soundbite_details(body: SoundbiteDecisionIn) -> dict[str, Any]:
         "recorded": body.recorded.strip(),
         "acknowledged_flags": list(dict.fromkeys(body.acknowledged_flags)),
         "rights_note": body.rights_note.strip(),
-        "music_drop": False,
+        "music_drop": body.music_drop,
     }
 
 
@@ -870,7 +872,11 @@ def _item_out(
         page=page if isinstance(page, int) and not isinstance(page, bool) else None,
         verdict=cast(Any, verdict) if item.usable else None,
         readability=ReadabilityOut(**readable) if readable is not None else None,
-        preview=_preview_out(preview) if item.usable and not is_video else None,
+        # A sound bite clip has a preview once the owner accepted it (SB-009): the clip as the
+        # render plays it.
+        preview=(
+            _preview_out(preview) if item.usable and (not is_video or details is not None) else None
+        ),
         soundbite=_soundbite_out(item, job, details) if is_video else None,
     )
 
@@ -929,7 +935,15 @@ async def _review_out(
     """The review answer: the claims with each piece's readability and newest preview video."""
     frame = (project.out_width, project.out_height)
     keys = [item.item_key for claim in view.claims for item in claim.items if item.usable]
-    previews = await evidence_clips.previews_for(session, project, keys)
+    accepted_clips = {
+        item.item_key: (item, details)
+        for claim in view.claims
+        for item in claim.items
+        if item.kind == "video"
+        and item.usable
+        and (details := claim.decision.soundbites.get(item.item_key)) is not None
+    }
+    previews = await evidence_clips.previews_for(session, project, keys, accepted_clips)
     jobs = await soundbite_clips.jobs_of(
         session, [item for claim in view.claims for item in claim.items if item.kind == "video"]
     )

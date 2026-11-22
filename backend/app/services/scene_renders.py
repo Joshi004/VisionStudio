@@ -141,6 +141,7 @@ class _Context:
     switched: set[tuple[str, str]]
     graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None]
     evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry]
+    soundbites: dict[tuple[str, str], evidence_clips.SoundbiteClipEntry]
     sources: list[story_render_plan.SceneSource]
 
 
@@ -174,6 +175,7 @@ async def _context(session: AsyncSession, project: Project, *, place: bool) -> _
         switched=await shot_voice_sources.clip_shots(session, project),
         graphics=await story_renders.graphic_videos(session, project),
         evidence=await story_renders.evidence_clips_now(session, project),
+        soundbites=await story_renders.soundbite_clips_now(session, project),
         sources=sources,
     )
 
@@ -283,11 +285,12 @@ def _music_reasons(recorded: dict[str, Any], context: _Context) -> list[str]:
 
 
 def _soundbite_reasons(
-    shot: dict[str, Any], entry: shot_plans.SceneEntry, shot_label: str
+    shot: dict[str, Any], entry: shot_plans.SceneEntry, shot_label: str, context: _Context
 ) -> list[str]:
     """Why a recorded sound bite shot (SB-008) is not what the cut plan and the timeline have
-    now: its clip changed, or its cut was trimmed again so it plays for another time. Its
-    placeholder has nothing else to go out of date until SB-009 makes the clip."""
+    now: its clip changed, or its cut was trimmed again so it plays for another time. A shot
+    that played its clip (SB-009) is also out of date when the clip was made again or the music
+    choice under it changed, and a placeholder when its clip is ready now."""
     recorded = shot["soundbite"]
     current = None
     if entry.row is not None:
@@ -303,6 +306,11 @@ def _soundbite_reasons(
     seconds = recorded.get("seconds")
     if isinstance(seconds, int | float) and abs(seconds - (span.end_s - span.start_s)) > 0.001:
         return [f"{shot_label} plays a clip that was trimmed again since this video was made."]
+    if "clip_id" in recorded:
+        return story_renders.soundbite_reasons(shot, context.soundbites)
+    made = context.soundbites.get((str(shot.get("scene_id")), str(shot.get("shot_id"))))
+    if made is not None and made.done:
+        return [f"{shot_label} has a sound bite clip now where this video shows a placeholder."]
     return []
 
 
@@ -346,7 +354,7 @@ def _scene_reasons(
             reasons.extend(story_renders.evidence_reasons(shot, context.evidence))
             continue
         if isinstance(shot.get("soundbite"), dict):
-            reasons.extend(_soundbite_reasons(shot, entry, shot_label))
+            reasons.extend(_soundbite_reasons(shot, entry, shot_label, context))
             continue
         now = shots_now.get(key)
         if now is None:
@@ -650,6 +658,9 @@ def _take_text(shot: dict[str, Any]) -> str:
         return f"evidence clip {evidence.get('clip_id')}"
     if isinstance(shot.get("placeholder"), dict):
         return "a placeholder"
+    bite = shot.get("soundbite")
+    if isinstance(bite, dict):
+        return f"sound bite clip {bite.get('clip_id')}"
     return f"take {shot.get('take_number')}"
 
 
@@ -681,6 +692,7 @@ def compare_scene(
             before.get("take_id") != shot.get("take_id")
             or before.get("graphic") != shot.get("graphic")
             or before.get("evidence") != shot.get("evidence")
+            or before.get("soundbite") != shot.get("soundbite")
         ):
             reasons.append(
                 f"The shot {shot_id} of {label} uses {_take_text(shot)} "

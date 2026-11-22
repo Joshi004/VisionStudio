@@ -160,14 +160,18 @@ def stereo_filters(channels: int | None) -> list[str]:
 
 
 def duck_volume_filter(
-    windows: Sequence[tuple[float, float]], depth_db: float, ramp_s: float
+    windows: Sequence[tuple[float, float]],
+    depth_db: float,
+    ramp_s: float,
+    release_s: float | None = None,
 ) -> str:
     """A `volume` filter that lowers the sound by `depth_db` (negative) inside each window and
     brings it back with linear ramps (PHASE-028).
 
     `windows` are `(start, end)` in the sound's own seconds. The sound reaches its full depth at
     `start` (the fall begins `ramp_s` earlier) and starts to come back at `end` (it is whole
-    again `ramp_s` later). Where two windows' ramps meet, the deeper one wins. The expression is
+    again `ramp_s` later; `release_s`, when given, is how long it takes instead, which a sound bite
+    uses, SB-009). Where two windows' ramps meet, the deeper one wins. The expression is
     evaluated per audio frame (`eval=frame`), so the gain moves in steps of one frame (about
     21 ms for 1024 samples at 48 kHz), which is smooth enough for ramps of a quarter second.
 
@@ -178,20 +182,25 @@ def duck_volume_filter(
         raise ValueError("The ducking depth must be below 0 dB.")
     if ramp_s <= 0:
         raise ValueError("The ducking ramp must be longer than 0 s.")
+    if release_s is not None and release_s <= 0:
+        raise ValueError("The ducking release must be longer than 0 s.")
     if not windows:
         raise ValueError("A ducking filter needs at least one window.")
     drop = 1 - 10 ** (depth_db / 20)
-    return f"volume='1-{drop:.6f}*{_envelope(windows, ramp_s)}':eval=frame"
+    return f"volume='1-{drop:.6f}*{_envelope(windows, ramp_s, release_s)}':eval=frame"
 
 
-def _envelope(windows: Sequence[tuple[float, float]], ramp_s: float) -> str:
+def _envelope(
+    windows: Sequence[tuple[float, float]], ramp_s: float, release_s: float | None = None
+) -> str:
     """An FFmpeg expression of `t` that is 0 outside the windows and their ramps and 1 inside
     them. The product of the rise and the fall is both ramps at once, whatever the window's
     length, and where two windows' ramps meet the higher one wins.
     """
+    release = ramp_s if release_s is None else release_s
     depths = [
         f"(clip((t-({start - ramp_s:.6f}))/{ramp_s:.6f},0,1)"
-        f"*clip((({end + ramp_s:.6f})-t)/{ramp_s:.6f},0,1))"
+        f"*clip((({end + release:.6f})-t)/{release:.6f},0,1))"
         for start, end in windows
     ]
     deepest = depths[0]
@@ -351,6 +360,73 @@ def _trimmed_output_args(frames: int, fps: int, dest: Path) -> list[str]:
         "-f",
         "mov",
         file_input(dest),
+    ]
+
+
+def soundbite_clip_args(
+    src: Path,
+    overlay: Path | None,
+    dest: Path,
+    *,
+    start_s: float,
+    graph: str,
+    frames: int,
+    fps: int,
+    for_browser: bool,
+) -> list[str]:
+    """The clip of a sound bite (SB-009): the video window `src` from `start_s`, put through
+    `graph` (`soundbite_render.compose_graph`: input 1 is `overlay`, the transparent lower third,
+    when there is one), as `frames` frames at `fps` with 48 kHz stereo sound. The sound is only cut
+    and padded: no gain, no speed, no pitch (SB-7). For the render the clip is written as
+    `trim_args` writes a clip (a MOV with PCM sound); for the review's preview (`for_browser`) it
+    is an MP4 with AAC sound, which a browser plays."""
+    if frames < 1 or start_s < 0:
+        raise ValueError("A clip needs frames and a start.")
+    inputs = ["-ss", f"{start_s:.3f}", "-i", file_input(src)]
+    if overlay is not None:
+        inputs += ["-i", file_input(overlay)]
+    if for_browser:
+        output = [
+            "-frames:v",
+            str(frames),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(fps),
+            "-fps_mode",
+            "cfr",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-ar",
+            str(SAMPLE_RATE),
+            "-ac",
+            "2",
+            "-movflags",
+            "+faststart",
+            "-f",
+            "mp4",
+            file_input(dest),
+        ]
+    else:
+        output = _trimmed_output_args(frames, fps, dest)
+    return [
+        *_BASE,
+        *inputs,
+        "-filter_complex",
+        graph,
+        "-map",
+        "[v]",
+        "-map",
+        "[a]",
+        *output,
     ]
 
 
@@ -575,6 +651,18 @@ _LIMITER: Final = "alimiter=limit=0.97:level=0"
 
 
 @dataclass(frozen=True)
+class BiteDuck:
+    """How far the music is lowered under the sound bite clips that touch one sound (SB-009): by
+    `depth_db` (negative) inside each window, going down over `attack_s` before it and coming back
+    over `release_s` after it. A window is in the sound's own seconds."""
+
+    windows: tuple[tuple[float, float], ...]
+    depth_db: float
+    attack_s: float
+    release_s: float
+
+
+@dataclass(frozen=True)
 class LaneSound:
     """One placed sound of a music lane: where it starts on the story's timeline, the part of
     the file it plays, its fades and its own ducks, dips and swells. Every window is in the
@@ -600,6 +688,8 @@ class LaneSound:
     bump_windows: tuple[tuple[float, float], ...] = ()
     bump_db: float = 0.0
     bump_ramp_s: float = 0.0
+    # Only a sound that a sound bite touches has these (SB-009).
+    bite_ducks: tuple[BiteDuck, ...] = ()
 
 
 def _lane_chain(sound: LaneSound, total_samples: int) -> list[str]:
@@ -629,6 +719,11 @@ def _lane_chain(sound: LaneSound, total_samples: int) -> list[str]:
         steps.append(duck_volume_filter(sound.dip_windows, sound.dip_db, sound.dip_ramp_s))
     if sound.bump_windows and sound.bump_db > 0:
         steps.append(gain_bump_filter(sound.bump_windows, sound.bump_db, sound.bump_ramp_s))
+    steps += [
+        duck_volume_filter(bite.windows, bite.depth_db, bite.attack_s, bite.release_s)
+        for bite in sound.bite_ducks
+        if bite.windows and bite.depth_db < 0
+    ]
     if sound.start_sample > 0:
         steps.append(f"adelay={sound.start_sample}S|{sound.start_sample}S")
     steps += [

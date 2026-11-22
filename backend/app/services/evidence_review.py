@@ -712,18 +712,33 @@ class ShownSoundbite:
     seconds: float
 
 
-async def shown_soundbites(session: AsyncSession, project: Project) -> list[ShownSoundbite]:
-    """The sound bite clips shown on video, in story order (SB-008). The same gate as
-    `shown_claims`: empty unless the newest round has exactly the claims that count now. A claim
-    is listed when it is a sound bite whose one shown piece is a usable `video` item with the
-    owner's details. A change of the cut changes only `seconds`.
+@dataclass(frozen=True)
+class SoundbiteClip:
+    """A shown sound bite with what its render needs (SB-009): the clip's row in the newest import
+    and the owner's details of it (`SOUNDBITE_FIELDS`, with the cut, the lower third's lines and
+    `music_drop`). `start` and `end` are the quote's code-point positions in `script_text`."""
+
+    id: str
+    start: int
+    end: int
+    text: str
+    item_key: str
+    item: EvidenceItem
+    details: dict[str, Any]
+
+
+async def shown_soundbite_clips(session: AsyncSession, project: Project) -> list[SoundbiteClip]:
+    """The sound bite clips shown on video, in story order, with their rows and the owner's
+    details (SB-008, SB-009). The same gate as `shown_claims`: empty unless the newest round has
+    exactly the claims that count now. A claim is listed when it is a sound bite whose one shown
+    piece is a usable `video` item with the owner's details.
     """
     current = await evidence_rounds.state(session, project)
     if not current.wanted or current.round is None or not current.current:
         return []
     review = await view(session, project)
     placed = {claim["id"]: claim for claim in current.claims}
-    found: list[ShownSoundbite] = []
+    found: list[SoundbiteClip] = []
     for claim in review.claims:
         position = placed.get(claim.entry["id"])
         if position is None or not evidence_claims.is_soundbite(claim.entry):
@@ -736,17 +751,37 @@ async def shown_soundbites(session: AsyncSession, project: Project) -> list[Show
             if key not in clips or details is None:
                 continue
             found.append(
-                ShownSoundbite(
+                SoundbiteClip(
                     id=claim.entry["id"],
                     start=position["start"],
                     end=position["end"],
                     text=position["text"],
                     item_key=key,
-                    seconds=round(float(details["out_s"]) - float(details["in_s"]), 3),
+                    item=clips[key],
+                    details=details,
                 )
             )
             break
     return sorted(found, key=lambda bite: bite.start)
+
+
+async def shown_soundbites(session: AsyncSession, project: Project) -> list[ShownSoundbite]:
+    """The sound bite clips shown on video, in story order (SB-008). The same gate as
+    `shown_claims`: empty unless the newest round has exactly the claims that count now. A claim
+    is listed when it is a sound bite whose one shown piece is a usable `video` item with the
+    owner's details. A change of the cut changes only `seconds`.
+    """
+    return [
+        ShownSoundbite(
+            id=clip.id,
+            start=clip.start,
+            end=clip.end,
+            text=clip.text,
+            item_key=clip.item_key,
+            seconds=round(float(clip.details["out_s"]) - float(clip.details["in_s"]), 3),
+        )
+        for clip in await shown_soundbite_clips(session, project)
+    ]
 
 
 # --- The owner's actions -------------------------------------------------------------------

@@ -46,14 +46,18 @@ from app.db.models import EvidenceClip, EvidenceItem
 from app.db.session import SessionLocal
 from app.jobs import motion_draw, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.render_story import RenderFailed
+from app.jobs.render_story import TRIM_TIMEOUT_S, RenderFailed, run_ffmpeg
 from app.providers import motion_renderer
 from app.services import (
     evidence_clip_layout,
     evidence_clips,
     evidence_layout,
     ffmpeg,
+    graphics_lab,
     graphics_render,
+    render_commands,
+    soundbite_clips,
+    soundbite_render,
 )
 from app.services.storage import Storage, StorageError, get_storage
 
@@ -148,6 +152,10 @@ class RenderEvidenceClipHandler(JobHandler):
         self, job_id: int, clip_id: int, storage: Storage, temp_paths: list[Path]
     ) -> None:
         started = time.monotonic()
+        bite = await _soundbite_plan(clip_id)
+        if bite is not None:
+            await _render_soundbite(job_id, bite, storage, temp_paths, started)
+            return
         plan = await _plan(clip_id)
         geometry = evidence_clip_layout.geometry_of(plan.capture)
         if geometry is None:
@@ -373,6 +381,238 @@ async def _plan(clip_id: int) -> _Plan:
             raise RenderFailed("The evidence clip does not say its size and length.") from None
         await session.commit()
     return plan
+
+
+# --- A sound bite clip (SB-009) ---------------------------------------------------------------
+
+OVERLAY_ENGINE: Final = "soundbite_overlay"
+OVERLAY_COMPOSITION: Final = "SoundbiteOverlay"
+
+
+@dataclass
+class _BitePlan:
+    """What one job makes of a sound bite: the owner's cut of the downloaded video at the output
+    size, with the lower third and the credit over it. `purpose` is `soundbite` (the clip the
+    render plays: a MOV with PCM sound) or `preview` (the review's copy: an MP4 a browser plays)."""
+
+    clip_id: int
+    project_id: int
+    purpose: str
+    width: int
+    height: int
+    fps: int
+    frames: int
+    accent: str
+    video_path: str
+    in_s: float
+    out_s: float
+    speaker: str
+    role: str
+    venue: str
+    recorded: str
+    channel: object
+    first_word: int
+    last_word: int
+    heard: list[tuple[str, float, float]]
+
+
+async def _soundbite_plan(clip_id: int) -> _BitePlan | None:
+    """Reads what the job makes when the clip shows a `video` piece, or None for any other clip.
+    Raises RenderFailed for a sound bite clip whose record is not complete."""
+    async with SessionLocal() as session:
+        clip = await session.get(EvidenceClip, clip_id)
+        if clip is None:
+            raise RenderFailed("The evidence clip this job was made for is gone.")
+        item = await session.get(EvidenceItem, clip.item_id) if clip.item_id is not None else None
+        if item is None:
+            raise RenderFailed("The piece of evidence this clip shows is gone.")
+        await session.commit()
+        if item.kind != "video":
+            return None
+        inputs = clip.inputs if isinstance(clip.inputs, dict) else {}
+        if not item.video_path:
+            raise RenderFailed("The sound bite clip has no video file.")
+        accent = inputs.get("accent")
+        try:
+            return _BitePlan(
+                clip_id=clip.id,
+                project_id=clip.project_id,
+                purpose=clip.purpose,
+                width=int(inputs["width"]),
+                height=int(inputs["height"]),
+                fps=int(inputs["fps"]),
+                frames=int(inputs["frames"]),
+                accent=accent if isinstance(accent, str) else "",
+                video_path=item.video_path,
+                in_s=float(inputs["in_s"]),
+                out_s=float(inputs["out_s"]),
+                speaker=str(inputs["speaker"]),
+                role=str(inputs["role"]),
+                venue=str(inputs["venue"]),
+                recorded=str(inputs["recorded"]),
+                channel=inputs.get("channel"),
+                first_word=int(inputs["first_word"]),
+                last_word=int(inputs["last_word"]),
+                heard=[
+                    (word.text, word.start, word.end)
+                    for word in soundbite_clips.words_of(item.heard_words)
+                ],
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RenderFailed("The sound bite clip does not say its cut and its size.") from None
+
+
+async def _render_soundbite(
+    job_id: int,
+    plan: _BitePlan,
+    storage: Storage,
+    temp_paths: list[Path],
+    started: float,
+) -> None:
+    """Makes the clip: the motion service draws the overlay (a transparent ProRes clip), then
+    ffmpeg cuts the video window at the cut's start, frames the picture, lays the overlay over it
+    and writes the file. The sound is the cut's own, unchanged."""
+    if plan.frames < 2 or plan.out_s <= plan.in_s:
+        raise RenderFailed("The sound bite clip has no length.")
+    source = storage.get_path(plan.video_path)
+    probe = await ffmpeg.probe_video(source)
+    if probe is None or probe.width is None or probe.height is None:
+        raise RenderFailed("The downloaded video could not be read.")
+    if probe.audio is None:
+        raise RenderFailed("The downloaded video has no sound, so it cannot be a sound bite.")
+    framing = soundbite_render.framing_for((probe.width, probe.height), (plan.width, plan.height))
+
+    name, detail = soundbite_render.lower_third_lines(
+        {"speaker": plan.speaker, "role": plan.role, "venue": plan.venue, "recorded": plan.recorded}
+    )
+    credit = soundbite_render.credit_text(plan.channel)
+    safe, caption = evidence_clip_layout.safe_and_caption(plan.width, plan.height)
+    resolved = soundbite_render.overlay_resolved(
+        width=plan.width,
+        height=plan.height,
+        fps=plan.fps,
+        accent=plan.accent,
+        fonts=graphics_lab.FONTS,
+        safe=safe,
+        caption=caption,
+        name=name,
+        detail=detail,
+        credit=credit,
+        last_word_start_s=soundbite_render.last_word_start(plan.heard, plan.last_word, plan.in_s),
+    )
+    warnings: list[dict[str, str]] = []
+    if resolved["lower_third"] is None:
+        warnings.append(
+            {
+                "code": "no_lower_third",
+                "message": "The clip is too short for a lower third, so it has none.",
+            }
+        )
+    overlay: Path | None = None
+    versions: dict[str, Any] = {}
+    render_s: float | None = None
+    if resolved["lower_third"] is not None or resolved["credit"] is not None:
+        async with SessionLocal() as session:
+            base_url = await settings_service.get_str(session, settings_service.MOTION_URL_KEY)
+        health = await motion_renderer.health(base_url)
+        versions = {"remotion": health.get("remotion"), "chrome": health.get("chrome")}
+        await phase_writer.note(job_id, phases.PREPARING_EVIDENCE)
+        overlay = storage.new_temp_path("mov")
+        temp_paths.append(overlay)
+        body = graphics_render.render_body(
+            OVERLAY_ENGINE,
+            width=plan.width,
+            height=plan.height,
+            fps=plan.fps,
+            frames=plan.frames,
+            resolved=resolved,
+            input=None,
+            code=None,
+            encoding=graphics_render.CALLOUT_ENCODING,
+        )
+        render_s = await motion_draw.draw_in_motion(job_id, base_url, body, overlay)
+        drawn = await ffmpeg.probe_video(overlay)
+        if drawn is None or drawn.frame_count is None:
+            raise RenderFailed("The rendered overlay could not be read.")
+        _, overlay_problems = graphics_render.check_probe(
+            drawn,
+            width=plan.width,
+            height=plan.height,
+            fps=plan.fps,
+            frames=plan.frames,
+            transparent=True,
+        )
+        if overlay_problems:
+            raise RenderFailed(" ".join(overlay_problems))
+
+    for_browser = plan.purpose == evidence_clips.PURPOSE_PREVIEW
+    extension = "mp4" if for_browser else "mov"
+    video = storage.new_temp_path(extension)
+    temp_paths.append(video)
+    graph = soundbite_render.compose_graph(
+        framing,
+        width=plan.width,
+        height=plan.height,
+        fps=plan.fps,
+        frames=plan.frames,
+        audio_s=plan.out_s - plan.in_s,
+        channel_filters=render_commands.stereo_filters(probe.audio.channels),
+        with_overlay=overlay is not None,
+    )
+    await phase_writer.note(job_id, phases.CHECKING_GRAPHIC)
+    await run_ffmpeg(
+        render_commands.soundbite_clip_args(
+            source,
+            overlay,
+            video,
+            start_s=plan.in_s,
+            graph=graph,
+            frames=plan.frames,
+            fps=plan.fps,
+            for_browser=for_browser,
+        ),
+        TRIM_TIMEOUT_S,
+        "cutting the sound bite clip",
+    )
+    made = await ffmpeg.probe_video(video)
+    if made is None or made.frame_count is None:
+        raise RenderFailed("The sound bite clip could not be read after it was made.")
+    checks, mismatches = graphics_render.check_probe(
+        made, width=plan.width, height=plan.height, fps=plan.fps, frames=plan.frames
+    )
+    if made.audio is None:
+        mismatches.append("The sound bite clip has no sound.")
+    lufs = await ffmpeg.measure_loudness(
+        video, pre_filters=render_commands.stereo_filters(made.audio.channels if made.audio else 2)
+    )
+    metrics: dict[str, Any] = {
+        "engine": OVERLAY_ENGINE,
+        "composition": OVERLAY_COMPOSITION,
+        "framing": framing.kind,
+        "source_px": [probe.width, probe.height],
+        "lower_third": resolved["lower_third"] is not None,
+        "credit": resolved["credit"] is not None,
+        "speech_lufs": None if lufs is None else round(lufs, 1),
+        "render_s": render_s,
+        "job_s": round(time.monotonic() - started, 3),
+        "size_bytes": video.stat().st_size,
+        "frames": made.frame_count,
+        "width": made.width,
+        "height": made.height,
+        "fps": made.fps,
+        "codec": made.codec_name,
+        "pix_fmt": made.pix_fmt,
+        "checks": checks,
+        "versions": versions,
+    }
+    if mismatches:
+        raise VideoMismatch(" ".join(mismatches), metrics)
+    await phase_writer.note(job_id, phases.SAVING_GRAPHIC)
+    temp = await storage.describe_temp(video)
+    stored = await storage.save(temp, plan.project_id, extension)
+    await _save(
+        job_id, plan.clip_id, stored.relative_path, temp.sha256, made.frame_count, metrics, warnings
+    )
 
 
 async def _save(

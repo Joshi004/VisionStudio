@@ -63,6 +63,8 @@ from app.services import (
     shot_plans,
     shot_takes,
     shot_voice_sources,
+    soundbite_clips,
+    soundbite_render,
     speech_synthesis,
     story_render_plan,
     take_timings,
@@ -403,6 +405,17 @@ async def evidence_clips_now(
     }
 
 
+async def soundbite_clips_now(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], evidence_clips.SoundbiteClipEntry]:
+    """Every sound bite shot of the newest plans, by `(scene id, shot id)` (SB-009), with where its
+    clip stands. Empty for a project without sound bites."""
+    state = await evidence_clips.soundbite_state(session, project)
+    return {
+        (scene.item["id"], shot.shot["id"]): shot for scene in state.entries for shot in scene.shots
+    }
+
+
 def _evidence_source(
     entry: evidence_clips.ShotClipEntry | None,
 ) -> story_render_plan.EvidenceSource | None:
@@ -417,6 +430,43 @@ def _evidence_source(
         frame_count=clip.frame_count,
         file_exists=file_exists(clip.media_path),
         split=inputs.get("layout") == evidence_clips.LAYOUT_SPLIT,
+    )
+
+
+def _soundbite_clip_source(
+    entry: evidence_clips.SoundbiteClipEntry | None,
+    colours: dict[str, str],
+    shot_seconds: float,
+    take_window: tuple[float, float] | None,
+) -> story_render_plan.SoundbiteClipSource | None:
+    """The clip a sound bite shot plays (SB-009): its newest clip, once it is ready and is the
+    current one, with the cut's words for the captions, its speaker's colour and the owner's
+    choice about the music. `take_window` is what the clip replaced in the narrator's take."""
+    clip = entry.clip if entry is not None and entry.done else None
+    if entry is None or clip is None or clip.media_path is None or entry.clip_info is None:
+        return None
+    info = entry.clip_info
+    heard = [
+        (word.text, word.start, word.end)
+        for word in soundbite_clips.words_of(info.item.heard_words)
+    ]
+    details = info.details
+    words = soundbite_render.caption_words(
+        heard,
+        int(details["first_word"]),
+        int(details["last_word"]),
+        float(details["in_s"]),
+        shot_seconds,
+    )
+    return story_render_plan.SoundbiteClipSource(
+        clip_id=clip.id,
+        path=clip.media_path,
+        frame_count=clip.frame_count,
+        file_exists=file_exists(clip.media_path),
+        music_drop=details.get("music_drop") is True,
+        colour=colours.get(soundbite_render.speaker_key(str(details["speaker"]))),
+        words=words,
+        take_window=take_window,
     )
 
 
@@ -501,6 +551,12 @@ async def scene_sources(
     continuous = word_timings.times_takes(project)
     graphics = await graphic_videos(session, project)
     evidence = await evidence_clips_now(session, project)
+    bite_state = await evidence_clips.soundbite_state(session, project)
+    bite_clips = {
+        (scene.item["id"], shot.shot["id"]): shot
+        for scene in bite_state.entries
+        for shot in scene.shots
+    }
     card_scenes = {
         scene.item["id"]: scene
         for scene in (await evidence_clips.card_state(session, project)).entries
@@ -538,13 +594,26 @@ async def scene_sources(
                     for shot in entry.row.content["shots"]
                     if shot.get("type") == scene_timeline.EVIDENCE_SHOT_TYPE
                 }
-            # The sound bite shots (SB-008) have no take either: SB-009 makes their clip.
+            # The sound bite shots (SB-008) have no take either: their clip is the newest one made
+            # for the shot (SB-009).
             bite_ids = {
                 str(shot["id"]): shot["soundbite"]
                 for shot in (entry.row.content["shots"] if entry.row is not None else [])
                 if shot.get("type") == scene_timeline.SOUNDBITE_SHOT_TYPE
                 and isinstance(shot.get("soundbite"), dict)
             }
+            # The take map has one replaced span for each of these shots, in the same order.
+            replaced = (
+                entry.timeline.take_map.replaced if entry.timeline.take_map is not None else ()
+            )
+            windows = (
+                {
+                    shot_id: (span.take_start_s, span.take_end_s)
+                    for shot_id, span in zip(bite_ids, replaced, strict=True)
+                }
+                if len(replaced) == len(bite_ids)
+                else {}
+            )
             for span in entry.timeline.shots:
                 if span.shot_id in bite_ids:
                     bite = bite_ids[span.shot_id]
@@ -559,6 +628,12 @@ async def scene_sources(
                                 claim_id=str(bite["claim_id"]),
                                 item_key=str(bite["item_key"]),
                                 seconds=round(span.end_s - span.start_s, 3),
+                                clip=_soundbite_clip_source(
+                                    bite_clips.get((scene_id, span.shot_id)),
+                                    bite_state.colours,
+                                    round(span.end_s - span.start_s, 3),
+                                    windows.get(span.shot_id),
+                                ),
                             ),
                             description=descriptions.get(span.shot_id),
                         )
@@ -884,12 +959,14 @@ def _render_reasons(
     switched: set[tuple[str, str]],
     graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None] | None = None,
     evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry] | None = None,
+    soundbites: dict[tuple[str, str], evidence_clips.SoundbiteClipEntry] | None = None,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
     `switched` is every presenter shot now on its clip's own voice (`shot_voice_sources`).
     `graphics` is the video each graphic shot uses now (`graphic_videos`), and `evidence` the
-    clip of each evidence shot now (`evidence_clips_now`).
+    clip of each evidence shot now (`evidence_clips_now`), and `soundbites` the clip of each sound
+    bite shot now (`soundbite_clips_now`).
     """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
@@ -919,6 +996,9 @@ def _render_reasons(
             continue
         if isinstance(shot.get("evidence"), dict):
             reasons.extend(evidence_reasons(shot, evidence or {}))
+            continue
+        if isinstance(shot.get("soundbite"), dict):
+            reasons.extend(soundbite_reasons(shot, soundbites or {}))
             continue
         now = shots.get((shot.get("scene_id"), shot.get("shot_id")))
         selected = now.selected if now is not None else None
@@ -1020,6 +1100,28 @@ def evidence_reasons(
     if now.clip.id == shot["evidence"].get("clip_id"):
         return []
     return [f"{label} was drawn again since this video was made."]
+
+
+def soundbite_reasons(
+    shot: dict[str, Any], soundbites: dict[tuple[str, str], evidence_clips.SoundbiteClipEntry]
+) -> list[str]:
+    """Why the sound bite clip a render played is not what the shot plays now (SB-009): the clip
+    was made again, or the owner changed what happens to the music under it. A shot recorded
+    without a clip (a placeholder of a scene render) is judged by the scene render's own check."""
+    recorded = shot["soundbite"]
+    if "clip_id" not in recorded:
+        return []
+    now = soundbites.get((str(shot.get("scene_id")), str(shot.get("shot_id"))))
+    if now is None:
+        return []  # the scenes' own reason says so
+    label = f"The sound bite clip of shot {shot.get('shot_id')} of scene {shot.get('scene_index')}"
+    if not now.done or now.clip is None or now.clip_info is None:
+        return [f"{label} is not ready now."]
+    if now.clip.id != recorded.get("clip_id"):
+        return [f"{label} was made again since this video was made."]
+    if (now.clip_info.details.get("music_drop") is True) != (recorded.get("music_drop") is True):
+        return [f"The music choice under {label.lower()} changed since this video was made."]
+    return []
 
 
 _LOOK_AGAIN: Final = "The callout look was written again since this video was made."
@@ -1157,6 +1259,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     switched = await shot_voice_sources.clip_shots(session, project)
     graphics = await graphic_videos(session, project)
     evidence = await evidence_clips_now(session, project)
+    soundbites = await soundbite_clips_now(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -1188,6 +1291,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             switched,
             graphics,
             evidence,
+            soundbites,
         )
         entries.append(
             RenderEntry(

@@ -6,6 +6,7 @@ import {
   Group,
   Loader,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -62,6 +63,7 @@ type Fields = {
   dateConfirmed: boolean;
   acknowledged: string[];
   rightsNote: string;
+  musicDrop: boolean;
 };
 
 /** What the panel needs to know about the claim the clip belongs to. */
@@ -118,6 +120,7 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
     dateConfirmed: edits.dateConfirmed ?? saved !== null,
     acknowledged: edits.acknowledged ?? saved?.acknowledged_flags ?? [],
     rightsNote: edits.rightsNote ?? saved?.rights_note ?? "",
+    musicDrop: edits.musicDrop ?? saved?.music_drop ?? false,
   };
   const edit = (change: Partial<Fields>) => setEdits((current) => ({ ...current, ...change }));
 
@@ -201,6 +204,7 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
           recorded: fields.recorded,
           acknowledged_flags: ticked,
           rights_note: fields.rightsNote.trim(),
+          music_drop: fields.musicDrop,
         }
       : null;
   const dirty =
@@ -213,6 +217,7 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
     details.venue !== saved.venue ||
     details.recorded !== saved.recorded ||
     details.rights_note !== saved.rights_note ||
+    details.music_drop !== saved.music_drop ||
     !sameList(details.acknowledged_flags, saved.acknowledged_flags);
 
   const quoteSpan =
@@ -558,6 +563,17 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
           value={fields.rightsNote}
           disabled={disabled}
           onChange={(event) => edit({ rightsNote: event.currentTarget.value })}
+        />
+      )}
+
+      {isBite && (
+        <Switch
+          size="xs"
+          label="Music off under this clip"
+          description="Instead of only lowering it. Use it for a clip where any music would be heard. More than three of these in ten minutes can feel choppy."
+          checked={fields.musicDrop}
+          disabled={disabled}
+          onChange={(event) => edit({ musicDrop: event.currentTarget.checked })}
         />
       )}
 

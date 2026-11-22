@@ -316,7 +316,7 @@ function PieceCard({
           </Group>
         )}
 
-        {item.usable && !isClip && item.verdict === "accepted" && (
+        {item.usable && (!isClip || isBite) && item.verdict === "accepted" && (
           <EvidencePreview
             item={item}
             disabled={disabled}
@@ -383,6 +383,7 @@ function decisionOf(claim: EvidenceReviewClaim): EvidenceClaimDecision {
                   recorded: saved.recorded,
                   acknowledged_flags: saved.acknowledged_flags,
                   rights_note: saved.rights_note,
+                  music_drop: saved.music_drop,
                 },
               }
             : {}),

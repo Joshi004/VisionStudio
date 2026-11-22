@@ -235,7 +235,7 @@ scene_time(t) = lead_in + t + sum over bites with e_i <= t of (L_i - (e_i - s_i)
 
 Take times inside `[s_i, e_i]` have no scene time: nothing of the take plays there. Every consumer gets times only from this mapping (SB-002). Presenter clips never cover a sound bite shot, so their windows in the take are unchanged and no H3 clip is made again. Captions and callouts are placed word by word through the mapping, not from a unit's start; the quote's own narrator captions and any callout on the quote's words are dropped (a warning lists them).
 
-**Defaults** (from the report; *S* sourced, *P* practitioner, *I* inference). Planning of SB-006, SB-008 and SB-009 may change them and records why.
+**Defaults** (from the report; *S* sourced, *P* practitioner, *I* inference). Planning of SB-006, SB-008 and SB-009 may change them and records why. **SB-009 built:** a deep duck of -26 dB with a 0.2 s attack and 0.45 s release (inside the 20 dB and 300–600 ms asked), a drop of -90 dB with 0.5 s and 0.6 s ramps, a lower third 0.4 s after the start held 5 s and gone 0.3 s before the last word, a 12 dB cap on the bite's gain with 20 ms fades, and no extra picture lead beyond the accepted cut.
 
 | Setting | Default | Basis |
 |---|---|---|
@@ -279,7 +279,7 @@ Planning in SB-001 decides the names. The feature needs:
 | SB-006 | Importing clips: transcription, fidelity, trim, flags | Code | SB-001, SB-003 | Completed (2026-11-22) |
 | SB-007 | The review screen for sound bites | Code | SB-006 | Completed (2026-11-22) |
 | SB-008 | Sound bite shots in the cut plan and the timeline | Code | SB-002, SB-007 | Completed (2026-11-22) |
-| SB-009 | The sound bite in the render | Code | SB-008 | Not Started |
+| SB-009 | The sound bite in the render | Code | SB-008 | Completed (2026-11-22) |
 | SB-010 | The Nvidia explainer end to end | Owner | SB-004, SB-005, SB-009 | Not Started |
 | SB-011 | Insert mode: cold open, montage, back-ID | Code, later | SB-010 | Deferred |
 | SB-012 | A quote card for the narrator's fallback | Code, later | SB-010 | Deferred |
@@ -292,7 +292,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 7 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008); 1 in progress (SB-004, Claude Code run pending).
+**Progress snapshot:** 8 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008, SB-009); 1 in progress (SB-004, Claude Code run pending).
 
 ---
 
@@ -666,7 +666,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-009 — The sound bite in the render
 
-**Status:** Not Started
+**Status:** Completed (2026-11-22)
 
 **Objective.** The viewer sees and hears the real person, cleanly, with name, date and source.
 
@@ -694,14 +694,26 @@ Planning in SB-001 decides the names. The feature needs:
 - Standard checks, `npm run typecheck` in `motion/`.
 
 **Completion checklist.**
-- [ ] Trimmed clip, gain, fades, portrait framing
-- [ ] Render audio and music
-- [ ] Captions
-- [ ] Overlay and preview
-- [ ] Description link
-- [ ] Standard checks
+- [x] Trimmed clip, gain, fades, portrait framing
+- [x] Render audio and music
+- [x] Captions
+- [x] Overlay and preview
+- [x] Description link
+- [x] Standard checks
+- [ ] Identity check of a project without sound bites on a snapshot of the real database (asked of the owner first; not run by the agent)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-22).
+- **Decisions of planning (owner's).** (1) Speaker colours come from a small fixed palette (`SPEAKER_PALETTE`: `#5CE1E6`, `#7CFC9A`, `#FFB347`, `#FF8AD8`), given to each speaker by first appearance in the story. (2) A bite's captions show the whole group in the speaker's colour, with no word highlight.
+- **The clip.** No migration and no new job type: `render_evidence_clip` also makes `purpose` `soundbite` clips (and the review's rendered preview, `purpose` `preview` of a `video` piece). `evidence_clips` keys a clip by its look (the item, the cut, the lower third and credit lines, size, accent), so a clip is made again only when one of those changes; its status is worked out on read. The job cuts the window on the accepted `in_s` and `out_s` (a whole number of frames at 24 fps), fits it to the render size (`full` for a 16:9 source, `fitted` over a blurred, darkened copy for portrait, a low resolution or a different aspect, `soundbite_render.compose_graph`), lays the motion service's transparent overlay (`SoundbiteOverlay`: lower third and source credit, ProRes 4444 on `/renders`, `engine` `soundbite_overlay`) over it and keeps the clip's own sound (stereo 48 kHz). Never a speed, pitch or word change. The lower third comes in 0.4 s after the start, is held 5 s and is gone 0.3 s before the last word (at least 1.5 s); the credit ("Video: channel") stays for the whole clip. The overlay takes the graphic theme's accent.
+- **The render.** A bite shot is no longer a placeholder: it carries the clip's file, `has_audio` and `soundbite {clip_id, claim_id, item_key, seconds, music_drop, take_window}`; a full render is refused (one sentence) only when a clip is missing or out of date. The clip is played at its own sound with a static gain against the narrator's speech over `take_window` (`voice_match_gain`, at most `BITE_MAX_BOOST_DB` = 12 dB, 20 ms fades, no duck); the scene render's levels record has the clip id. The frozen timeline is still version 6: the new keys (the bite shot's `soundbite`, `bite_ducks` on the music sounds, a group's `colour`, the bite constants) are only written when a bite exists, and the constants have defaults when read, so no timeline of a project without a bite changes.
+- **Music.** Under a bite the music is lowered by a separate, deeper duck of -26 dB (attack 0.2 s, release 0.45 s), or, with the bite's `music_drop`, by -90 dB (attack 0.5 s, release 0.6 s). The normal duck is not changed, so the two can add up under a bite (the music is then even lower). `music_placement` counts the bite as speech and no longer counts the take's silences inside a replaced span. A full render warns when a story has more than 3 drops per 10 minutes (`soundbite_music_drops`). The review card has the switch (`music_drop` in the decision, off by default).
+- **Captions.** A bite's caption units come from the clip's heard words; `CaptionGroup` and `TimedUnit` have an optional `colour` (written and read only when set). ASS writes one event for the whole group with `{\c}` in that colour; YTT has one pen for each speaker colour; SRT is unchanged. The narrator's captions are as before.
+- **Out of date.** A scene or story render is out of date when a bite's clip changed (a new cut, lower third or accent) or its `music_drop` changed. `music_drop` is not part of the clip's look and not part of the plan's fingerprint, so neither goes stale for it. The pipeline's `evidence_clips` step has one target for each bite (`soundbite:{scene}/{shot}`) and starts the clip job.
+- **Description.** `youtube_sources` gives an accepted clip's address as `https://www.youtube.com/watch?v=<id>&t=<n>s` (`n` is the cut's start in the video, from the window's start and `in_s`); context videos get the link of their quote.
+- **API and screen.** `SoundbiteDecisionIn.music_drop`; an accepted clip has a rendered preview on its card in the review; `schema.d.ts` regenerated from the app's own OpenAPI document.
+- **Checked** (2026-11-22; throwaway scripts in `/tmp` with a throwaway motion service on port 18090; no real data touched). Through the real `_render_soundbite` with a made-up 1280x720 source (a tone and the test pattern): landscape and portrait clips of exactly 102 frames at 24 fps, both streams 4.25 s long, the lower third present at 1.5 s and gone at 3.9 s, the credit throughout; portrait is `fitted` over the blurred copy, landscape `full`; the preview is an h264/aac file of the same length. The music duck filter on a 1 kHz tone: 26.0 dB lower inside the window for the duck, 69.9 dB for the drop (at least 20 dB asked). The render plan with a bite: the right entry, `bite_ducks` for both variants, the take pieces leave the replaced gap exactly, `parse_timeline` reads it back, a full render with a missing clip is refused with one sentence and a scene render shows "Sound bite clip not made yet"; ASS has the colour tag, YTT three pens; a timeline without a bite has none of the new keys. `ruff check`, `ruff format --check` (backend), `eslint` and `tsc -b` (frontend) and `npm run typecheck` (motion) pass.
+- **Not checked.** (1) The identity check of a project with no sound bites on a snapshot of the real database (asked of the owner; not run). (2) The loudness match within ±1 LU and a whole scene render with two bites were not run on real media (the gain comes from the same `voice_match_gain` as presenter clips; the clip job measured the made-up source, not a real speech). (3) The review screen's switch and preview in a browser; the description's link against a real project; a real planner call.
+- **For the owner.** Rebuild with `docker compose up --build -d` (never `down -v`) so the motion service has the new composition; make the bite's clip in the pipeline, listen to each bite in a scene render (levels, the edges, the music under it), and open the preview on the review card. Known small things: at a frame rate other than 24 the clip may differ from its slot by up to half a frame; the voice duck and the bite duck add up.
 
 ### SB-010 — The Nvidia explainer end to end (owner)
 
@@ -811,3 +823,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | 2026-11-22 | SB-006 | Completed: the import reads `video` pieces (media checks), `transcribe_evidence_clip` job and handler, `services/soundbite_analysis.py` (fidelity, trim, flags), read-only clip panel and "Transcribe again" in the review; no migration. Verified on a throwaway app with a fake GPU server; Parakeet checked on five real clips (words right, word times off by 0.1 to 0.3 s, so the trim is searched in the audio; the "quiet" limit was tuned from them). |
 | 2026-11-22 | SB-007 | Completed: the review of a sound bite clip (`SoundbiteClipPanel.tsx`, `SoundbitePlayer.tsx`): player with the cut marked, word-by-word trim whose cut the server finds in the clip's audio (`trim_for`, `GET .../review/items/{item_key}/trim`), lower third fields, confirmed recording date, flags to tick, rights note; `evidence_review.check_clip` and the `soundbite` object in `evidence_review.content`; clips are left out of `shown_claims` until SB-008. No migration. Verified on a throwaway app with real clips and made-up word times. |
 | 2026-11-22 | SB-008 | Completed: `soundbite` shot type (fixed in the planner's request, refused otherwise), `shown_soundbites`, `inputs.soundbites_sha256`, replaced spans filled from the clips' cut lengths, `take_map.place_s`, the take cut at each bite in `voice_pieces`, narrator captions and callouts dropped under a bite, scene render placeholder for the bite, `ShotType` literals and `schema.d.ts`, plans panel lines. No migration. Verified on throwaway scripts (pure functions); the identity check on a real snapshot is pending the owner's go-ahead. |
+| 2026-11-22 | SB-009 | Completed: the sound bite in the render. `evidence_clip` `soundbite` (clip cut on the accepted points, fitted full or over a blurred copy, motion overlay with lower third and credit, own sound kept) and the review's rendered preview, both through `render_evidence_clip`; the bite shot plays the clip with a static gain against the narrator, a deeper music duck or the per-bite music drop, speaker-coloured captions (ASS, YTT), `?t=` link in the description, out-of-date rules, `music_drop` in the decision. No migration. Verified on throwaway scripts with a throwaway motion service; the identity check on a real snapshot is pending the owner's go-ahead. |

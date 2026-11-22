@@ -11,10 +11,16 @@ export const ENGINES = [
   // An evidence clip (EVD-008): a screenshot zoomed to a quote. Its images travel in the request,
   // so it is asked for on POST /evidence-renders only, never on POST /renders.
   "evidence_clip",
+  // The lower third and the source credit laid over a sound bite clip (SB-009): a transparent
+  // full-frame clip, always ProRes 4444 like a callout, with no images in its request.
+  "soundbite_overlay",
 ] as const;
 export type Engine = (typeof ENGINES)[number];
 
 export const EVIDENCE_ENGINE: Engine = "evidence_clip";
+export const SOUNDBITE_ENGINE: Engine = "soundbite_overlay";
+// A sound bite is at most 15 s long (SB-007): 1800 frames is 60 s at 30 fps, as for a callout.
+const SOUNDBITE_MAX_FRAMES = 1800;
 // The body of POST /evidence-renders: a screenshot and a context image as base64, so far more than
 // the 1 MB of the other routes. The backend refuses to send more than 30 MB.
 export const EVIDENCE_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
@@ -265,6 +271,14 @@ export function requestProblem(request: RenderRequest): string | null {
   if (callout && frames > CALLOUT_MAX_FRAMES) {
     return `The engine "${engine}" draws at most ${CALLOUT_MAX_FRAMES} frames.`;
   }
+  // The overlay of a sound bite (SB-009) is transparent: ProRes 4444 only.
+  const overlay = engine === SOUNDBITE_ENGINE;
+  if (overlay && frames > SOUNDBITE_MAX_FRAMES) {
+    return `The engine "${engine}" draws at most ${SOUNDBITE_MAX_FRAMES} frames.`;
+  }
+  if (overlay && encoding.codec === "h264") {
+    return "A sound bite overlay is transparent: it is drawn as ProRes 4444.";
+  }
   if (encoding.codec === "h264") {
     if (encoding.pixel_format !== "yuv420p") return "H.264 is drawn as yuv420p.";
     if (encoding.crf === undefined || encoding.preset === undefined || encoding.color_space === undefined) {
@@ -277,8 +291,8 @@ export function requestProblem(request: RenderRequest): string | null {
     }
     return null;
   }
-  if (!callout && !card) {
-    return `Only the callout engines and evidence cards may be drawn as ProRes; "${engine}" is H.264 only.`;
+  if (!callout && !card && !overlay) {
+    return `Only the callout engines, evidence cards and sound bite overlays may be drawn as ProRes; "${engine}" is H.264 only.`;
   }
   if (encoding.prores_profile !== "4444" || encoding.pixel_format !== "yuva444p10le") {
     return "ProRes needs prores_profile 4444 and pixel_format yuva444p10le.";

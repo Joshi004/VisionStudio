@@ -28,6 +28,7 @@ const COMPOSITION_OF: Record<Engine, string> = {
   callout_component: "Callout",
   callout_blocks: "Callout",
   evidence_clip: "Evidence",
+  soundbite_overlay: "SoundbiteOverlay",
 };
 
 export type RenderState = "queued" | "rendering" | "done" | "failed";

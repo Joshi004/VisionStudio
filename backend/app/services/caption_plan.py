@@ -102,6 +102,8 @@ class CaptionGroup:
     start_ms: int
     end_ms: int
     words: tuple[CaptionWord, ...]
+    # Only a sound bite's group (SB-009) has one: the speaker's colour, the whole group in it.
+    colour: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,8 @@ class TimedUnit:
     audio_id: int
     start_ms: int
     words: Sequence[tuple[str, float, float]]
+    # A sound bite's words (SB-009) carry their speaker's colour into their groups.
+    colour: str | None = None
 
 
 # --- The layout -----------------------------------------------------------------------------
@@ -303,6 +307,7 @@ def build_captions(
                         start_ms=timed[0].start_ms,
                         end_ms=max(word.end_ms for word in timed),
                         words=timed,
+                        colour=unit.colour,
                     )
                 )
         for position, group in enumerate(groups):
@@ -327,6 +332,7 @@ def build_captions(
                 start_ms=group.start_ms,
                 end_ms=end,
                 words=words,
+                colour=group.colour,
             )
         )
     return finished
@@ -372,6 +378,7 @@ def _cut_out(group: CaptionGroup, window_start: int, window_end: int) -> Caption
         start_ms=start,
         end_ms=end,
         words=_fit_words(kept, start, end),
+        colour=group.colour,
     )
 
 
@@ -434,6 +441,8 @@ def track_dict(
                 "start_ms": group.start_ms,
                 "end_ms": group.end_ms,
                 "words": [_word_dict(word) for word in group.words],
+                # Written only for a sound bite's group, so a track without one is unchanged.
+                **({"colour": group.colour} if group.colour is not None else {}),
             }
             for group in groups
         ],
@@ -520,6 +529,7 @@ def _group_of(raw: object) -> CaptionGroup:
         start_ms=_whole(raw.get("start_ms")),
         end_ms=_whole(raw.get("end_ms")),
         words=words,
+        colour=None if raw.get("colour") is None else _colour(raw["colour"]),
     )
     if (
         not words

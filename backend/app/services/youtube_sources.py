@@ -22,6 +22,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlparse
 
+from app.services import soundbite_render
+
 if TYPE_CHECKING:
     from app.services.evidence_review import ReviewView
 
@@ -70,10 +72,30 @@ def _address(value: object) -> str | None:
     return text
 
 
-def _piece_of(item: Any) -> dict[str, Any] | None:
-    """One accepted piece as a cleaned entry, or None when it has no usable address."""
+def _watch_address(item: Any, details: dict[str, Any] | None) -> str | None:
+    """The address of a video piece at the second that matters (SB-009), built from the video's
+    11-character id: where the accepted clip's cut starts, or where the quote is said in a video
+    that is only context. None for any other piece, and when the second is not known."""
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    window = capture.get("window") if isinstance(capture.get("window"), dict) else {}
+    quote_at = capture.get("quote_at_s") if isinstance(capture.get("quote_at_s"), dict) else {}
+    if details is not None:
+        second = soundbite_render.start_second(window.get("start_s"), details.get("in_s"))
+    else:
+        second = soundbite_render.start_second(quote_at.get("start"), 0)
+    if second is None:
+        return None
+    return soundbite_render.watch_url(capture.get("video_id"), second)
+
+
+def _piece_of(item: Any, details: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """One accepted piece as a cleaned entry, or None when it has no usable address. A video
+    piece links to the second it is about (`_watch_address`); `details` are the owner's details
+    of an accepted sound bite clip."""
     source = item.source if isinstance(item.source, dict) else {}
     url = _address(source.get("final_url")) or _address(source.get("url"))
+    if item.kind == "video":
+        url = _watch_address(item, details) or url
     if url is None:
         return None
     capture = item.capture if isinstance(item.capture, dict) else {}
@@ -106,7 +128,7 @@ def entries_from_review(view: ReviewView) -> list[dict[str, Any]]:
         for item in claim.items:
             if not item.usable or claim.decision.verdicts.get(item.item_key) != _ACCEPTED:
                 continue
-            piece = _piece_of(item)
+            piece = _piece_of(item, claim.decision.soundbites.get(item.item_key))
             if piece is None or piece["url"] in seen:
                 continue
             seen.add(piece["url"])

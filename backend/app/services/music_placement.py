@@ -42,6 +42,7 @@ from app.services import (
     music_takes,
     music_timeline,
     render_commands,
+    story_render_plan,
     story_renders,
 )
 from app.services import music_plan_writer as plan_writer
@@ -401,12 +402,22 @@ async def _voice_speech(
         if measurement is None:
             unmeasured.append(f"the voice take of {music_timeline.scene_ref(scene.scene_id)}")
         else:
+            measured = [
+                (float(item["start_s"]), float(item["end_s"]))
+                for item in measurement.get("silences") or []
+            ]
+            if take_map.replaced:
+                # The narrator's words under a sound bite are not heard (SB-008): a silence in
+                # them says nothing about the story, so only what is outside is kept.
+                measured = story_render_plan.subtract_spans(
+                    measured, [(span.take_start_s, span.take_end_s) for span in take_map.replaced]
+                )
             silences = [
                 (
-                    take_start + float(item["start_s"]) + take_map.bite_shift_at(item["start_s"]),
-                    take_start + float(item["end_s"]) + take_map.bite_shift_at(item["end_s"]),
+                    take_start + low + take_map.bite_shift_at(low),
+                    take_start + high + take_map.bite_shift_at(high),
                 )
-                for item in measurement.get("silences") or []
+                for low, high in measured
             ]
         for unit in scene.units:
             ref = music_timeline.unit_ref(scene.scene_id, unit.unit_id)
@@ -418,6 +429,21 @@ async def _voice_speech(
                 if low < end and high > start
             )
             speech.append(music_placer.Speech(ref, unit.kind, start, end, inside))
+        # A sound bite's clip is a person speaking: the music keeps out of its way (SB-009).
+        for shot in scene.shots:
+            if not shot.is_soundbite:
+                continue
+            start = scene.story_start_s + shot.start_s
+            end = min(scene.story_start_s + shot.end_s, end_of_story)
+            if end > start:
+                speech.append(
+                    music_placer.Speech(
+                        music_timeline.shot_ref(scene.scene_id, shot.shot_id),
+                        "dialogue",
+                        start,
+                        end,
+                    )
+                )
     return sorted(speech, key=lambda item: item.start_s)
 
 

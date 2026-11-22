@@ -2076,6 +2076,8 @@ async def _start_graphics(
 
 # The last part of the `ref` of a target that is the clip of an evidence card (EVD-011).
 CARD_REF: Final = "card"
+# The same for the clip of a sound bite shot (SB-009).
+SOUNDBITE_REF: Final = "soundbite"
 
 
 def _evidence_notes(plans: shot_plans.ShotPlansState) -> list[str]:
@@ -2173,6 +2175,24 @@ async def _evaluate_evidence_clips(
                     group=scene_id,
                 )
             )
+    # The clip of each sound bite shot (SB-009): the video's own sound and picture.
+    for bite_scene in (await evidence_clips.soundbite_state(session, project)).entries:
+        scene_id = bite_scene.item["id"]
+        for bite in bite_scene.shots:
+            active = bite.status == "working"
+            targets.append(
+                Target(
+                    f"soundbite:{bite.ref}",
+                    f"{_shot_label(bite_scene.item, bite.shot)}, sound bite clip",
+                    bite.done,
+                    active=active,
+                    block=None if bite.done or active else bite.blocked_reason,
+                    last_error=None if bite.done else bite.last_error,
+                    ref=(scene_id, bite.shot["id"], SOUNDBITE_REF),
+                    stale=bite.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
     return StepView(targets, warnings=_evidence_notes(await shot_plans.state(session, project)))
 
 
@@ -2186,6 +2206,10 @@ async def _start_evidence_clips(
     async def make(target: Target) -> tuple[int, ...]:
         if target.ref[-1] == CARD_REF:
             job = await evidence_clips.queue_card_clip(
+                session, project, target.ref[0], target.ref[1]
+            )
+        elif target.ref[-1] == SOUNDBITE_REF:
+            job = await evidence_clips.queue_soundbite_clip(
                 session, project, target.ref[0], target.ref[1]
             )
         else:

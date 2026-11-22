@@ -93,10 +93,22 @@ def _pen(pen_id: str, colour: str, edge_colour: str) -> ET.Element:
     )
 
 
-def _head(style: CaptionStyle) -> ET.Element:
+def _speaker_pens(track: CaptionTrack) -> dict[str, str]:
+    """The pen id of each colour a group of the track has (a sound bite's speaker, SB-009), in
+    order of first use, after the two pens every track has. Empty when no group has a colour."""
+    pens: dict[str, str] = {}
+    for group in track.groups:
+        if group.colour is not None and group.colour not in pens:
+            pens[group.colour] = str(int(_PEN_HIGHLIGHT) + 1 + len(pens))
+    return pens
+
+
+def _head(style: CaptionStyle, speaker_pens: dict[str, str]) -> ET.Element:
     head = ET.Element("head")
     head.append(_pen(_PEN_TEXT, style.text_colour, style.outline_colour))
     head.append(_pen(_PEN_HIGHLIGHT, style.highlight_colour, style.outline_colour))
+    for colour, pen_id in speaker_pens.items():
+        head.append(_pen(pen_id, colour, style.outline_colour))
     head.append(
         ET.Element(
             "wp",
@@ -147,6 +159,28 @@ def _paragraph(words: list[str], highlighted: int, start_ms: int, duration_ms: i
     return paragraph
 
 
+def _whole_group_paragraph(group: CaptionGroup, pen: str) -> list[ET.Element]:
+    """A group with a colour (a sound bite's): one `<p>` for the whole group, all in its pen, with
+    no highlighted word."""
+    text = " ".join(part for part in (_clean(word.text) for word in group.words) if part)
+    start = max(group.start_ms, 1)
+    if not text or group.end_ms <= start:
+        return []
+    paragraph = ET.Element(
+        "p",
+        {
+            "t": str(start),
+            "d": str(group.end_ms - start),
+            "wp": _WINDOW,
+            "ws": _WINDOW_STYLE,
+            "p": _PEN_TEXT,
+        },
+    )
+    paragraph.text = _ZERO_WIDTH_SPACE
+    paragraph.append(_segment(pen, text))
+    return [paragraph]
+
+
 def _group_paragraphs(group: CaptionGroup) -> list[ET.Element]:
     texts = [_clean(word.text) for word in group.words]
     paragraphs: list[ET.Element] = []
@@ -167,8 +201,12 @@ def _group_paragraphs(group: CaptionGroup) -> list[ET.Element]:
 def ytt_document(track: CaptionTrack) -> str:
     """The whole YTT file of a caption track, as text (UTF-8 when written)."""
     root = ET.Element("timedtext", {"format": "3"})
-    root.append(_head(track.style))
+    speaker_pens = _speaker_pens(track)
+    root.append(_head(track.style, speaker_pens))
     body = ET.SubElement(root, "body")
     for group in track.groups:
-        body.extend(_group_paragraphs(group))
+        if group.colour is not None:
+            body.extend(_whole_group_paragraph(group, speaker_pens[group.colour]))
+        else:
+            body.extend(_group_paragraphs(group))
     return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(root, encoding="unicode")
