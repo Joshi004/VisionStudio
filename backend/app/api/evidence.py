@@ -16,7 +16,10 @@
   review of the newest import (EVD-007, `app/services/evidence_review.py`): accept or reject each
   usable piece, choose which accepted pieces are shown and in what order, or say a claim has no
   proof on screen. Each change is a new `evidence_review` version, and "Review done" ends the
-  review. The review answer is the one place the claims' words and the agent's text (summary,
+  review. A sound bite clip is accepted with the owner's details (SB-007: start and end words,
+  lower third, recording date, flags, rights note); `GET .../review/items/{item_key}/trim` finds
+  the cut for a start and end word in the clip's audio without storing anything. The review
+  answer is the one place the claims' words and the agent's text (summary,
   quote, notes) are sent; the browser shows them as plain text only.
 
 The rows and the files are made by `app/services/evidence_rounds.py`. The other answers never
@@ -26,9 +29,9 @@ return ORM objects, and never the text of the claims (the brief file holds it).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +42,7 @@ from app.db.models import EvidenceItem, Job, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.services import (
+    evidence_claims,
     evidence_clip_layout,
     evidence_clips,
     evidence_import,
@@ -478,6 +482,30 @@ class SoundbiteTrimOut(BaseModel):
 class SoundbiteFlagOut(BaseModel):
     code: str
     message: str
+    # The owner must tick this flag before accepting the clip. The length, the date flags and the
+    # admission words of the proposed cut are not ticked: the review checks the length and the
+    # confirmed date itself, and works the admission words out again for the owner's cut.
+    acknowledge: bool
+
+
+class SoundbiteDecisionOut(BaseModel):
+    """The owner's details of an accepted clip (SB-007), as stored. The cut is in seconds from the
+    start of the downloaded window; `first_word` and `last_word` are positions in the heard
+    words."""
+
+    first_word: int
+    last_word: int
+    in_s: float
+    out_s: float
+    in_clean: bool
+    out_clean: bool
+    speaker: str
+    role: str
+    venue: str
+    recorded: str
+    acknowledged_flags: list[str]
+    rights_note: str
+    music_drop: bool
 
 
 class SoundbiteTranscriptionOut(BaseModel):
@@ -489,8 +517,8 @@ class SoundbiteTranscriptionOut(BaseModel):
 
 
 class SoundbiteOut(BaseModel):
-    """What the app knows about an imported clip of a `video` piece (SB-006). Shown read-only
-    until the sound bite review (SB-007)."""
+    """What the app knows about an imported clip of a `video` piece (SB-006), and the owner's
+    details when the clip is accepted (SB-007)."""
 
     video_url: str | None
     video_id: str | None
@@ -504,6 +532,8 @@ class SoundbiteOut(BaseModel):
     fidelity: Literal["exact", "near", "paraphrase", "mismatch"] | None
     proposed_trim: SoundbiteTrimOut | None
     flags: list[SoundbiteFlagOut]
+    # The owner's details; null unless the clip is accepted.
+    decision: SoundbiteDecisionOut | None
 
 
 class ReviewItemOut(BaseModel):
@@ -540,6 +570,19 @@ class ReviewItemOut(BaseModel):
     soundbite: SoundbiteOut | None
 
 
+class TrimPreviewOut(BaseModel):
+    """A cut the owner is trying, found in the clip's audio (SB-007). `flags` are the ones that
+    depend on the cut: the length, and the admission words (which must be ticked)."""
+
+    in_s: float
+    out_s: float
+    in_clean: bool
+    out_clean: bool
+    length_s: float
+    flags: list[SoundbiteFlagOut]
+    warnings: list[str]
+
+
 class ReviewAttemptOut(BaseModel):
     what: str
     outcome: str
@@ -548,6 +591,10 @@ class ReviewAttemptOut(BaseModel):
 class ReviewClaimOut(BaseModel):
     claim_id: str
     origin: Literal["owner", "glm"]
+    # `soundbite` when the owner chose a sound bite for the claim (SB-001); `speaker` is who says
+    # the quote. Both come from the round's brief (version 1 has neither: `evidence`, null).
+    want: Literal["evidence", "soundbite"]
+    speaker: str | None
     # The script words, the sentence they are in, and the owner's note, from the round's brief.
     text: str
     sentence: str
@@ -584,9 +631,26 @@ class EvidenceReviewOut(BaseModel):
     claims: list[ReviewClaimOut]
 
 
+class SoundbiteDecisionIn(BaseModel):
+    """What the owner says about an accepted clip of a sound bite claim (SB-007). The cut is not
+    sent: the app finds it in the clip's audio from the first and last word."""
+
+    first_word: int = Field(ge=0, le=100_000)
+    last_word: int = Field(ge=0, le=100_000)
+    speaker: str = Field(max_length=evidence_review.SPEAKER_MAX_CHARS)
+    role: str = Field(max_length=evidence_review.LINE_MAX_CHARS)
+    venue: str = Field(max_length=evidence_review.LINE_MAX_CHARS)
+    # The confirmed recording date, `YYYY-MM-DD`.
+    recorded: str = Field(max_length=10)
+    acknowledged_flags: list[Annotated[str, Field(max_length=40)]] = Field(max_length=20)
+    rights_note: str = Field(default="", max_length=evidence_review.RIGHTS_NOTE_MAX_CHARS)
+
+
 class ItemVerdictIn(BaseModel):
     item_key: str = Field(max_length=64)
     verdict: Verdict
+    # Only for an accepted clip of a sound bite claim.
+    soundbite: SoundbiteDecisionIn | None = None
 
 
 class ClaimDecisionIn(BaseModel):
@@ -651,15 +715,34 @@ def _preview_out(preview: evidence_clips.Preview | None) -> PreviewOut | None:
     )
 
 
+def _soundbite_details(body: SoundbiteDecisionIn) -> dict[str, Any]:
+    """The owner's details as the review keeps them, without the cut (the review finds it) and
+    with the text trimmed. Switching the music off under the clip is SB-009's."""
+    return {
+        "first_word": body.first_word,
+        "last_word": body.last_word,
+        "speaker": body.speaker.strip(),
+        "role": body.role.strip(),
+        "venue": body.venue.strip(),
+        "recorded": body.recorded.strip(),
+        "acknowledged_flags": list(dict.fromkeys(body.acknowledged_flags)),
+        "rights_note": body.rights_note.strip(),
+        "music_drop": False,
+    }
+
+
 def _number_or_none(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
 
 
-def _soundbite_out(item: EvidenceItem, job: Job | None) -> SoundbiteOut:
-    """The read-only view of a clip: its capture details, its transcription status and what the
-    analysis stored. Every stored value is read defensively and sent as plain data."""
+def _soundbite_out(
+    item: EvidenceItem, job: Job | None, details: dict[str, Any] | None
+) -> SoundbiteOut:
+    """The view of a clip: its capture details, its transcription status, what the analysis
+    stored and the owner's details (`details`, as `evidence_review.read_soundbite` gives them,
+    for an accepted clip). Every stored value is read defensively and sent as plain data."""
     capture = item.capture if isinstance(item.capture, dict) else {}
     window = capture.get("window") if isinstance(capture.get("window"), dict) else None
     at = capture.get("quote_at_s") if isinstance(capture.get("quote_at_s"), dict) else None
@@ -734,12 +817,17 @@ def _soundbite_out(item: EvidenceItem, job: Job | None) -> SoundbiteOut:
         fidelity=cast(Any, item.fidelity),
         proposed_trim=trim_out,
         flags=[
-            SoundbiteFlagOut(code=entry["code"], message=entry["message"])
+            SoundbiteFlagOut(
+                code=entry["code"],
+                message=entry["message"],
+                acknowledge=entry["code"] not in evidence_review.UNACKNOWLEDGED_FLAG_CODES,
+            )
             for entry in (item.flags if isinstance(item.flags, list) else [])
             if isinstance(entry, dict)
             and isinstance(entry.get("code"), str)
             and isinstance(entry.get("message"), str)
         ],
+        decision=SoundbiteDecisionOut(**details) if details is not None else None,
     )
 
 
@@ -749,6 +837,7 @@ def _item_out(
     frame: tuple[int, int],
     preview: evidence_clips.Preview | None,
     job: Job | None,
+    details: dict[str, Any] | None,
 ) -> ReviewItemOut:
     capture = item.capture if isinstance(item.capture, dict) else {}
     is_video = item.kind == "video"
@@ -782,7 +871,7 @@ def _item_out(
         verdict=cast(Any, verdict) if item.usable else None,
         readability=ReadabilityOut(**readable) if readable is not None else None,
         preview=_preview_out(preview) if item.usable and not is_video else None,
-        soundbite=_soundbite_out(item, job) if is_video else None,
+        soundbite=_soundbite_out(item, job, details) if is_video else None,
     )
 
 
@@ -806,6 +895,8 @@ def _claim_out(
     return ReviewClaimOut(
         claim_id=entry["id"],
         origin="glm" if origin == "glm" else "owner",
+        want="soundbite" if evidence_claims.is_soundbite(entry) else "evidence",
+        speaker=_text(entry.get("speaker")),
         text=_text(entry.get("text")) or "",
         sentence=_text(entry.get("sentence")) or "",
         hint=_text(entry.get("hint")) or "",
@@ -822,6 +913,7 @@ def _claim_out(
                 frame,
                 previews.get(item.item_key),
                 jobs.get(item.id),
+                claim.decision.soundbites.get(item.item_key),
             )
             for item in claim.items
         ],
@@ -886,6 +978,7 @@ async def put_evidence_claim_decision(
     """
     project = await load_project(session, project_id)
     verdicts: dict[str, str] = {}
+    soundbites: dict[str, dict[str, Any]] = {}
     for entry in body.items:
         if entry.item_key in verdicts:
             raise HTTPException(
@@ -893,8 +986,13 @@ async def put_evidence_claim_decision(
                 "A piece of evidence has two verdicts.",
             )
         verdicts[entry.item_key] = entry.verdict
+        if entry.soundbite is not None:
+            soundbites[entry.item_key] = _soundbite_details(entry.soundbite)
     decision = evidence_review.Decision(
-        verdicts=verdicts, shown=list(body.shown), no_proof_on_screen=body.no_proof_on_screen
+        verdicts=verdicts,
+        shown=list(body.shown),
+        no_proof_on_screen=body.no_proof_on_screen,
+        soundbites=soundbites,
     )
     try:
         result = await evidence_review.save_claim_decision(session, project, claim_id, decision)
@@ -960,3 +1058,43 @@ async def transcribe_evidence_item(
         raise _review_refusal(exc) from exc
     dispatcher.nudge()
     return EvidenceBriefRun(job_id=job.id)
+
+
+@router.get(
+    "/projects/{project_id}/evidence/review/items/{item_key}/trim",
+    response_model=TrimPreviewOut,
+    responses=_REVIEW_REFUSED,
+)
+async def get_clip_trim(
+    project_id: int,
+    item_key: str,
+    session: SessionDep,
+    first_word: Annotated[int, Query(ge=0, le=100_000)],
+    last_word: Annotated[int, Query(ge=0, le=100_000)],
+) -> TrimPreviewOut:
+    """The cut for a sound bite clip whose quote runs from heard word `first_word` to heard word
+    `last_word` (positions in the clip's heard words), found in the clip's own audio. Nothing is
+    stored. 422 when the piece is not a transcribed clip of the newest import or the words are
+    not words of the clip.
+    """
+    project = await load_project(session, project_id)
+    try:
+        found = await evidence_review.preview_trim(
+            session, project, item_key, first_word, last_word
+        )
+    except evidence_review.EvidenceReviewError as exc:
+        raise _review_refusal(exc) from exc
+    return TrimPreviewOut(
+        in_s=found.in_s,
+        out_s=found.out_s,
+        in_clean=found.in_clean,
+        out_clean=found.out_clean,
+        length_s=found.length_s,
+        flags=[
+            SoundbiteFlagOut(
+                code=flag["code"], message=flag["message"], acknowledge=flag["code"] != "length"
+            )
+            for flag in found.flags
+        ],
+        warnings=found.warnings,
+    )

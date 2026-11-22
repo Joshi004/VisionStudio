@@ -22,12 +22,24 @@ again until the owner presses "Review done" again.
 piece of the claim in the newest import is dropped, and so is a place in `shown` of a piece that
 is no longer accepted. A claim whose piece changed in a re-import is then undecided again.
 
+**Sound bite clips (SB-007).** A usable `video` piece has a verdict like any other. For a clip of
+a sound bite claim, an `accepted` verdict also carries a `soundbite` object (`SOUNDBITE_FIELDS`):
+the owner's start and end words, the cut found in the clip's audio from those words (the browser
+sends words, never times: `_with_cuts`), the lower third's lines, the confirmed recording date,
+the flags acknowledged and the rights note. `check_clip` lists the rules; a clip that is not
+accepted has no details, and an accepted one whose details are missing or no longer fit its words
+reads as undecided again. At most one clip is shown per claim, and then nothing else; a video of
+a claim that is not a sound bite is only context and is never shown. `shown_claims` leaves clips
+out: SB-008 plans their shots.
+
 No file is ever deleted here (EVD-006: stored files are shared between items and imports).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
+from datetime import date
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -35,11 +47,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import EvidenceItem, EvidenceReview, Job, Project
 from app.jobs import store
-from app.services import evidence_import, evidence_rounds, soundbite_clips
+from app.services import (
+    evidence_claims,
+    evidence_import,
+    evidence_rounds,
+    soundbite_analysis,
+    soundbite_clips,
+)
+from app.services.soundbite_analysis import HeardWord
 
 ACCEPTED: Final = "accepted"
 REJECTED: Final = "rejected"
 VERDICTS: Final = (ACCEPTED, REJECTED)
+
+# --- Sound bite clips (SB-007) -------------------------------------------------------------
+
+# The fidelity classes that can be shown (SB-6).
+SHOWABLE_FIDELITIES: Final = ("exact", "near")
+# The lower third's lines, and the rights note.
+SPEAKER_MAX_CHARS: Final = evidence_claims.SPEAKER_MAX_CHARS
+LINE_MAX_CHARS: Final = 80
+RIGHTS_NOTE_MAX_CHARS: Final = 300
+# Licences that need a rights note from the owner (everything but Creative Commons).
+LICENCES_WITHOUT_NOTE: Final = ("creative_commons",)
+# Flags the owner does not acknowledge: the length is checked on its own, the admission words
+# are worked out again for the owner's trim, and the date flags are replaced by the date the
+# owner confirms (which must be a real date not later than the upload).
+DATE_FLAG_CODES: Final = ("date_missing", "date_after_upload")
+UNACKNOWLEDGED_FLAG_CODES: Final = (*soundbite_analysis.TRIM_FLAG_CODES, *DATE_FLAG_CODES)
+_DATE_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 NO_IMPORT_MESSAGE: Final = "Import the research results first, then review them here."
 IMPORT_RUNNING_MESSAGE: Final = "The results are being imported. Review them when that is done."
@@ -74,31 +110,129 @@ class Decision:
     # The item keys shown on video, in the owner's order. Each one is accepted.
     shown: list[str] = field(default_factory=list)
     no_proof_on_screen: bool = False
+    # item_key -> the owner's sound bite details of an accepted clip (SB-007), as stored in
+    # `evidence_review.content` (see `SOUNDBITE_FIELDS`).
+    soundbites: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-def effective_decision(entry: object, usable_keys: list[str]) -> Decision:
+# The fields of a clip's `soundbite` object, in the order they are stored.
+SOUNDBITE_FIELDS: Final = (
+    "first_word",
+    "last_word",
+    "in_s",
+    "out_s",
+    "in_clean",
+    "out_clean",
+    "speaker",
+    "role",
+    "venue",
+    "recorded",
+    "acknowledged_flags",
+    "rights_note",
+    "music_drop",
+)
+_INT_FIELDS: Final = ("first_word", "last_word")
+_NUMBER_FIELDS: Final = ("in_s", "out_s")
+_BOOL_FIELDS: Final = ("in_clean", "out_clean", "music_drop")
+_TEXT_FIELDS: Final = ("speaker", "role", "venue", "recorded", "rights_note")
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def read_soundbite(raw: object) -> dict[str, Any] | None:
+    """A stored `soundbite` object of an accepted clip, with the fields in storage order, or None
+    when it is not well formed (a missing field or a field of the wrong kind). Pure."""
+    if not isinstance(raw, dict):
+        return None
+    result: dict[str, Any] = {}
+    for name in SOUNDBITE_FIELDS:
+        value = raw.get(name)
+        if name in _INT_FIELDS:
+            valid = isinstance(value, int) and not isinstance(value, bool)
+        elif name in _NUMBER_FIELDS:
+            valid = _is_number(value)
+        elif name in _BOOL_FIELDS:
+            valid = isinstance(value, bool)
+        elif name in _TEXT_FIELDS:
+            valid = isinstance(value, str)
+        else:
+            valid = isinstance(value, list) and all(isinstance(code, str) for code in value)
+        if not valid:
+            return None
+        result[name] = list(value) if name == "acknowledged_flags" else value
+    return result
+
+
+@dataclass(frozen=True)
+class ClipFacts:
+    """What the rules for a `video` piece need to know, read from the item and the brief once.
+    `soundbite` is whether the claim is a sound bite; a video of any other claim is only context
+    and is never shown."""
+
+    soundbite: bool
+    words: tuple[HeardWord, ...]
+    fidelity: str | None
+    licence: str | None
+    upload_date: str | None
+    # The flags the import stored (`code`), in order.
+    flag_codes: tuple[str, ...]
+    # The claim's entry of the round's brief (`sentence`, `context`), for the admission words.
+    brief_entry: dict[str, Any]
+
+    def required_flags(self, trim: dict[str, Any]) -> list[str]:
+        """The flag codes the owner must acknowledge for this cut: the stored ones that are not
+        in `UNACKNOWLEDGED_FLAG_CODES`, and `admission_words` when the cut holds such a phrase.
+        Pure."""
+        codes = [code for code in self.flag_codes if code not in UNACKNOWLEDGED_FLAG_CODES]
+        for flag in soundbite_analysis.trim_flags(list(self.words), trim, self.brief_entry):
+            if flag["code"] == "admission_words" and flag["code"] not in codes:
+                codes.append(flag["code"])
+        return codes
+
+
+def effective_decision(
+    entry: object, usable_keys: list[str], clips: dict[str, ClipFacts] | None = None
+) -> Decision:
     """A stored claim entry of `evidence_review.content`, kept to what still holds: verdicts of
-    pieces in `usable_keys` only, and `shown` limited to accepted pieces, once each. Anything that
-    is not a well-formed entry reads as no decision. Pure.
+    pieces in `usable_keys` only, and `shown` limited to accepted pieces, once each. An accepted
+    clip of a sound bite claim keeps its verdict only with a well formed `soundbite` object whose
+    words are words of the clip; otherwise the clip is undecided again. Anything that is not a
+    well-formed entry reads as no decision. Pure.
     """
     if not isinstance(entry, dict):
         return Decision()
+    clips = clips or {}
     allowed = set(usable_keys)
     verdicts: dict[str, str] = {}
+    soundbites: dict[str, dict[str, Any]] = {}
     raw_items = entry.get("items")
     for raw in raw_items if isinstance(raw_items, list) else []:
         if not isinstance(raw, dict):
             continue
         key, verdict = raw.get("item_key"), raw.get("verdict")
-        if isinstance(key, str) and key in allowed and verdict in VERDICTS:
-            verdicts[key] = verdict
+        if not (isinstance(key, str) and key in allowed and verdict in VERDICTS):
+            continue
+        facts = clips.get(key)
+        if verdict == ACCEPTED and facts is not None and facts.soundbite:
+            details = read_soundbite(raw.get("soundbite"))
+            if details is None or details["last_word"] >= len(facts.words):
+                continue
+            if details["first_word"] < 0 or details["first_word"] > details["last_word"]:
+                continue
+            soundbites[key] = details
+        verdicts[key] = verdict
     shown: list[str] = []
     raw_shown = entry.get("shown")
     for key in raw_shown if isinstance(raw_shown, list) else []:
         if isinstance(key, str) and verdicts.get(key) == ACCEPTED and key not in shown:
             shown.append(key)
     return Decision(
-        verdicts=verdicts, shown=shown, no_proof_on_screen=entry.get("no_proof_on_screen") is True
+        verdicts=verdicts,
+        shown=shown,
+        no_proof_on_screen=entry.get("no_proof_on_screen") is True,
+        soundbites=soundbites,
     )
 
 
@@ -111,11 +245,111 @@ def is_decided(decision: Decision, usable_keys: list[str]) -> bool:
     return bool(decision.shown) or decision.no_proof_on_screen
 
 
-def check_decision(decision: Decision, usable_keys: list[str]) -> None:
+def _line_problem(value: object, limit: int) -> bool:
+    """Whether a lower third line is blank, too long or holds a character that cannot be shown."""
+    return (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > limit
+        or not all(char.isprintable() for char in value)
+    )
+
+
+def _real_date(value: object) -> date | None:
+    """A `YYYY-MM-DD` text as a date, or None."""
+    if not isinstance(value, str) or not _DATE_PATTERN.fullmatch(value):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def check_clip(key: str, facts: ClipFacts, details: dict[str, Any] | None, today: date) -> None:
+    """Raises EvidenceReviewError when an accepted clip of a sound bite claim lacks something
+    (the rules of SB-007), with one sentence. `details` is the `soundbite` object with its cut
+    filled in. Pure.
+    """
+    if not facts.words:
+        raise EvidenceReviewError("This clip has not been heard yet, so it cannot be accepted.")
+    if facts.fidelity not in SHOWABLE_FIDELITIES:
+        raise EvidenceReviewError(
+            "The words of this clip are not the quote's words, so it cannot be accepted."
+        )
+    if details is None:
+        raise EvidenceReviewError("Fill in the sound bite details before accepting this clip.")
+    first, last = details.get("first_word"), details.get("last_word")
+    if (
+        not isinstance(first, int)
+        or not isinstance(last, int)
+        or isinstance(first, bool)
+        or isinstance(last, bool)
+        or not 0 <= first <= last < len(facts.words)
+    ):
+        raise EvidenceReviewError("The start and end words are not words of this clip.")
+    start, end = details.get("in_s"), details.get("out_s")
+    if not _is_number(start) or not _is_number(end) or end < start:
+        raise EvidenceReviewError("The cut of this clip is not known.")
+    length = end - start
+    low, high = soundbite_analysis.MIN_CLIP_S, soundbite_analysis.MAX_CLIP_S
+    if length < low or length > high:
+        raise EvidenceReviewError(
+            f"The cut is {length:.1f} s long; a sound bite is {low:.0f} to {high:.0f} s."
+        )
+    if _line_problem(details.get("speaker"), SPEAKER_MAX_CHARS):
+        raise EvidenceReviewError("Write the speaker's name for the lower third.")
+    if _line_problem(details.get("role"), LINE_MAX_CHARS):
+        raise EvidenceReviewError("Write the speaker's role at the time for the lower third.")
+    if _line_problem(details.get("venue"), LINE_MAX_CHARS):
+        raise EvidenceReviewError("Write the venue or event for the lower third.")
+    recorded = _real_date(details.get("recorded"))
+    if recorded is None:
+        raise EvidenceReviewError("Confirm the recording date (year, month and day).")
+    if recorded > today:
+        raise EvidenceReviewError("The recording date cannot be in the future.")
+    uploaded = _real_date(facts.upload_date)
+    if uploaded is not None and recorded > uploaded:
+        raise EvidenceReviewError("The recording date cannot be later than the upload date.")
+    acknowledged = details.get("acknowledged_flags")
+    acknowledged = acknowledged if isinstance(acknowledged, list) else []
+    missing = [
+        code
+        for code in facts.required_flags({"in_s": start, "out_s": end})
+        if code not in acknowledged
+    ]
+    if missing:
+        raise EvidenceReviewError(
+            f"Acknowledge every flag of this clip before accepting it: {', '.join(missing)}."
+        )
+    note = details.get("rights_note")
+    note = note if isinstance(note, str) else ""
+    if len(note) > RIGHTS_NOTE_MAX_CHARS or not all(
+        char.isprintable() or char in "\n\t" for char in note
+    ):
+        raise EvidenceReviewError(
+            f"The rights note can be at most {RIGHTS_NOTE_MAX_CHARS} characters of plain text."
+        )
+    if facts.licence not in LICENCES_WITHOUT_NOTE and not note.strip():
+        raise EvidenceReviewError(
+            "This clip is not under a Creative Commons licence: write a one-line rights note."
+        )
+
+
+def check_decision(
+    decision: Decision,
+    usable_keys: list[str],
+    clips: dict[str, ClipFacts] | None = None,
+    today: date | None = None,
+) -> None:
     """Raises EvidenceReviewError when a decision the owner sends is not allowed: a verdict for a
     piece that is not usable in the newest import, two verdicts for one piece, a shown piece that
-    is not accepted (or shown twice), or pieces shown together with `no_proof_on_screen`. Pure.
+    is not accepted (or shown twice), or pieces shown together with `no_proof_on_screen`. For
+    clips (`clips`, by item key, for every usable `video` piece; SB-007): an accepted clip of a
+    sound bite claim must pass `check_clip`; sound bite details belong only to such a clip; a
+    video that is only context is never shown; at most one clip is shown, and then nothing
+    else. Pure.
     """
+    clips = clips or {}
     allowed = set(usable_keys)
     for key, verdict in decision.verdicts.items():
         if key not in allowed:
@@ -132,16 +366,42 @@ def check_decision(decision: Decision, usable_keys: list[str]) -> None:
     if decision.shown and decision.no_proof_on_screen:
         raise EvidenceReviewError("A claim cannot both show evidence and have no proof on screen.")
 
+    for key in decision.soundbites:
+        facts = clips.get(key)
+        if facts is None or not facts.soundbite:
+            raise EvidenceReviewError(
+                "Sound bite details belong only to a clip of a sound bite claim."
+            )
+        if decision.verdicts.get(key) != ACCEPTED:
+            raise EvidenceReviewError("Sound bite details belong only to an accepted clip.")
+    for key, verdict in decision.verdicts.items():
+        facts = clips.get(key)
+        if facts is not None and facts.soundbite and verdict == ACCEPTED:
+            check_clip(key, facts, decision.soundbites.get(key), today or date.today())
+    shown_clips = [key for key in decision.shown if key in clips and clips[key].soundbite]
+    if any(key in clips and not clips[key].soundbite for key in decision.shown):
+        raise EvidenceReviewError("A video that is only context cannot be shown on video.")
+    if len(shown_clips) > 1:
+        raise EvidenceReviewError("Only one sound bite clip can be shown for a claim.")
+    if shown_clips and len(decision.shown) > 1:
+        raise EvidenceReviewError("A claim that shows a sound bite clip shows nothing else.")
+
 
 def decision_entry(claim_id: str, decision: Decision, usable_keys: list[str]) -> dict[str, Any]:
-    """One claim of `evidence_review.content`. The items are in the import's order. Pure."""
+    """One claim of `evidence_review.content`. The items are in the import's order; an accepted
+    clip also carries its `soundbite` object. Pure."""
+    items: list[dict[str, Any]] = []
+    for key in usable_keys:
+        if key not in decision.verdicts:
+            continue
+        item: dict[str, Any] = {"item_key": key, "verdict": decision.verdicts[key]}
+        details = decision.soundbites.get(key)
+        if details is not None and decision.verdicts[key] == ACCEPTED:
+            item["soundbite"] = {name: details[name] for name in SOUNDBITE_FIELDS}
+        items.append(item)
     return {
         "claim_id": claim_id,
-        "items": [
-            {"item_key": key, "verdict": decision.verdicts[key]}
-            for key in usable_keys
-            if key in decision.verdicts
-        ],
+        "items": items,
         "shown": list(decision.shown),
         "no_proof_on_screen": decision.no_proof_on_screen,
     }
@@ -257,6 +517,29 @@ class _Loaded:
     latest: EvidenceReview | None
     # Why nothing can be changed now, or None.
     refusal: EvidenceReviewError | None
+    # For each claim, the rules' facts and the item of every usable `video` piece, by item key.
+    clips: dict[str, dict[str, ClipFacts]]
+    clip_items: dict[str, EvidenceItem]
+
+
+def _clip_facts(item: EvidenceItem, entry: dict[str, Any]) -> ClipFacts:
+    """The facts the rules need about one usable `video` piece of the claim `entry`."""
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    licence, upload = capture.get("licence"), capture.get("upload_date")
+    stored = item.flags if isinstance(item.flags, list) else []
+    return ClipFacts(
+        soundbite=evidence_claims.is_soundbite(entry),
+        words=tuple(soundbite_clips.words_of(item.heard_words)),
+        fidelity=item.fidelity,
+        licence=licence if isinstance(licence, str) else None,
+        upload_date=upload if isinstance(upload, str) else None,
+        flag_codes=tuple(
+            flag["code"]
+            for flag in stored
+            if isinstance(flag, dict) and isinstance(flag.get("code"), str)
+        ),
+        brief_entry=entry,
+    )
 
 
 async def _load(session: AsyncSession, project: Project) -> _Loaded | EvidenceReviewError:
@@ -276,20 +559,24 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded | EvidenceRe
         by_claim.setdefault(item.claim_id, []).append(item)
     entries = _brief_claims(row.brief)
     claim_ids = [entry["id"] for entry in entries]
-    # A video clip (SB-006) is shown but gets no verdict until the sound bite review exists
-    # (SB-007): it is left out of the pieces a decision may name.
     keys = {
-        claim_id: [
-            item.item_key
-            for item in by_claim.get(claim_id, [])
-            if item.usable and item.kind != "video"
-        ]
+        claim_id: [item.item_key for item in by_claim.get(claim_id, []) if item.usable]
         for claim_id in claim_ids
     }
+    clips: dict[str, dict[str, ClipFacts]] = {}
+    clip_items: dict[str, EvidenceItem] = {}
+    for entry in entries:
+        found: dict[str, ClipFacts] = {}
+        for item in by_claim.get(entry["id"], []):
+            if item.usable and item.kind == "video":
+                found[item.item_key] = _clip_facts(item, entry)
+                clip_items[item.item_key] = item
+        clips[entry["id"]] = found
     latest = await latest_review(session, row.id)
     stored = _review_claims_by_id(latest)
     decisions = {
-        claim_id: effective_decision(stored.get(claim_id), keys[claim_id]) for claim_id in claim_ids
+        claim_id: effective_decision(stored.get(claim_id), keys[claim_id], clips[claim_id])
+        for claim_id in claim_ids
     }
     results = record.results if isinstance(record.results, dict) else {}
     claims = [
@@ -327,6 +614,8 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded | EvidenceRe
         decisions=decisions,
         latest=latest,
         refusal=refusal,
+        clips=clips,
+        clip_items=clip_items,
     )
 
 
@@ -386,7 +675,10 @@ async def shown_claims(session: AsyncSession, project: Project) -> list[ShownCla
         position = placed.get(claim.entry["id"])
         if position is None or not claim.decision.shown:
             continue
-        by_key = {item.item_key: item for item in claim.items if item.usable}
+        # A shown sound bite clip gets no screenshot shot: SB-008 plans its own shot for it.
+        by_key = {
+            item.item_key: item for item in claim.items if item.usable and item.kind != "video"
+        }
         pieces = tuple(
             ShownPiece(item_key=key, item_id=by_key[key].id)
             for key in claim.decision.shown
@@ -469,6 +761,53 @@ async def _loaded_for_edit(session: AsyncSession, project: Project) -> _Loaded:
     return loaded
 
 
+_CUT_FIELDS: Final = ("in_s", "out_s", "in_clean", "out_clean")
+
+
+async def _with_cuts(loaded: _Loaded, claim_id: str, decision: Decision) -> Decision:
+    """The decision with the cut of each clip set from the owner's start and end words, and each
+    clip's acknowledged flags kept to the ones that are asked for. The browser sends words, never
+    times: the cut is found in the clip's own audio (as the proposed cut is), or is the stored one
+    when the words did not change. A clip whose details cannot be used is left as it is, for
+    `check_decision` to refuse with its reason. Raises EvidenceReviewError when the audio cannot
+    be read.
+    """
+    clips = loaded.clips[claim_id]
+    before = loaded.decisions[claim_id].soundbites
+    filled: dict[str, dict[str, Any]] = {}
+    for key, details in decision.soundbites.items():
+        facts = clips.get(key)
+        first, last = details.get("first_word"), details.get("last_word")
+        if (
+            facts is None
+            or not facts.soundbite
+            or not isinstance(first, int)
+            or not isinstance(last, int)
+            or isinstance(first, bool)
+            or isinstance(last, bool)
+            or not 0 <= first <= last < len(facts.words)
+        ):
+            filled[key] = details
+            continue
+        stored = before.get(key)
+        if stored is not None and stored["first_word"] == first and stored["last_word"] == last:
+            cut = {name: stored[name] for name in _CUT_FIELDS}
+        else:
+            try:
+                cut = await soundbite_clips.trim_for(loaded.clip_items[key], first, last)
+            except soundbite_clips.SoundbiteClipError as exc:
+                raise EvidenceReviewError(str(exc)) from exc
+        sent = details.get("acknowledged_flags")
+        sent = sent if isinstance(sent, list) else []
+        required = facts.required_flags(cut)
+        filled[key] = {
+            **details,
+            **cut,
+            "acknowledged_flags": [code for code in required if code in sent],
+        }
+    return replace(decision, soundbites=filled)
+
+
 async def save_claim_decision(
     session: AsyncSession, project: Project, claim_id: str, decision: Decision
 ) -> ReviewView:
@@ -479,7 +818,8 @@ async def save_claim_decision(
     loaded = await _loaded_for_edit(session, project)
     if claim_id not in loaded.keys:
         raise ClaimNotInRoundError(UNKNOWN_CLAIM_MESSAGE)
-    check_decision(decision, loaded.keys[claim_id])
+    decision = await _with_cuts(loaded, claim_id, decision)
+    check_decision(decision, loaded.keys[claim_id], loaded.clips[claim_id])
     row = loaded.current.round
     assert row is not None
     decisions = {**loaded.decisions, claim_id: decision}
@@ -537,3 +877,58 @@ async def retry_transcription(session: AsyncSession, project: Project, item_key:
     if job is not None and job.status in store.ACTIVE_STATUSES:
         raise TranscriptionRunningError("The clip is being transcribed. Wait for it to finish.")
     return await soundbite_clips.queue(session, item, commit=True)
+
+
+@dataclass(frozen=True)
+class TrimPreview:
+    """A cut the owner is trying, before anything is saved: the points, the length, the flags that
+    depend on the cut and the warnings."""
+
+    in_s: float
+    out_s: float
+    in_clean: bool
+    out_clean: bool
+    length_s: float
+    flags: list[dict[str, str]]
+    warnings: list[str]
+
+
+async def preview_trim(
+    session: AsyncSession, project: Project, item_key: str, first: int, last: int
+) -> TrimPreview:
+    """The cut for a clip of the newest import whose quote runs from heard word `first` to heard
+    word `last`, found in the clip's own audio. Read only: nothing is stored. Raises
+    EvidenceReviewError when the piece is not a transcribed clip of the newest import or the
+    words are not words of the clip.
+    """
+    loaded = await _load(session, project)
+    if isinstance(loaded, EvidenceReviewError):
+        raise loaded
+    item = loaded.clip_items.get(item_key)
+    if item is None:
+        raise EvidenceReviewError("This is not a usable clip of the newest import.")
+    facts = next(found[item_key] for found in loaded.clips.values() if item_key in found)
+    if not facts.words:
+        raise EvidenceReviewError("This clip has not been heard yet, so it cannot be trimmed.")
+    if not 0 <= first <= last < len(facts.words):
+        raise EvidenceReviewError("The start and end words are not words of this clip.")
+    try:
+        cut = await soundbite_clips.trim_for(item, first, last)
+    except soundbite_clips.SoundbiteClipError as exc:
+        raise EvidenceReviewError(str(exc)) from exc
+    length = cut["out_s"] - cut["in_s"]
+    warnings = []
+    if soundbite_analysis.WARN_CLIP_S < length <= soundbite_analysis.MAX_CLIP_S:
+        warnings.append(
+            f"The cut is {length:.1f} s long. A sound bite longer than "
+            f"{soundbite_analysis.WARN_CLIP_S:.0f} s starts to feel like a speech."
+        )
+    return TrimPreview(
+        in_s=cut["in_s"],
+        out_s=cut["out_s"],
+        in_clean=cut["in_clean"],
+        out_clean=cut["out_clean"],
+        length_s=round(length, 3),
+        flags=soundbite_analysis.trim_flags(list(facts.words), cut, facts.brief_entry),
+        warnings=warnings,
+    )

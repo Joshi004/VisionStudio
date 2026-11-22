@@ -17,6 +17,8 @@ export type EvidenceReviewClaim = components["schemas"]["ReviewClaimOut"];
 export type EvidenceReviewItem = components["schemas"]["ReviewItemOut"];
 export type EvidenceClaimDecision = components["schemas"]["ClaimDecisionIn"];
 export type EvidencePreview = components["schemas"]["PreviewOut"];
+export type SoundbiteDecision = components["schemas"]["SoundbiteDecisionIn"];
+export type SoundbiteTrim = components["schemas"]["TrimPreviewOut"];
 
 /**
  * The evidence query of a project. It sits under the project's own key, so whatever refreshes
@@ -141,6 +143,49 @@ export function useEvidenceReview(projectId: number, enabled = true) {
       )
         ? ACTIVE_POLL_MS
         : false,
+  });
+}
+
+/** The query key of a clip's trial cut: the clip and its first and last word. */
+function soundbiteTrimKey(projectId: number, itemKey: string, first: number, last: number) {
+  return [...evidenceReviewKey(projectId), "trim", itemKey, first, last] as const;
+}
+
+/**
+ * The cut for a sound bite clip whose quote runs from heard word `first` to heard word `last`,
+ * found by the server in the clip's audio. Nothing is stored. A cut for the same words is kept
+ * for a while, so moving back and forth costs nothing.
+ */
+export function useSoundbiteTrim(
+  projectId: number,
+  itemKey: string,
+  first: number,
+  last: number,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: soundbiteTrimKey(projectId, itemKey, first, last),
+    queryFn: async () => {
+      const { data, error, response } = await api.GET(
+        "/api/projects/{project_id}/evidence/review/items/{item_key}/trim",
+        {
+          params: {
+            path: { project_id: projectId, item_key: itemKey },
+            query: { first_word: first, last_word: last },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not find the cut (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    enabled: enabled && isValidProjectId(projectId),
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previous) => previous,
   });
 }
 

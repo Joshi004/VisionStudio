@@ -301,6 +301,43 @@ async def compute(inputs: ClipInputs, words: list[HeardWord]) -> Analysis:
     )
 
 
+async def trim_for(item: EvidenceItem, first: int, last: int) -> dict[str, Any]:
+    """The cut for a clip whose quote runs from heard word `first` to heard word `last` (the
+    owner's choice in the review): `{in_s, out_s, in_clean, out_clean}`, found in the clip's own
+    audio exactly as the proposed cut is. Raises SoundbiteClipError when the clip has no heard
+    words, a position is not a heard word, or the files cannot be read.
+    """
+    words = words_of(item.heard_words)
+    if not words:
+        raise SoundbiteClipError("This clip has no heard words yet, so it cannot be trimmed.")
+    if not 0 <= first <= last < len(words):
+        raise SoundbiteClipError("The start and end words are not words of this clip.")
+    if item.video_path is None:
+        raise SoundbiteClipError("The clip file could not be found on disk.")
+    try:
+        video = get_storage().get_path(item.video_path)
+    except StorageError as exc:
+        raise SoundbiteClipError("The clip file could not be found on disk.") from exc
+    if not video.is_file():
+        raise SoundbiteClipError("The clip file could not be found on disk.")
+    raw = await ffmpeg.decode_mono_float(video, AUDIO_RATE, max_seconds=MAX_AUDIO_S)
+    if raw is None:
+        raise SoundbiteClipError("The clip's sound could not be read.")
+    samples = np.frombuffer(raw[: len(raw) // 4 * 4], dtype="<f4").astype(np.float32)
+    trim = await asyncio.to_thread(
+        soundbite_analysis.propose_trim,
+        samples,
+        AUDIO_RATE,
+        words,
+        first,
+        last,
+        len(samples) / AUDIO_RATE,
+    )
+    if trim is None:
+        raise SoundbiteClipError("The clip's sound is too short to find a cut in.")
+    return trim
+
+
 async def store_result(session: AsyncSession, item_id: int, analysis: Analysis) -> bool:
     """Writes an analysis on its item (flushed, not committed: the job commits it with finishing
     itself). False when the item is gone."""

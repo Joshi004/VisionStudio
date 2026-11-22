@@ -848,6 +848,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/evidence/review/items/{item_key}/trim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clip Trim
+         * @description The cut for a sound bite clip whose quote runs from heard word `first_word` to heard word
+         *     `last_word` (positions in the clip's heard words), found in the clip's own audio. Nothing is
+         *     stored. 422 when the piece is not a transcribed clip of the newest import or the words are
+         *     not words of the clip.
+         */
+        get: operations["get_clip_trim_api_projects__project_id__evidence_review_items__item_key__trim_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -10828,6 +10851,7 @@ export interface components {
              * @enum {string}
              */
             verdict: "accepted" | "rejected";
+            soundbite?: components["schemas"]["SoundbiteDecisionIn"] | null;
         };
         /** JobCapacity */
         JobCapacity: {
@@ -14928,6 +14952,13 @@ export interface components {
              * @enum {string}
              */
             origin: "owner" | "glm";
+            /**
+             * Want
+             * @enum {string}
+             */
+            want: "evidence" | "soundbite";
+            /** Speaker */
+            speaker: string | null;
             /** Text */
             text: string;
             /** Sentence */
@@ -17504,6 +17535,66 @@ export interface components {
             avoid: string[];
         };
         /**
+         * SoundbiteDecisionIn
+         * @description What the owner says about an accepted clip of a sound bite claim (SB-007). The cut is not
+         *     sent: the app finds it in the clip's audio from the first and last word.
+         */
+        SoundbiteDecisionIn: {
+            /** First Word */
+            first_word: number;
+            /** Last Word */
+            last_word: number;
+            /** Speaker */
+            speaker: string;
+            /** Role */
+            role: string;
+            /** Venue */
+            venue: string;
+            /** Recorded */
+            recorded: string;
+            /** Acknowledged Flags */
+            acknowledged_flags: string[];
+            /**
+             * Rights Note
+             * @default
+             */
+            rights_note: string;
+        };
+        /**
+         * SoundbiteDecisionOut
+         * @description The owner's details of an accepted clip (SB-007), as stored. The cut is in seconds from the
+         *     start of the downloaded window; `first_word` and `last_word` are positions in the heard
+         *     words.
+         */
+        SoundbiteDecisionOut: {
+            /** First Word */
+            first_word: number;
+            /** Last Word */
+            last_word: number;
+            /** In S */
+            in_s: number;
+            /** Out S */
+            out_s: number;
+            /** In Clean */
+            in_clean: boolean;
+            /** Out Clean */
+            out_clean: boolean;
+            /** Speaker */
+            speaker: string;
+            /** Role */
+            role: string;
+            /** Venue */
+            venue: string;
+            /** Recorded */
+            recorded: string;
+            /** Acknowledged Flags */
+            acknowledged_flags: string[];
+            /** Rights Note */
+            rights_note: string;
+            /** Music Drop */
+            music_drop: boolean;
+        };
+        /**
          * SoundbiteDiffOut
          * @description One difference between the claim's words and the heard words (normalised words).
          */
@@ -17524,6 +17615,8 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            /** Acknowledge */
+            acknowledge: boolean;
         };
         /** SoundbiteHeardOut */
         SoundbiteHeardOut: {
@@ -17554,8 +17647,8 @@ export interface components {
         };
         /**
          * SoundbiteOut
-         * @description What the app knows about an imported clip of a `video` piece (SB-006). Shown read-only
-         *     until the sound bite review (SB-007).
+         * @description What the app knows about an imported clip of a `video` piece (SB-006), and the owner's
+         *     details when the clip is accepted (SB-007).
          */
         SoundbiteOut: {
             /** Video Url */
@@ -17577,6 +17670,7 @@ export interface components {
             proposed_trim: components["schemas"]["SoundbiteTrimOut"] | null;
             /** Flags */
             flags: components["schemas"]["SoundbiteFlagOut"][];
+            decision: components["schemas"]["SoundbiteDecisionOut"] | null;
         };
         /**
          * SoundbiteQuoteAtOut
@@ -19313,6 +19407,27 @@ export interface components {
             source_id?: number | null;
             /** Label */
             label: string;
+        };
+        /**
+         * TrimPreviewOut
+         * @description A cut the owner is trying, found in the clip's audio (SB-007). `flags` are the ones that
+         *     depend on the cut: the length, and the admission words (which must be ticked).
+         */
+        TrimPreviewOut: {
+            /** In S */
+            in_s: number;
+            /** Out S */
+            out_s: number;
+            /** In Clean */
+            in_clean: boolean;
+            /** Out Clean */
+            out_clean: boolean;
+            /** Length S */
+            length_s: number;
+            /** Flags */
+            flags: components["schemas"]["SoundbiteFlagOut"][];
+            /** Warnings */
+            warnings: string[];
         };
         /** UnitSpanOut */
         UnitSpanOut: {
@@ -22104,6 +22219,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceBriefRun"];
+                };
+            };
+            /** @description No such project, or no such claim in the round. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results are being imported. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_clip_trim_api_projects__project_id__evidence_review_items__item_key__trim_get: {
+        parameters: {
+            query: {
+                first_word: number;
+                last_word: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrimPreviewOut"];
                 };
             };
             /** @description No such project, or no such claim in the round. */

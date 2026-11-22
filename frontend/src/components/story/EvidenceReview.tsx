@@ -24,9 +24,10 @@ import {
   type EvidenceClaimDecision,
   type EvidenceReviewClaim,
   type EvidenceReviewItem,
+  type SoundbiteDecision,
 } from "../../api/evidence";
 import { EvidencePreview, ReadabilityWarning } from "./EvidencePreview";
-import { SoundbiteClipPanel } from "./SoundbiteClipPanel";
+import { SoundbiteClipPanel, type ClipClaim } from "./SoundbiteClipPanel";
 import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
 
 type EvidenceReviewProps = {
@@ -144,9 +145,12 @@ function SourceLine({ item }: { item: EvidenceReviewItem }) {
 type PieceProps = {
   projectId: number;
   item: EvidenceReviewItem;
+  // The claim a video belongs to: a clip of a sound bite claim is decided in its own panel.
+  clipClaim: ClipClaim;
   shown: boolean;
   disabled: boolean;
   onVerdict: (verdict: "accepted" | "rejected") => void;
+  onAcceptClip: (details: SoundbiteDecision) => void;
   onShown: (shown: boolean) => void;
   previewStarting: boolean;
   onPreview: () => void;
@@ -155,16 +159,21 @@ type PieceProps = {
 function PieceCard({
   projectId,
   item,
+  clipClaim,
   shown,
   disabled,
   onVerdict,
+  onAcceptClip,
   onShown,
   previewStarting,
   onPreview,
 }: PieceProps) {
   const [contextOpen, setContextOpen] = useState(false);
-  // Until the sound bite review (SB-007) a clip is only shown, never decided on.
   const isClip = item.kind === "video";
+  // A clip of a sound bite claim has its own Accept and Reject; any other video is context.
+  const isBite = isClip && clipClaim.want === "soundbite";
+  // A video of a claim that is not a sound bite is never shown on video.
+  const canShow = !isClip || isBite;
   return (
     <Paper withBorder p="sm" radius="md">
       <Stack gap="xs">
@@ -182,7 +191,7 @@ function PieceCard({
               {TIER_LABEL[item.source_tier] ?? item.source_tier}
             </Badge>
           )}
-          {item.usable && !isClip && item.verdict === null && (
+          {item.usable && item.verdict === null && (
             <Badge size="sm" color="yellow" variant="light">
               Undecided
             </Badge>
@@ -254,9 +263,28 @@ function PieceCard({
 
         <ReadabilityWarning item={item} />
 
-        {isClip && <SoundbiteClipPanel item={item} projectId={projectId} disabled={disabled} />}
+        {isClip && (
+          <SoundbiteClipPanel
+            item={item}
+            projectId={projectId}
+            claim={clipClaim}
+            disabled={disabled}
+            onAccept={onAcceptClip}
+            onReject={() => onVerdict("rejected")}
+          />
+        )}
 
-        {item.usable && !isClip && (
+        {item.usable && isBite && item.verdict === "accepted" && (
+          <Checkbox
+            size="xs"
+            label="Show on video"
+            checked={shown}
+            disabled={disabled}
+            onChange={(event) => onShown(event.currentTarget.checked)}
+          />
+        )}
+
+        {item.usable && !isBite && (
           <Group gap="sm">
             <Button
               size="xs"
@@ -276,7 +304,7 @@ function PieceCard({
             >
               Reject
             </Button>
-            {item.verdict === "accepted" && (
+            {item.verdict === "accepted" && canShow && (
               <Checkbox
                 size="xs"
                 label="Show on video"
@@ -333,9 +361,34 @@ function PieceCard({
 
 function decisionOf(claim: EvidenceReviewClaim): EvidenceClaimDecision {
   return {
-    items: claim.items.flatMap((item) =>
-      item.usable && item.verdict !== null ? [{ item_key: item.item_key, verdict: item.verdict }] : [],
-    ),
+    items: claim.items.flatMap((item) => {
+      if (!item.usable || item.verdict === null) {
+        return [];
+      }
+      // A PUT replaces the whole decision, so an accepted clip sends its details back as they
+      // are saved (the cut is found again by the server only when the words change).
+      const saved = item.verdict === "accepted" ? item.soundbite?.decision : null;
+      return [
+        {
+          item_key: item.item_key,
+          verdict: item.verdict,
+          ...(saved != null
+            ? {
+                soundbite: {
+                  first_word: saved.first_word,
+                  last_word: saved.last_word,
+                  speaker: saved.speaker,
+                  role: saved.role,
+                  venue: saved.venue,
+                  recorded: saved.recorded,
+                  acknowledged_flags: saved.acknowledged_flags,
+                  rights_note: saved.rights_note,
+                },
+              }
+            : {}),
+        },
+      ];
+    }),
     shown: claim.shown,
     no_proof_on_screen: claim.no_proof_on_screen,
   };
@@ -360,27 +413,57 @@ function ClaimCard({
 }) {
   const key = claim.status ?? claim.result_state;
   const disabled = !editable || saving;
-  const usable = claim.items.filter((item) => item.usable && item.kind !== "video");
+  const isBiteClaim = claim.want === "soundbite";
+  const clipClaim: ClipClaim = { want: claim.want, speaker: claim.speaker };
+  // The pieces that can be shown: not a video of a claim that is not a sound bite.
+  const showable = claim.items.filter(
+    (item) => item.usable && (item.kind !== "video" || isBiteClaim),
+  );
   const save = (decision: EvidenceClaimDecision) => onSave(claim.claim_id, decision);
 
-  const setVerdict = (itemKey: string, verdict: "accepted" | "rejected") => {
+  const isClipKey = (itemKey: string) =>
+    claim.items.some((item) => item.item_key === itemKey && item.kind === "video");
+
+  // What shows on video once `itemKey` is shown: a sound bite clip is shown alone, and nothing
+  // is shown beside it (the server refuses both).
+  const withShown = (current: string[], itemKey: string): string[] => {
+    const others = current.filter((entry) => entry !== itemKey);
+    if (isClipKey(itemKey)) {
+      return [itemKey];
+    }
+    return [...others.filter((entry) => !isClipKey(entry)), itemKey];
+  };
+
+  const setVerdict = (
+    itemKey: string,
+    verdict: "accepted" | "rejected",
+    soundbite?: SoundbiteDecision,
+  ) => {
     const current = decisionOf(claim);
+    const item = claim.items.find((entry) => entry.item_key === itemKey);
     const items = [
       ...current.items.filter((entry) => entry.item_key !== itemKey),
-      { item_key: itemKey, verdict },
+      { item_key: itemKey, verdict, ...(soundbite !== undefined ? { soundbite } : {}) },
     ];
     const others = current.shown.filter((entry) => entry !== itemKey);
-    // An accepted piece is shown by default; the owner can untick it.
-    const shown = verdict === "accepted" ? [...others, itemKey] : others;
+    // An accepted piece is shown by default; the owner can untick it. Saving new details of a
+    // clip that is already accepted keeps it as it was shown or not. A video that is only
+    // context is never shown, and a web page or PDF accepted beside a shown clip is not shown.
+    const wasAccepted = item?.verdict === "accepted";
+    const showNow =
+      verdict === "accepted" &&
+      (item?.kind !== "video" || isBiteClaim) &&
+      (wasAccepted ? current.shown.includes(itemKey) : true) &&
+      (isClipKey(itemKey) || !others.some(isClipKey));
+    const shown = showNow ? withShown(current.shown, itemKey) : others;
     save({ items, shown, no_proof_on_screen: shown.length > 0 ? false : current.no_proof_on_screen });
   };
 
   const setShown = (itemKey: string, on: boolean) => {
     const current = decisionOf(claim);
-    const others = current.shown.filter((entry) => entry !== itemKey);
     save({
       ...current,
-      shown: on ? [...others, itemKey] : others,
+      shown: on ? withShown(current.shown, itemKey) : current.shown.filter((e) => e !== itemKey),
       no_proof_on_screen: on ? false : current.no_proof_on_screen,
     });
   };
@@ -416,6 +499,11 @@ function ClaimCard({
           <Badge size="sm" variant="light" color={CLAIM_STATUS_COLOR[key] ?? "gray"}>
             {CLAIM_STATUS_LABEL[key] ?? key}
           </Badge>
+          {isBiteClaim && (
+            <Badge size="sm" variant="filled" color="grape">
+              Sound bite{claim.speaker !== null ? `: ${claim.speaker}` : ""}
+            </Badge>
+          )}
           {claim.decided ? (
             <Badge size="sm" variant="light" color="green">
               Decided
@@ -475,9 +563,11 @@ function ClaimCard({
             key={item.item_key}
             projectId={projectId}
             item={item}
+            clipClaim={clipClaim}
             shown={claim.shown.includes(item.item_key)}
             disabled={disabled}
             onVerdict={(verdict) => setVerdict(item.item_key, verdict)}
+            onAcceptClip={(details) => setVerdict(item.item_key, "accepted", details)}
             onShown={(on) => setShown(item.item_key, on)}
             previewStarting={previewingKey === item.item_key}
             onPreview={() => onPreview(item.item_key)}
@@ -518,9 +608,11 @@ function ClaimCard({
         <Switch
           label="No proof on screen"
           description={
-            usable.length === 0
-              ? "This claim has no usable evidence to show as a screenshot. It stays in the script without an evidence shot."
-              : "The claim stays in the script without an evidence shot, even if a piece is accepted."
+            showable.length === 0
+              ? "This claim has no usable evidence to show. It stays in the script without an evidence shot."
+              : isBiteClaim
+                ? "No clip plays for this claim: the narrator reads the quote, even if a piece is accepted."
+                : "The claim stays in the script without an evidence shot, even if a piece is accepted."
           }
           checked={claim.no_proof_on_screen}
           disabled={disabled}

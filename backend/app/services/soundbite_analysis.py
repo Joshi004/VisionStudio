@@ -94,11 +94,19 @@ PARAPHRASE_MATCH_SHARE: Final = 0.5
 # --- the trim ----------------------------------------------------------------------------------
 
 FRAME_S: Final = 0.010
-# "Quiet" is this far under the median level over the quote's words.
+# "Quiet" is the higher of two limits, so a pause in a noisy room still counts and a pause in a
+# silent studio is not asked to be quieter than it is (checked on five real clips, SB-006):
+# this far under the median level over the quote's words, or this far over the clip's room tone
+# (the 10th percentile of its frame levels). It is never less than QUIET_MIN_BELOW_SPEECH_DB
+# under the speech.
 QUIET_BELOW_SPEECH_DB: Final = 20.0
+QUIET_ABOVE_ROOM_TONE_DB: Final = 6.0
+QUIET_MIN_BELOW_SPEECH_DB: Final = 10.0
+ROOM_TONE_PERCENTILE: Final = 10
 # The in point is looked for from this long before the first word to MIN_EDGE_GAP_S before it.
 IN_REACH_S: Final = 0.5
-# The out point from OUT_NEAR_S to OUT_REACH_S after the last word (never into the next word).
+# The out point from OUT_NEAR_S to OUT_REACH_S after the last word (never into the next word); in
+# a gap too short for that, from MIN_EDGE_GAP_S.
 OUT_NEAR_S: Final = 0.15
 OUT_REACH_S: Final = 0.4
 # The cut must stay this far from the next or the previous word.
@@ -116,6 +124,8 @@ CONTEXT_BEFORE_WORDS: Final = 10
 LAUGHTER_REACH_S: Final = 5.0
 MIN_CLIP_S: Final = 3.0
 MAX_CLIP_S: Final = 15.0
+# Above this the review warns (it still accepts up to MAX_CLIP_S): §4.7 "warn above 12 s".
+WARN_CLIP_S: Final = 12.0
 
 TURN_PHRASES: Final = (
     "but",
@@ -375,7 +385,7 @@ def propose_trim(
 
     Each point is the quietest frame of the gap next to the quote's edge word. A point is
     **clean** when the neighbouring word is at least MIN_EDGE_GAP_S away and the chosen frame is
-    QUIET_BELOW_SPEECH_DB under the speech. When there is no such gap the point is the middle of
+    quiet (see QUIET_BELOW_SPEECH_DB). When there is no such gap the point is the middle of
     what gap there is, and not clean. None when the audio is too short to measure.
     """
     level = _levels_db(samples, rate)
@@ -388,7 +398,12 @@ def propose_trim(
     ]
     if len(speech) == 0:
         return None
-    quiet_limit = float(np.median(speech)) - QUIET_BELOW_SPEECH_DB
+    speech_level = float(np.median(speech))
+    room_tone = float(np.percentile(level, ROOM_TONE_PERCENTILE))
+    quiet_limit = min(
+        max(speech_level - QUIET_BELOW_SPEECH_DB, room_tone + QUIET_ABOVE_ROOM_TONE_DB),
+        speech_level - QUIET_MIN_BELOW_SPEECH_DB,
+    )
 
     previous_end = words[first - 1].end if first > 0 else 0.0
     # In point.
@@ -409,6 +424,9 @@ def propose_trim(
     if next_start is not None:
         high = min(high, next_start - MIN_EDGE_GAP_S)
     high = min(high, duration_s)
+    if high < low:
+        # A short gap: the cut may sit as near the last word as the first one allows.
+        low = offset + MIN_EDGE_GAP_S
     if high >= low:
         frame = _quietest(level, low, high, (low + high) / 2)
         out_s = frame * FRAME_S
@@ -540,18 +558,11 @@ def flags(
         )
 
     if trim is not None:
-        length = trim["out_s"] - trim["in_s"]
-        if length < MIN_CLIP_S or length > MAX_CLIP_S:
-            add(
-                "length",
-                f"The clip is {length:.1f} s long; a sound bite is {MIN_CLIP_S:.0f} to "
-                f"{MAX_CLIP_S:.0f} s.",
-            )
+        flag = length_flag(trim)
+        if flag is not None:
+            found.append(flag)
 
-    context_tokens = tokens_of(
-        f"{brief_entry.get('sentence', '')} {brief_entry.get('context', '')}"
-    )
-    sensitive = sorted(SENSITIVE_WORDS.intersection(context_tokens))
+    sensitive = _sensitive_words(brief_entry)
     if sensitive:
         add(
             "sensitive_context",
@@ -559,20 +570,69 @@ def flags(
             "Check that the clip cannot read as an admission or as the wrong side of the story.",
         )
         if trim is not None:
-            inside_clip = [
-                token
-                for word in words
-                if trim["in_s"] <= word.start and word.end <= trim["out_s"]
-                for token in tokens_of(word.text)
-            ]
-            admission = _has_phrase(inside_clip, ADMISSION_PHRASES)
-            if admission is not None:
-                add(
-                    "admission_words",
-                    f'"{admission}" is said in the clip, which sits near sensitive words in '
-                    "the script. It may read as an admission.",
-                )
+            flag = admission_flag(words, trim, brief_entry)
+            if flag is not None:
+                found.append(flag)
     return found
+
+
+def _sensitive_words(brief_entry: dict[str, Any]) -> list[str]:
+    context_tokens = tokens_of(
+        f"{brief_entry.get('sentence', '')} {brief_entry.get('context', '')}"
+    )
+    return sorted(SENSITIVE_WORDS.intersection(context_tokens))
+
+
+def length_flag(trim: dict[str, Any]) -> dict[str, str] | None:
+    """The `length` flag for a trim (`{in_s, out_s, ...}`), or None when it is 3 to 15 s. Pure."""
+    length = trim["out_s"] - trim["in_s"]
+    if MIN_CLIP_S <= length <= MAX_CLIP_S:
+        return None
+    return {
+        "code": "length",
+        "message": (
+            f"The clip is {length:.1f} s long; a sound bite is {MIN_CLIP_S:.0f} to "
+            f"{MAX_CLIP_S:.0f} s."
+        ),
+    }
+
+
+def admission_flag(
+    words: list[HeardWord], trim: dict[str, Any], brief_entry: dict[str, Any]
+) -> dict[str, str] | None:
+    """The `admission_words` flag: an admission-like phrase is said inside the trim while the
+    script around the quote has sensitive words. None otherwise. Pure."""
+    if not _sensitive_words(brief_entry):
+        return None
+    inside_clip = [
+        token
+        for word in words
+        if trim["in_s"] <= word.start and word.end <= trim["out_s"]
+        for token in tokens_of(word.text)
+    ]
+    admission = _has_phrase(inside_clip, ADMISSION_PHRASES)
+    if admission is None:
+        return None
+    return {
+        "code": "admission_words",
+        "message": (
+            f'"{admission}" is said in the clip, which sits near sensitive words in '
+            "the script. It may read as an admission."
+        ),
+    }
+
+
+def trim_flags(
+    words: list[HeardWord], trim: dict[str, Any], brief_entry: dict[str, Any]
+) -> list[dict[str, str]]:
+    """The flags that depend on the owner's trim: `length` and `admission_words`. Pure."""
+    found = [length_flag(trim), admission_flag(words, trim, brief_entry)]
+    return [flag for flag in found if flag is not None]
+
+
+# The flag codes `trim_flags` can give. The review works these out again for the owner's trim
+# and does not ask for the stored ones to be acknowledged (the length is checked on its own).
+TRIM_FLAG_CODES: Final = ("length", "admission_words")
 
 
 def _get(value: Any, *keys: str) -> Any:
