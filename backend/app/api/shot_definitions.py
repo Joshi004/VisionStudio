@@ -74,6 +74,7 @@ ShotType = Literal[
     "presenter",
     "graphic",
     "evidence",
+    "soundbite",
 ]
 PlanStatus = Literal["not_planned", "planned", "out_of_date"]
 SpeechKind = Literal["narration", "dialogue"]

@@ -58,8 +58,12 @@ GRAPHIC_SHOT_TYPE: Final = "graphic"
 # The type of a cut shot that shows a piece of evidence (EVD-009): a screenshot of a source, drawn
 # by the motion service. Like a graphic, it is never made by H3 and has its own frames plus one.
 EVIDENCE_SHOT_TYPE: Final = "evidence"
+# The type of a cut shot that plays a real person's clip in place of the narrator's reading of a
+# quote (SB-008). It is fixed to the quote's words, never made by H3, and lasts as long as the
+# owner's accepted cut of the clip: its length is not the quote's length in the take.
+SOUNDBITE_SHOT_TYPE: Final = "soundbite"
 # Every type of shot that code draws instead of H3.
-DRAWN_SHOT_TYPES: Final = (GRAPHIC_SHOT_TYPE, EVIDENCE_SHOT_TYPE)
+DRAWN_SHOT_TYPES: Final = (GRAPHIC_SHOT_TYPE, EVIDENCE_SHOT_TYPE, SOUNDBITE_SHOT_TYPE)
 _GRAPHIC_SPARE_FRAMES: Final = 1
 
 Severity = Literal["flagged", "blocking"]
@@ -369,10 +373,12 @@ def build_cut_timeline(
     words of the scene's take (FLOW-005), so they are not laid one after another by length:
 
     - a shot starts and ends at its stored cut times (`start_s`, `end_s`, seconds from the start
-      of the take), moved by `take_map` (the lead-in, and later the sound bites). The first shot
-      starts at 0, so the lead-in belongs to it;
+      of the take), moved by `take_map` (the lead-in, and the sound bites before it). The first
+      shot starts at 0, so the lead-in belongs to it. A sound bite shot lasts as long as its
+      clip, which the map's replaced span says;
     - the take sits at the scene's start plus the lead-in, so each unit sits where `take_map`
-      puts its place in the take. The units carried by a shot are the ones the plan lists;
+      puts its place in the take (a unit edge inside a sound bite is put inside the clip's
+      window: `place_s`). The units carried by a shot are the ones the plan lists;
     - each shot gets the length of the clip made for it (`ShotSpan.clip_frames`); a graphic shot
       (EXG-003) gets its own frames plus one spare frame;
     - the scene ends where its last shot ends;
@@ -402,6 +408,10 @@ def build_cut_timeline(
             )
         )
         length = round(end - start, _DECIMALS)
+        if shot.get("type") == SOUNDBITE_SHOT_TYPE:
+            # The clip's length decides: the review held the cut to 3 to 15 s. It never goes
+            # through H3, so H3's bounds do not apply.
+            continue
         if length < policy.hard_min_s - _TOLERANCE:
             problems.append(
                 TimelineProblem(
@@ -427,9 +437,9 @@ def build_cut_timeline(
         UnitSpan(
             unit_id=unit.id,
             kind=unit.kind,
-            start_s=take_map.to_scene(unit.start_s),
-            end_s=take_map.to_scene(unit.end_s),
-            natural_start_s=take_map.to_scene(unit.start_s),
+            start_s=take_map.place_s(unit.start_s),
+            end_s=take_map.place_s(unit.end_s),
+            natural_start_s=take_map.place_s(unit.start_s),
             shot_ids=[shot["id"] for shot in shots if unit.id in shot["speech_unit_ids"]],
         )
         for unit in units

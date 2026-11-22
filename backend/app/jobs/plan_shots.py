@@ -136,6 +136,13 @@ def _is_take(value: Any) -> bool:
         )
         and _is_suggestions(value.get("suggestions"))
         and _is_evidence(value.get("evidence"))
+        and _is_soundbites(value.get("soundbites"))
+    )
+
+
+def _is_positions(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(position, int) and not isinstance(position, bool) for position in value
     )
 
 
@@ -143,6 +150,7 @@ def _is_evidence(value: Any) -> bool:
     """Whether `value` is the take's optional list of claims with evidence to show, as
     `shot_plans` writes it (EVD-009): absent, or `[{id, text, words, pieces}]`, where `words` are
     positions in the take (none for a claim that has no word in it) and `pieces` the item keys.
+    A claim whose words overlap a sound bite also has `on_soundbite` true (SB-008).
     """
     return value is None or (
         isinstance(value, list)
@@ -150,14 +158,11 @@ def _is_evidence(value: Any) -> bool:
             isinstance(entry, dict)
             and isinstance(entry.get("id"), str)
             and isinstance(entry.get("text"), str)
-            and isinstance(entry.get("words"), list)
-            and all(
-                isinstance(position, int) and not isinstance(position, bool)
-                for position in entry["words"]
-            )
+            and _is_positions(entry.get("words"))
             and isinstance(entry.get("pieces"), list)
             and bool(entry["pieces"])
             and all(isinstance(key, str) for key in entry["pieces"])
+            and entry.get("on_soundbite", True) is True
             for entry in value
         )
     )
@@ -165,7 +170,8 @@ def _is_evidence(value: Any) -> bool:
 
 def _is_suggestions(value: Any) -> bool:
     """Whether `value` is the take's optional list of suggested graphics, as `shot_plans` writes
-    it: absent, or `[{id, text, words}]` with the positions of the take's words.
+    it: absent, or `[{id, text, words}]` with the positions of the take's words. A suggestion
+    whose words were all a sound bite's has no words and a `reason` (SB-008).
     """
     return value is None or (
         isinstance(value, list)
@@ -173,11 +179,25 @@ def _is_suggestions(value: Any) -> bool:
             isinstance(entry, dict)
             and isinstance(entry.get("id"), str)
             and isinstance(entry.get("text"), str)
-            and isinstance(entry.get("words"), list)
-            and all(
-                isinstance(position, int) and not isinstance(position, bool)
-                for position in entry["words"]
-            )
+            and _is_positions(entry.get("words"))
+            and isinstance(entry.get("reason", ""), str)
+            for entry in value
+        )
+    )
+
+
+def _is_soundbites(value: Any) -> bool:
+    """Whether `value` is the take's optional list of sound bites to place, as `shot_plans`
+    writes it (SB-008): absent, or `[{id, text, words, item_key}]`, where `words` are the
+    positions in the take of the quote (none when it is not one run of words in it)."""
+    return value is None or (
+        isinstance(value, list)
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("text"), str)
+            and _is_positions(entry.get("words"))
+            and isinstance(entry.get("item_key"), str)
             for entry in value
         )
     )

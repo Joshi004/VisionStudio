@@ -70,7 +70,7 @@ from app.services import (
     word_timings,
 )
 from app.services.projects import prompt_mode
-from app.services.take_map import NO_REPLACED, TakeMap, unit_words
+from app.services.take_map import NO_REPLACED, ReplacedSpan, TakeMap, TakeMapError, unit_words
 
 _logger = logging.getLogger(__name__)
 
@@ -239,6 +239,9 @@ class _Loaded:
     # evidence shots that are drawn split. Empty unless the project has evidence and callouts on,
     # and a callout plan that is current and not being written.
     callouts: tuple[dict[str, Any], ...] = ()
+    # The sound bite clips the owner accepted and chose to show (SB-008), in story order. Empty
+    # unless the project has evidence on and its newest round is reviewed.
+    soundbites: list[evidence_review.ShownSoundbite] = field(default_factory=list)
 
 
 EVIDENCE_FIRST_MESSAGE: Final = (
@@ -269,11 +272,13 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         policy_problem = str(exc)
 
     evidence: list[evidence_review.ShownClaim] = []
+    soundbites: list[evidence_review.ShownSoundbite] = []
     evidence_problem: str | None = None
     if evidence_claims.wanted(project):
         # Shots wait for the evidence step (EV-9): its newest round has to be reviewed.
         if evidence_rounds.is_done(await evidence_rounds.state(session, project)):
             evidence = await evidence_review.shown_claims(session, project)
+            soundbites = await evidence_review.shown_soundbites(session, project)
         else:
             evidence_problem = EVIDENCE_FIRST_MESSAGE
 
@@ -304,6 +309,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         evidence=evidence,
         evidence_problem=evidence_problem,
         callouts=callouts,
+        soundbites=soundbites,
     )
 
 
@@ -349,15 +355,80 @@ def _scene_evidence(
         found["id"]: found["words"]
         for found in graphic_suggestions.take_suggestions(item["text"], start, words, entries)
     }
-    return [
-        {
+    quoted = _soundbite_words(loaded, item, words)
+    found_claims: list[dict[str, Any]] = []
+    for claim in mine:
+        positions = covered.get(claim.id, [])
+        entry: dict[str, Any] = {
             "id": claim.id,
             "text": claim.text,
-            "words": covered.get(claim.id, []),
+            "words": positions,
             "pieces": [piece.item_key for piece in claim.pieces],
         }
-        for claim in mine
+        if quoted.intersection(positions):
+            # Its words overlap a sound bite: it gets no evidence shot (SB-008). The key is only
+            # there when it is true, so every other scene's record is as it was.
+            entry["on_soundbite"] = True
+        found_claims.append(entry)
+    return found_claims
+
+
+def _scene_soundbites(
+    loaded: _Loaded, item: dict[str, Any], words: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The sound bites of this scene (SB-008): `[{id, text, words, item_key}]`, in story order. A
+    sound bite belongs to the scene that holds its first word. `words` are the positions (from 0)
+    of its quote in the take, and are empty when the quote is not one unbroken run of words in
+    this take (it reaches into another scene, a word is missing, or an earlier sound bite already
+    has one of its words): the narrator then reads it. Empty when there are none, or when the
+    story is no longer the one the scenes were found in.
+    """
+    story = loaded.story
+    if not loaded.soundbites or story is None:
+        return []
+    start, end = item["start"], item["end"]
+    if story[start:end] != item["text"]:
+        return []
+    mine = [bite for bite in loaded.soundbites if start <= bite.start < end]
+    if not mine:
+        return []
+    entries = [
+        {"id": bite.id, "start": bite.start, "end": bite.end, "text": bite.text} for bite in mine
     ]
+    covered = {
+        found["id"]: found["words"]
+        for found in graphic_suggestions.take_suggestions(item["text"], start, words, entries)
+    }
+    taken: set[int] = set()
+    quotes: list[dict[str, Any]] = []
+    for bite in mine:
+        positions = covered.get(bite.id, [])
+        unbroken = (
+            bool(positions)
+            and bite.end <= end
+            and positions == list(range(positions[0], positions[0] + len(positions)))
+            and not taken.intersection(positions)
+        )
+        if unbroken:
+            taken.update(positions)
+        quotes.append(
+            {
+                "id": bite.id,
+                "text": bite.text,
+                "words": positions if unbroken else [],
+                "item_key": bite.item_key,
+            }
+        )
+    return quotes
+
+
+def _soundbite_words(
+    loaded: _Loaded, item: dict[str, Any], words: list[dict[str, Any]]
+) -> set[int]:
+    """The positions in the take of every word that a sound bite of this scene replaces."""
+    return {
+        position for quote in _scene_soundbites(loaded, item, words) for position in quote["words"]
+    }
 
 
 def _scene_suggestions(
@@ -367,6 +438,9 @@ def _scene_suggestions(
     the positions (from 0) counted in `words`. Empty when there are none. They are placed with
     the scene's position in the story, so they are left out when the story is no longer the one
     the scenes were found in (the plan is out of date then, and says so).
+
+    A sound bite wins over a suggestion (SB-008): its words are taken out of the suggestion. One
+    left with no words stays in the list, with a `reason` that code wrote, and is not asked for.
     """
     story = loaded.story
     if not loaded.suggestions or story is None:
@@ -374,7 +448,26 @@ def _scene_suggestions(
     start, end = item["start"], item["end"]
     if story[start:end] != item["text"]:
         return []
-    return graphic_suggestions.take_suggestions(item["text"], start, words, loaded.suggestions)
+    marked = graphic_suggestions.take_suggestions(item["text"], start, words, loaded.suggestions)
+    quoted = _soundbite_words(loaded, item, words)
+    if not quoted:
+        return marked
+    result: list[dict[str, Any]] = []
+    for suggestion in marked:
+        kept = [position for position in suggestion["words"] if position not in quoted]
+        if len(kept) == len(suggestion["words"]):
+            result.append(suggestion)
+        elif kept:
+            result.append({**suggestion, "words": kept})
+        else:
+            result.append(
+                {
+                    **suggestion,
+                    "words": [],
+                    "reason": cut_planning_writer.SUGGESTION_ON_SOUNDBITE_TEXT,
+                }
+            )
+    return result
 
 
 def _unit_problems(scene: speech_synthesis.SceneAudio) -> list[str]:
@@ -618,6 +711,10 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         if proved:
             # Likewise only a scene with evidence to show has this key (EVD-009).
             take["evidence"] = proved
+        quoted = _scene_soundbites(loaded, item, take["words"])
+        if quoted:
+            # And only a scene with a sound bite to place has this one (SB-008).
+            take["soundbites"] = quoted
         audio_artifacts.append(
             {
                 "kind": SPEECH_TAKE_KIND,
@@ -659,6 +756,9 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
     evidence_hash = graphic_suggestions.fingerprint(
         take["evidence"] if take is not None and "evidence" in take else []
     )
+    soundbites_hash = graphic_suggestions.fingerprint(
+        take["soundbites"] if take is not None and "soundbites" in take else []
+    )
     inputs = {
         "project_id": project.id,
         "scene_id": item["id"],
@@ -666,6 +766,9 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         "scene_text_sha256": event_extraction_writer.scene_text_sha256(item["text"]),
         # Only a scene with evidence to show has this key (EVD-009); see `_evidence_reasons`.
         **({"evidence_sha256": evidence_hash} if evidence_hash else {}),
+        # Only a scene with a sound bite to place has this one (SB-008); see `_soundbite_reasons`.
+        # The clip's length is not in it: a new cut changes the timeline, never the plan.
+        **({"soundbites_sha256": soundbites_hash} if soundbites_hash else {}),
         # Only a scene with marked words has this key. A plan without it is current when the
         # scene has none (see `_suggestion_reasons`).
         **({"graphic_suggestions_sha256": suggestions_hash} if suggestions_hash else {}),
@@ -1071,6 +1174,22 @@ def _evidence_reasons(
     return ["The evidence to show in this scene changed since these shots were planned."]
 
 
+def _soundbite_reasons(
+    row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
+) -> list[str]:
+    """Why a cut plan no longer fits the sound bites of its scene (SB-008): a clip was accepted,
+    rejected or is no longer shown, or its quote moved. A new cut of a clip is not one: only the
+    timeline changes. A plan made before sound bites existed records none, which is the same as a
+    scene with none. A take that is not ready has no words to place the quotes on.
+    """
+    if not isinstance(row.inputs, dict) or clock is None or not clock.words:
+        return []
+    now = graphic_suggestions.fingerprint(_scene_soundbites(loaded, item, clock.words))
+    if row.inputs.get("soundbites_sha256") == now:
+        return []
+    return ["The sound bites of this scene changed since these shots were planned."]
+
+
 def _claim_times(
     loaded: _Loaded,
     item: dict[str, Any],
@@ -1082,19 +1201,23 @@ def _claim_times(
     found: list[evidence_cards.ClaimTime] = []
     for claim in _scene_evidence(loaded, item, clock.words):
         positions = [position for position in claim["words"] if 0 <= position < len(clock.words)]
-        if not positions or not claim["pieces"]:
+        if not positions or not claim["pieces"] or claim.get("on_soundbite"):
             continue
         first = clock.words[min(positions)].get("start")
         last = clock.words[max(positions)].get("end")
         if not isinstance(first, int | float) or not isinstance(last, int | float):
             continue
+        try:
+            first_s, last_s = take_map.to_scene(float(first)), take_map.to_scene(float(last))
+        except TakeMapError:
+            continue  # a word of the claim is in a sound bite's clip: no card for it (SB-008)
         found.append(
             evidence_cards.ClaimTime(
                 claim_id=str(claim["id"]),
                 text=str(claim["text"]),
                 pieces=tuple(claim["pieces"]),
-                first_s=take_map.to_scene(float(first)),
-                last_s=take_map.to_scene(float(last)),
+                first_s=first_s,
+                last_s=last_s,
             )
         )
     return found
@@ -1170,6 +1293,11 @@ def _split_shots(
         for shot in row.content["shots"]
         if shot.get("type") == scene_timeline.EVIDENCE_SHOT_TYPE
     }
+    bite_ids = {
+        str(shot["id"])
+        for shot in row.content["shots"]
+        if shot.get("type") == scene_timeline.SOUNDBITE_SHOT_TYPE
+    }
     shots = [
         evidence_layout.ShotAt(span.shot_id, round(span.start_s * 1000), round(span.end_s * 1000))
         for span in timeline.shots
@@ -1192,12 +1320,21 @@ def _split_shots(
             words=unit_words(clock.words, span.first_word, span.last_word, span.start, take_map),
         )
     total_ms = round(timeline.total_s * 1000)
+    # A callout that starts in a sound bite's window is left out of the render (SB-008), so it
+    # splits no shot here either.
+    bites_ms = [
+        (round(span.start_s * 1000), round(span.end_s * 1000))
+        for span in timeline.shots
+        if span.shot_id in bite_ids
+    ]
     times: list[evidence_layout.CalloutAt] = []
     for callout in mine:
         unit = units.get(str(callout.get("unit_id")))
         if unit is None:
             continue
         start_ms, end_ms = callout_render.timing_of(callout, unit, total_ms)
+        if any(first <= start_ms < last for first, last in bites_ms):
+            continue
         times.append(
             evidence_layout.CalloutAt(
                 callout_id=str(callout["id"]),
@@ -1267,6 +1404,7 @@ def _out_of_date_reasons(
         reasons.extend(_take_reasons(row, clock))
         reasons.extend(_suggestion_reasons(row, loaded, scene.scene.item, clock))
         reasons.extend(_evidence_reasons(row, loaded, scene.scene.item, clock))
+        reasons.extend(_soundbite_reasons(row, loaded, scene.scene.item, clock))
     else:
         now = {item.unit["id"]: item for item in scene.units}
         reasons.extend(_audio_reasons(row, loaded.policy, now))
@@ -1416,14 +1554,48 @@ def _cut_units(
     ]
 
 
+def _bite_seconds(
+    soundbites: list[evidence_review.ShownSoundbite],
+) -> dict[tuple[str, str], float]:
+    """The length of each shown sound bite's cut, by `(claim id, item key)`: what the clip plays
+    for. Its cut in seconds moved to whole frames, so the shot ends on a frame (SB-008). The
+    render (SB-009) fades inside this length and never changes it."""
+    return {
+        (bite.id, bite.item_key): cut_planning_writer.frame_time(bite.seconds)
+        for bite in soundbites
+    }
+
+
+def _take_map_of(content: dict[str, Any], bites: dict[tuple[str, str], float]) -> TakeMap:
+    """The take map of a cut plan: its lead-in and a replaced span for each of its sound bite
+    shots, as long as the clip the owner accepted now plays. A shot whose clip is not shown any
+    more (or is another one) keeps the take's own length, so nothing moves: the plan says it is
+    out of date."""
+    spans: list[ReplacedSpan] = []
+    for shot in content["shots"]:
+        about = shot.get("soundbite")
+        if shot.get("type") != scene_timeline.SOUNDBITE_SHOT_TYPE or not isinstance(about, dict):
+            continue
+        start, end = float(shot["start_s"]), float(shot["end_s"])
+        seconds = bites.get((str(about.get("claim_id")), str(about.get("item_key"))))
+        length = max(0.0, seconds) if seconds is not None else end - start
+        spans.append(ReplacedSpan(start, end, length))
+    return TakeMap(
+        lead_in_s=float(content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"]),
+        replaced=tuple(spans),
+    )
+
+
 def _timeline_of(
     row: ShotPlan | None,
     policy: duration_policy.DurationPolicy | None,
     kinds_by_plan: dict[int, dict[str, str]],
     clock: take_timings.TakeClock | None = None,
+    bites: dict[tuple[str, str], float] | None = None,
 ) -> scene_timeline.SceneTimeline | None:
     """The timeline of a scene's newest plan, or None when it cannot be worked out. `clock` is
-    the scene's take clock, used only by a cut plan for the places of its speech units.
+    the scene's take clock, used only by a cut plan for the places of its speech units. `bites`
+    are the lengths of the shown sound bite clips (`_bite_seconds`), used only by a cut plan.
     """
     if row is None or policy is None or not isinstance(row.inputs, dict):
         return None
@@ -1432,7 +1604,7 @@ def _timeline_of(
         return scene_timeline.build_cut_timeline(
             row.content["shots"],
             _cut_units(row, kinds_by_plan, clock),
-            TakeMap(lead_in_s=float(row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"])),
+            _take_map_of(row.content, bites or {}),
             policy,
         )
     infos = _unit_infos(row, kinds_by_plan)
@@ -1484,12 +1656,14 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
     kinds_by_plan = await _unit_kinds(session, rows)
 
     # Each scene's timeline first, so that a scene's start in the story can be given.
+    bites = _bite_seconds(loaded.soundbites)
     timelines = {
         scene.scene.item["id"]: _timeline_of(
             rows.get(scene.scene.item["id"]),
             loaded.policy,
             kinds_by_plan,
             loaded.clocks.get(scene.scene.item["id"]),
+            bites,
         )
         for scene in loaded.audio.scenes
     }
@@ -1583,7 +1757,16 @@ async def timeline_of(session: AsyncSession, row: ShotPlan) -> scene_timeline.Sc
     except duration_policy.DurationPolicyError:
         return None
     kinds = await _unit_kinds(session, {row.scene_id: row})
-    return _timeline_of(row, policy, kinds)
+    # A sound bite shot's length is its clip's, so the plan job's timeline needs the clips (SB-008).
+    project = await session.get(Project, row.project_id)
+    soundbites: list[evidence_review.ShownSoundbite] = []
+    if (
+        project is not None
+        and evidence_claims.wanted(project)
+        and evidence_rounds.is_done(await evidence_rounds.state(session, project))
+    ):
+        soundbites = await evidence_review.shown_soundbites(session, project)
+    return _timeline_of(row, policy, kinds, None, _bite_seconds(soundbites))
 
 
 async def queue_replan(

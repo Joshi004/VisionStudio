@@ -8,14 +8,17 @@ on the scene's timeline is placed by the take's word times, so every place that 
 from the start of the take" into "seconds from the start of the scene" (or back) asks this map
 and nothing else.
 
-Today the map is a single fixed offset: the lead-in the take sits after (`lead_in_s`). Its list of
-**replaced spans** is always empty for now. A replaced span is a stretch `[take_start_s,
-take_end_s]` of the take that does not play in the scene: a sound bite's clip plays in its place
-for `scene_seconds`. With spans `i` (each `s_i`, `e_i`, `L_i`):
+The map is a fixed offset, the lead-in the take sits after (`lead_in_s`), and a list of
+**replaced spans**. The list was always empty in SB-002; SB-008 fills it from the plan's sound bite
+shots. A replaced span is a stretch `[take_start_s, take_end_s]` of the take that does not play in
+the scene: a sound bite's clip plays in its place for `scene_seconds`. With spans `i` (each `s_i`,
+`e_i`, `L_i`):
 
     scene_time(t) = lead_in + t + sum over spans with e_i <= t of (L_i - (e_i - s_i))
 
-A take time strictly inside a replaced span has no scene time, and `TakeMapError` says so.
+A take time strictly inside a replaced span has no scene time, and `TakeMapError` says so. The
+callers that must not fail on such a time (the words of a quote, the edge of a unit) ask
+`place_s`, which puts it at the same share of the clip's window.
 
 **Rounding.** `to_scene` and `to_take` round to a thousandth of a second, as every copy of the
 clock did before. The terms added for replaced spans are `0.0` while there are none, and adding
@@ -58,7 +61,7 @@ class TakeMap:
 
     # The take starts this long after the start of the scene.
     lead_in_s: float
-    # In order of the take and never overlapping. Always empty in SB-002.
+    # In order of the take and never overlapping: one for each sound bite shot (SB-008).
     replaced: tuple[ReplacedSpan, ...] = ()
 
     def __post_init__(self) -> None:
@@ -96,12 +99,52 @@ class TakeMap:
             raise TakeMapError(f"Nothing of the take plays at {take_s:g} s: a clip replaces it.")
         return round(self.shift_at(take_s) + take_s, _DECIMALS)
 
+    def place_s(self, take_s: float) -> float:
+        """The scene time of the take's second `take_s`, and never an error. Outside the replaced
+        spans it is `to_scene`. Inside a span nothing of the take plays, so the second is put at
+        the same share of the clip's window as it has of the span: the words of a quote, and the
+        edges of a speech unit that holds them, land inside the clip's window, where captions and
+        callouts can be told from the rest."""
+        span = self._span_around(take_s)
+        if span is None:
+            return self.to_scene(take_s)
+        return round(self._inside(span, take_s) + self.lead_in_s, _DECIMALS)
+
+    def is_word_replaced(self, start_s: float, end_s: float) -> bool:
+        """Whether a word of the take, given by its start and end, is in a replaced span (its
+        middle is strictly inside one). A word that touches the edge of a span is not."""
+        return self.is_replaced((start_s + end_s) / 2)
+
+    def _span_around(self, take_s: float) -> ReplacedSpan | None:
+        for span in self.replaced:
+            if span.take_start_s < take_s < span.take_end_s:
+                return span
+        return None
+
+    def _inside(self, span: ReplacedSpan, take_s: float) -> float:
+        """The offset from the start of the scene's take (the lead-in not counted) at which the
+        second `take_s`, strictly inside `span`, is placed."""
+        share = (take_s - span.take_start_s) / (span.take_end_s - span.take_start_s)
+        return (
+            span.take_start_s + self.bite_shift_at(span.take_start_s) + share * span.scene_seconds
+        )
+
+    def _plain_offset(self, take_s: float) -> float:
+        """How far from the start of the take (lead-in not counted) the second plays."""
+        span = self._span_around(take_s)
+        if span is not None:
+            return self._inside(span, take_s)
+        return take_s + self.bite_shift_at(take_s)
+
     def elapsed_s(self, from_take_s: float, to_take_s: float) -> float:
         """The scene time that passes between two seconds of the take, not rounded. Used for the
-        offset of a word from the start of its unit, so a clip between them counts."""
-        return (to_take_s - from_take_s) + (
-            self.bite_shift_at(to_take_s) - self.bite_shift_at(from_take_s)
-        )
+        offset of a word from the start of its unit, so a clip between them counts. A second
+        inside a replaced span is placed as `place_s` does."""
+        if self._span_around(from_take_s) is None and self._span_around(to_take_s) is None:
+            return (to_take_s - from_take_s) + (
+                self.bite_shift_at(to_take_s) - self.bite_shift_at(from_take_s)
+            )
+        return self._plain_offset(to_take_s) - self._plain_offset(from_take_s)
 
     # --- Scene to take -------------------------------------------------------------------
 
@@ -135,6 +178,14 @@ class TakeMap:
         return self._samples(span.scene_seconds, rate) - (
             self._samples(span.take_end_s, rate) - self._samples(span.take_start_s, rate)
         )
+
+    def replaced_take_samples(self, rate: int) -> list[tuple[int, int]]:
+        """The replaced spans as `(start, end)` places in the take, in samples at `rate` (the same
+        rounding as `bite_shift_samples_at` and `take_sample_at`). Empty with none."""
+        return [
+            (self._samples(span.take_start_s, rate), self._samples(span.take_end_s, rate))
+            for span in self.replaced
+        ]
 
     def take_sample_at(self, offset_sample: int, rate: int) -> int:
         """The place in the take, in samples, that plays `offset_sample` samples after the take's

@@ -96,6 +96,7 @@ ShotType = Literal[
     "presenter",
     "graphic",
     "evidence",
+    "soundbite",
 ]
 ProblemKind = Literal["clip", "plan"]
 DialogueOutcome = Literal[

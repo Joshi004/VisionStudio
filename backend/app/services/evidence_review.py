@@ -30,7 +30,7 @@ the flags acknowledged and the rights note. `check_clip` lists the rules; a clip
 accepted has no details, and an accepted one whose details are missing or no longer fit its words
 reads as undecided again. At most one clip is shown per claim, and then nothing else; a video of
 a claim that is not a sound bite is only context and is never shown. `shown_claims` leaves clips
-out: SB-008 plans their shots.
+out: `shown_soundbites` lists them for the cut plan (SB-008).
 
 No file is ever deleted here (EVD-006: stored files are shared between items and imports).
 """
@@ -675,7 +675,7 @@ async def shown_claims(session: AsyncSession, project: Project) -> list[ShownCla
         position = placed.get(claim.entry["id"])
         if position is None or not claim.decision.shown:
             continue
-        # A shown sound bite clip gets no screenshot shot: SB-008 plans its own shot for it.
+        # A shown sound bite clip gets no screenshot shot: `shown_soundbites` plans its own.
         by_key = {
             item.item_key: item for item in claim.items if item.usable and item.kind != "video"
         }
@@ -695,6 +695,58 @@ async def shown_claims(session: AsyncSession, project: Project) -> list[ShownCla
                 )
             )
     return sorted(found, key=lambda claim: claim.start)
+
+
+@dataclass(frozen=True)
+class ShownSoundbite:
+    """A sound bite clip the owner accepted and chose to show (SB-008). `start` and `end` are
+    code-point positions of the quote in `script_text`, as for `ShownClaim`. `item_key` names the
+    clip. `seconds` is the length of the owner's cut (`out_s - in_s`), not yet rounded to frames.
+    """
+
+    id: str
+    start: int
+    end: int
+    text: str
+    item_key: str
+    seconds: float
+
+
+async def shown_soundbites(session: AsyncSession, project: Project) -> list[ShownSoundbite]:
+    """The sound bite clips shown on video, in story order (SB-008). The same gate as
+    `shown_claims`: empty unless the newest round has exactly the claims that count now. A claim
+    is listed when it is a sound bite whose one shown piece is a usable `video` item with the
+    owner's details. A change of the cut changes only `seconds`.
+    """
+    current = await evidence_rounds.state(session, project)
+    if not current.wanted or current.round is None or not current.current:
+        return []
+    review = await view(session, project)
+    placed = {claim["id"]: claim for claim in current.claims}
+    found: list[ShownSoundbite] = []
+    for claim in review.claims:
+        position = placed.get(claim.entry["id"])
+        if position is None or not evidence_claims.is_soundbite(claim.entry):
+            continue
+        clips = {
+            item.item_key: item for item in claim.items if item.usable and item.kind == "video"
+        }
+        for key in claim.decision.shown:
+            details = claim.decision.soundbites.get(key)
+            if key not in clips or details is None:
+                continue
+            found.append(
+                ShownSoundbite(
+                    id=claim.entry["id"],
+                    start=position["start"],
+                    end=position["end"],
+                    text=position["text"],
+                    item_key=key,
+                    seconds=round(float(details["out_s"]) - float(details["in_s"]), 3),
+                )
+            )
+            break
+    return sorted(found, key=lambda bite: bite.start)
 
 
 # --- The owner's actions -------------------------------------------------------------------

@@ -86,14 +86,29 @@ NOT_IN_TAKE_TEXT: Final = "The claim's words are not in this scene's voice take.
 # shot. Its source is shown as a line on that graphic (EVD-012).
 ON_GRAPHIC: Final = "on_graphic"
 ON_GRAPHIC_TEXT: Final = "A graphic shot covers its words, so its source is a line on that graphic."
+# A real person's clip that plays in place of the narrator's reading of a quote (SB-008). The
+# planner is told each one as a fixed shot: it starts on the quote's first word and the next shot
+# starts on the word after its last (`check_answer` refuses anything else). The length of the shot
+# is the clip's, so no shortest or longest shot applies to it.
+SOUNDBITE: Final = scene_timeline.SOUNDBITE_SHOT_TYPE
+# Set by code, never by the planner: a claim with evidence to show whose words overlap a sound
+# bite gets no evidence shot, and the reason a suggested graphic over the quote is not followed.
+ON_SOUNDBITE: Final = "on_soundbite"
+ON_SOUNDBITE_TEXT: Final = "A sound bite covers its words, so its clip plays there."
+SUGGESTION_ON_SOUNDBITE_TEXT: Final = "These words are a sound bite: the clip plays there."
+SOUNDBITE_NOT_IN_TAKE_TEXT: Final = (
+    "The quote is not one run of words in this scene's voice take, so the narrator reads it."
+)
 
 
-def cut_types(graphics: bool, evidence: bool = False) -> tuple[str, ...]:
+def cut_types(graphics: bool, evidence: bool = False, soundbites: bool = False) -> tuple[str, ...]:
     """The shot types the planner may use: `GRAPHIC` is one only when the project has graphics,
-    and `EVIDENCE` only when the scene has evidence to show.
+    `EVIDENCE` only when the scene has evidence to show, and `SOUNDBITE` only when the scene has
+    a sound bite to place.
     """
     types = (*CUT_TYPES, GRAPHIC) if graphics else CUT_TYPES
-    return (*types, EVIDENCE) if evidence else types
+    types = (*types, EVIDENCE) if evidence else types
+    return (*types, SOUNDBITE) if soundbites else types
 
 
 def drawn_by_code(kind: object) -> bool:
@@ -114,6 +129,8 @@ CUT_PLAN_KEY: Final = "cut_plan"
 SUGGESTIONS_KEY: Final = "graphic_suggestions"
 # The plan content's list of the claims with evidence to show and what became of each (EVD-009).
 EVIDENCE_KEY: Final = "evidence"
+# The plan content's list of the sound bites of the scene and what became of each (SB-008).
+SOUNDBITES_KEY: Final = "soundbites"
 _TIME_DECIMALS: Final = 3
 _SHOWN_DECIMALS: Final = 2
 # Characters that may follow the mark that ends a sentence ("said it.\"").
@@ -237,34 +254,72 @@ _EVIDENCE_RULES: Final = (
 )
 
 
-def _answer_form(graphics: bool, suggestions: bool, evidence: bool) -> str:
+_SOUNDBITE_TYPE_TEXT: Final = (
+    ', or "soundbite" for a real person\'s clip that plays in place of the narrator reading a '
+    "quote, fixed to the words listed in SOUND BITES"
+)
+_SOUNDBITE_LENGTH_TEXT: Final = (
+    ' This does not apply to a "soundbite" shot: it lasts as long as its clip.'
+)
+_SOUNDBITE_RULES: Final = (
+    '- Some words of the TAKE have a "soundbite_claim", an id such as "s1". The SOUND BITES block '
+    'lists each one with the number of its "first_word" and of its "last_word". A real person\'s '
+    'clip plays in place of the narrator reading those words. Plan exactly one "soundbite" '
+    'shot for each, with "soundbite_claim" set to its id, starting on its "first_word". The next '
+    'shot must start on the word after its "last_word" (the soundbite shot is the last shot when '
+    "its last word is the last word of the take). Never start another shot on a word inside it, "
+    'and give no other shot a "soundbite_claim". Its description is one plain sentence saying '
+    "that the speaker is seen saying those words.\n"
+    '- A "soundbite" shot does not count as the presenter or as B-roll: the scene still needs a '
+    "presenter or B-roll shot.\n"
+)
+
+
+def _answer_form(graphics: bool, suggestions: bool, evidence: bool, soundbites: bool) -> str:
     form = _GRAPHICS_ANSWER_FORM if graphics else _ANSWER_FORM
     if graphics and suggestions:
         form = _SUGGESTIONS_ANSWER_FORM
-    if not evidence:
+    if not evidence and not soundbites:
         return form
     parsed = json.loads(form)
-    parsed["shots"].append(
-        {
-            "start_word": 44,
-            "type": "evidence",
-            "evidence_claim": "c1",
-            "source_event_ids": ["an id from EVENTS"],
-            "description": "A screenshot of the company's report, with the figure highlighted.",
-        }
-    )
-    parsed["left_out_evidence"] = [
-        {"claim": "c2", "code": "scene_too_short", "reason": "Why no evidence shot fits."}
-    ]
+    if evidence:
+        parsed["shots"].append(
+            {
+                "start_word": 44,
+                "type": "evidence",
+                "evidence_claim": "c1",
+                "source_event_ids": ["an id from EVENTS"],
+                "description": "A screenshot of the company's report, with the figure highlighted.",
+            }
+        )
+        parsed["left_out_evidence"] = [
+            {"claim": "c2", "code": "scene_too_short", "reason": "Why no evidence shot fits."}
+        ]
+    if soundbites:
+        parsed["shots"].append(
+            {
+                "start_word": 60,
+                "type": "soundbite",
+                "soundbite_claim": "s1",
+                "source_event_ids": ["an id from EVENTS"],
+                "description": "The speaker is seen saying the quote.",
+            }
+        )
     return json.dumps(parsed)
 
 
-def _body(graphics: bool, suggestions: bool = False, evidence: bool = False) -> str:
+def _body(
+    graphics: bool,
+    suggestions: bool = False,
+    evidence: bool = False,
+    soundbites: bool = False,
+) -> str:
     """The system message. With `graphics` False it is exactly what it was before graphic shots
     existed; with it True the `graphic` type and its rules are added. With `suggestions` (only
     with `graphics`) the rule for the owner's suggested graphics and its answer form are added.
     With `evidence` (a scene with claims to show, EVD-009) the `evidence` type and its rules are
-    added; with it False nothing of that is in the text.
+    added; with it False nothing of that is in the text. With `soundbites` (a scene with a sound
+    bite clip to place, SB-008) the `soundbite` type and its rules are added the same way.
     """
     graphic_type = _GRAPHIC_TYPE_TEXT if graphics else ""
     graphic_broll = _GRAPHIC_BROLL_TEXT if graphics else ""
@@ -273,7 +328,7 @@ def _body(graphics: bool, suggestions: bool = False, evidence: bool = False) -> 
     )
     graphic_length = _GRAPHIC_LENGTH_TEXT if graphics else ""
     graphic_rules = _GRAPHIC_RULES if graphics else ""
-    answer_form = _answer_form(graphics, suggestions, evidence)
+    answer_form = _answer_form(graphics, suggestions, evidence, soundbites)
     suggestion_rules = ""
     if graphics and suggestions:
         suggestion_rules = _SUGGESTION_RULES
@@ -281,6 +336,10 @@ def _body(graphics: bool, suggestions: bool = False, evidence: bool = False) -> 
     evidence_length = _EVIDENCE_LENGTH_TEXT if evidence else ""
     # The evidence rules follow the suggestion rules in the same place of the text.
     suggestion_rules += _EVIDENCE_RULES if evidence else ""
+    # So do the sound bite rules, and its type is listed after the evidence type.
+    suggestion_rules += _SOUNDBITE_RULES if soundbites else ""
+    evidence_type += _SOUNDBITE_TYPE_TEXT if soundbites else ""
+    evidence_length += _SOUNDBITE_LENGTH_TEXT if soundbites else ""
     return f"""You are the shot planner of a studio that makes explainer videos. One presenter \
 speaks the whole script. You read ONE scene whose events are known and whose speech has already \
 been recorded as ONE continuous take, with the time of every word. You decide how the audience \
@@ -362,12 +421,25 @@ def _evidence_body(graphics: bool, suggestions: bool) -> str:
     return _body(graphics, graphics and suggestions, True)
 
 
-def instructions(graphics: bool = False, suggestions: bool = False, evidence: bool = False) -> str:
+@functools.cache
+def _soundbite_body(graphics: bool, suggestions: bool, evidence: bool) -> str:
+    return _body(graphics, graphics and suggestions, evidence, True)
+
+
+def instructions(
+    graphics: bool = False,
+    suggestions: bool = False,
+    evidence: bool = False,
+    soundbites: bool = False,
+) -> str:
     """The system message of a continuous explainer's cut planning. `graphics` is the project's
     setting: with it on, the planner may also plan graphic shots (EXG-003). `suggestions` is
     whether words of the scene are marked as a suggested graphic; it counts only with graphics.
-    `evidence` is whether the scene has claims with evidence to show (EVD-009).
+    `evidence` is whether the scene has claims with evidence to show (EVD-009). `soundbites` is
+    whether the scene has a sound bite clip to place (SB-008).
     """
+    if soundbites:
+        return _soundbite_body(graphics, suggestions, evidence)
     if evidence:
         return _evidence_body(graphics, suggestions)
     if graphics and suggestions:
@@ -442,9 +514,27 @@ def sentence_ranges(
 def evidence_claims(take: dict[str, Any]) -> list[dict[str, Any]]:
     """The claims of the take that have words in it, `[{id, text, words, pieces}]` (EVD-009):
     `pieces` are the item keys of the pieces to show, in the owner's order. A claim of the scene
-    that has no word in the take is in `take["evidence"]` too, with no words, and is left out here.
+    that has no word in the take is in `take["evidence"]` too, with no words, and is left out here;
+    so is a claim with `on_soundbite` (its words overlap a sound bite, SB-008).
     """
-    return [claim for claim in take.get("evidence") or [] if claim["words"]]
+    return [
+        claim
+        for claim in take.get("evidence") or []
+        if claim["words"] and not claim.get("on_soundbite")
+    ]
+
+
+def soundbites_of(take: dict[str, Any]) -> list[dict[str, Any]]:
+    """The sound bites of the take to place, `[{id, text, words, item_key}]` (SB-008): `words` are
+    the positions (from 0) of the quote, one unbroken run. A sound bite of the scene whose words
+    are not such a run is in `take["soundbites"]` too, with no words, and is left out here."""
+    return [bite for bite in take.get("soundbites") or [] if bite["words"]]
+
+
+def suggestions_of(take: dict[str, Any]) -> list[dict[str, Any]]:
+    """The suggested graphics of the take that still have words: a suggestion whose words were
+    all a sound bite's is kept in `take["suggestions"]` (with its reason) but is not asked for."""
+    return [entry for entry in take.get("suggestions") or [] if entry["words"]]
 
 
 def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, Any]:
@@ -456,7 +546,8 @@ def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, A
     scene's speech units. A take may also hold `suggestions`, `[{id, text, words}]`: the words
     the owner suggests a graphic for. Each of those words is shown with its `graphic_suggestion`.
     It may also hold `evidence` (`evidence_claims`): each word of a claim is shown with its
-    `evidence_claim`.
+    `evidence_claim`. And `soundbites` (`soundbites_of`): each word of a quote is shown with its
+    `soundbite_claim`.
     """
     kinds = {unit["id"]: unit["kind"] for unit in units}
     words = take["words"]
@@ -468,6 +559,7 @@ def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, A
     proved = {
         position: claim["id"] for claim in evidence_claims(take) for position in claim["words"]
     }
+    quoted = {position: bite["id"] for bite in soundbites_of(take) for position in bite["words"]}
 
     def shown(position: int) -> dict[str, Any]:
         word = words[position]
@@ -483,6 +575,8 @@ def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, A
             entry["graphic_suggestion"] = suggested[position]
         if position in proved:
             entry["evidence_claim"] = proved[position]
+        if position in quoted:
+            entry["soundbite_claim"] = quoted[position]
         return entry
 
     sentences: list[dict[str, Any]] = [
@@ -547,6 +641,7 @@ def build_request(
     evidence = evidence_claims(take)
     if evidence:
         policy["shortest_evidence_seconds"] = SHORTEST_EVIDENCE_S
+    bites = soundbites_of(take)
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
         "SCENE (JSON):\n" + json.dumps(scene, ensure_ascii=False, indent=2),
@@ -571,6 +666,23 @@ def build_request(
                 indent=2,
             )
         )
+    if bites:
+        parts.append(
+            "SOUND BITES (JSON):\n"
+            + json.dumps(
+                [
+                    {
+                        "claim": bite["id"],
+                        "text": bite["text"],
+                        "first_word": bite["words"][0] + 1,
+                        "last_word": bite["words"][-1] + 1,
+                    }
+                    for bite in bites
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     if staging is not None:
         parts.append("STAGING (JSON):\n" + json.dumps(staging, ensure_ascii=False, indent=2))
     if feedback is not None:
@@ -580,7 +692,9 @@ def build_request(
         "messages": [
             {
                 "role": "system",
-                "content": instructions(graphics, bool(take.get("suggestions")), bool(evidence)),
+                "content": instructions(
+                    graphics, bool(suggestions_of(take)), bool(evidence), bool(bites)
+                ),
             },
             {"role": "user", "content": "\n\n".join(parts)},
         ],
@@ -722,8 +836,10 @@ def check_answer(
     spoken_events = set(event_of_unit.values())
 
     claims = evidence_claims(take)
-    allowed_types = cut_types(graphics, bool(claims))
+    bites = soundbites_of(take)
+    allowed_types = cut_types(graphics, bool(claims), bool(bites))
     claim_ids = {claim["id"] for claim in claims}
+    bite_ids = {bite["id"] for bite in bites}
 
     # The shape of each shot.
     parsed: list[dict[str, Any]] = []
@@ -754,12 +870,20 @@ def check_answer(
                     f"EVIDENCE: {', '.join(sorted(claim_ids))}."
                 )
             parsed[-1]["evidence_claim"] = claim_id
+        if kind == SOUNDBITE:
+            bite_id = entry.get("soundbite_claim")
+            if not isinstance(bite_id, str) or bite_id not in bite_ids:
+                raise ValueError(
+                    f'The "soundbite_claim" of shot {position} was not the id of a sound bite in '
+                    f"SOUND BITES: {', '.join(sorted(bite_ids))}."
+                )
+            parsed[-1]["soundbite_claim"] = bite_id
 
     if all(drawn_by_code(shot["type"]) for shot in parsed):
-        if claims:
+        if claims or bites:
             raise ValueError(
-                "Every shot of the scene was a graphic or evidence shot. Plan at least one "
-                "presenter or B-roll shot."
+                "Every shot of the scene was a graphic, evidence or soundbite shot. Plan at "
+                "least one presenter or B-roll shot."
             )
         raise ValueError(
             "Every shot of the scene was a graphic shot. Plan at least one presenter or B-roll "
@@ -779,9 +903,15 @@ def check_answer(
     # The evidence: every claim has its shots, or a reason from the fixed list.
     left_out = _check_evidence(answer, parsed, claims, len(words)) if claims else {}
 
+    # The sound bites: each has its one shot, on its words and no others.
+    if bites:
+        _check_soundbites(parsed, bites, len(words))
+
     # The times, and the length of each shot.
     times = cut_times(words, [shot["start_word"] for shot in parsed], float(take["seconds"]))
     for position, (shot, (start, end)) in enumerate(zip(parsed, times, strict=True), start=1):
+        if shot["type"] == SOUNDBITE:
+            continue  # it lasts as long as its clip, which the timeline says
         floor = float(target_min_seconds)
         if shot["type"] == GRAPHIC:
             floor = max(floor, SHORTEST_GRAPHIC_S)
@@ -800,6 +930,7 @@ def check_answer(
     event_spans: list[tuple[int, int]] = []
     shots: list[dict[str, Any]] = []
     pieces_by_claim = {claim["id"]: claim["pieces"] for claim in claims}
+    item_of_bite = {bite["id"]: bite["item_key"] for bite in bites}
     pieces_used: dict[str, int] = {}
     for position, (shot, (start, end)) in enumerate(zip(parsed, times, strict=True), start=1):
         first = shot["start_word"] - 1
@@ -820,6 +951,11 @@ def check_answer(
                     "item_key": pieces_by_claim[claim_id][piece - 1],
                     "piece": piece,
                 }
+            }
+        if shot["type"] == SOUNDBITE:
+            bite_id = shot["soundbite_claim"]
+            evidence_of_shot = {
+                "soundbite": {"claim_id": bite_id, "item_key": item_of_bite[bite_id]}
             }
         shots.append(
             {
@@ -855,7 +991,69 @@ def check_answer(
         content[SUGGESTIONS_KEY] = suggestion_results(answer, take["suggestions"], shots)
     if take.get("evidence"):
         content[EVIDENCE_KEY] = evidence_results(take["evidence"], shots, left_out)
+    if take.get("soundbites"):
+        content[SOUNDBITES_KEY] = soundbite_results(take["soundbites"], shots)
     return content
+
+
+def _check_soundbites(
+    parsed: list[dict[str, Any]], bites: list[dict[str, Any]], word_count: int
+) -> None:
+    """Checks the sound bite shots of an answer against the sound bites of the take (SB-008).
+    Each sound bite has exactly one shot of its own, starting on its first word, and the next
+    shot starts on the word after its last (a bite that ends the take has no next shot). The
+    start words rise, so no other shot can then start inside it. Raises ValueError."""
+    shots_of: dict[str, list[int]] = {}
+    for index, shot in enumerate(parsed):
+        if shot["type"] == SOUNDBITE:
+            shots_of.setdefault(shot["soundbite_claim"], []).append(index)
+    for bite in bites:
+        bite_id = bite["id"]
+        first, last = bite["words"][0] + 1, bite["words"][-1] + 1
+        indices = shots_of.get(bite_id, [])
+        if not indices:
+            raise ValueError(
+                f"The sound bite {bite_id} needs a soundbite shot that starts on word {first}."
+            )
+        if len(indices) > 1:
+            raise ValueError(f"The sound bite {bite_id} has {len(indices)} soundbite shots: one.")
+        index = indices[0]
+        if parsed[index]["start_word"] != first:
+            raise ValueError(
+                f"The soundbite shot {index + 1} of the sound bite {bite_id} starts on word "
+                f"{parsed[index]['start_word']}. It must start on word {first}, the first word "
+                "of the quote."
+            )
+        if last >= word_count:
+            continue
+        if index + 1 >= len(parsed) or parsed[index + 1]["start_word"] != last + 1:
+            raise ValueError(
+                f"The shot after the soundbite shot {index + 1} must start on word {last + 1}, "
+                f"the word after the quote of the sound bite {bite_id}."
+            )
+
+
+def soundbite_results(
+    bites: list[dict[str, Any]], shots: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """What became of each sound bite of the scene (SB-008), in story order:
+    `[{claim_id, text, planned, left_out, reason}]`. `planned` is whether the scene got its
+    soundbite shot; a quote that is not one run of words in the take got none (`NOT_IN_TAKE`) and
+    the narrator reads it."""
+    planned = {shot["soundbite"]["claim_id"] for shot in shots if shot["type"] == SOUNDBITE}
+    results: list[dict[str, Any]] = []
+    for bite in bites:
+        has_shot = bite["id"] in planned
+        results.append(
+            {
+                "claim_id": bite["id"],
+                "text": bite["text"],
+                "planned": has_shot,
+                "left_out": None if has_shot else NOT_IN_TAKE,
+                "reason": None if has_shot else SOUNDBITE_NOT_IN_TAKE_TEXT,
+            }
+        )
+    return results
 
 
 def _evidence_ranges(parsed: list[dict[str, Any]], word_count: int) -> list[tuple[int, int]]:
@@ -967,7 +1165,7 @@ def evidence_results(
     """What became of each claim of the scene (EVD-009), in story order:
     `[{claim_id, text, pieces, shown, left_out, reason}]`. `shown` is the number of evidence
     shots the claim got; `left_out` is the code of the reason (`LEFT_OUT_TEXT`, or `NOT_IN_TAKE`
-    or `ON_GRAPHIC`, set by code) and None for a claim that
+    or `ON_GRAPHIC` or `ON_SOUNDBITE`, set by code) and None for a claim that
     got a shot. A claim that got fewer shots than it has pieces says which are not shown in
     `shown` alone.
     """
@@ -983,6 +1181,8 @@ def evidence_results(
         reason: str | None = None
         if not claim["words"]:
             code, reason = NOT_IN_TAKE, NOT_IN_TAKE_TEXT
+        elif claim.get("on_soundbite"):
+            code, reason = ON_SOUNDBITE, ON_SOUNDBITE_TEXT
         elif claim_id in left_out:
             code, reason = left_out[claim_id]
         results.append(
@@ -1032,7 +1232,10 @@ def suggestion_results(
                 "id": suggestion["id"],
                 "text": suggestion["text"],
                 "followed": followed,
-                "reason": None if followed else reasons.get(suggestion["id"]),
+                # A reason that code set (the words are a sound bite's) comes first.
+                "reason": None
+                if followed
+                else suggestion.get("reason") or reasons.get(suggestion["id"]),
             }
         )
     return results

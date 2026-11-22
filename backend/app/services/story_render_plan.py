@@ -87,6 +87,8 @@ from app.services.take_map import NO_REPLACED, TakeMap, TakeMapError
 # Version 6 adds motion callouts (CMO-005): `callouts` gains `callout_style`, `look` and `theme`,
 # and an entry may have `motion` (the version it is drawn with, its box and the start of each
 # text). A version 5 timeline has none of them and is read as a track of boxes.
+# A sound bite shot (SB-008) adds a `soundbite` key to its shot's entry; the render job reads shots
+# by the keys it knows, so the version stays 6.
 TIMELINE_VERSION: Final = 6
 # The versions the render job reads.
 READABLE_TIMELINE_VERSIONS: Final = (5, 6)
@@ -122,6 +124,10 @@ MASTER_LRA: Final = 20.0
 # The crossfade at each edge of a presenter shot switched to its clip's own voice: the take fades
 # out (or in) over this long, inside the shot, while the clip's sound fades in (or out).
 VOICE_FADE_S: Final = 0.05
+# The take's own fade at each edge of a sound bite (SB-008): 10 ms, the lowest of the 10 to 30 ms
+# that §4.7 of `Sound_bite_implementation_phases.md` gives for speech edges. It is inside the
+# take's pieces, never reaching into the clip; SB-009 may change it.
+BITE_EDGE_FADE_S: Final = 0.01
 VOICE_TAKE: Final = "take"
 VOICE_CLIP: Final = "clip"
 
@@ -146,6 +152,8 @@ CAPTION_TIMING_ESTIMATED: Final = "caption_timing_estimated"
 # it; a line of dialogue is spoken inside a clip that is not there, so it is not heard; the scene
 # starts at an unknown place in the story because an earlier scene has no plan.
 SHOT_PLACEHOLDER: Final = "shot_placeholder"
+# The narrator's words under a sound bite's clip are left out of the captions (SB-008).
+SOUNDBITE_CAPTIONS_DROPPED: Final = "soundbite_captions_dropped"
 DIALOGUE_NOT_HEARD: Final = "dialogue_not_heard"
 SCENE_START_UNKNOWN: Final = "scene_start_unknown"
 
@@ -156,6 +164,8 @@ PLACEHOLDER_NO_GRAPHIC: Final = "No graphic yet"
 PLACEHOLDER_GRAPHIC_FILE_MISSING: Final = "Graphic file missing"
 PLACEHOLDER_NO_EVIDENCE: Final = "No evidence clip yet"
 PLACEHOLDER_EVIDENCE_FILE_MISSING: Final = "Evidence clip file missing"
+# A sound bite shot (SB-008) has no clip made for it yet: SB-009 makes it.
+PLACEHOLDER_NO_SOUNDBITE: Final = "Sound bite clip not made yet"
 # Only in the timing timeline of a provisional music placement (SCN-011): a clip that is shorter
 # than its shot counts as missing there, so the placement can still be made.
 PLACEHOLDER_CLIP_TOO_SHORT: Final = "Clip too short"
@@ -264,6 +274,16 @@ class SourceLineSource:
 
 
 @dataclass(frozen=True)
+class SoundbiteSource:
+    """The clip a sound bite shot plays (SB-008): the claim, the clip's item key and how long it
+    plays in the scene, in seconds (the owner's cut moved to whole frames)."""
+
+    claim_id: str
+    item_key: str
+    seconds: float
+
+
+@dataclass(frozen=True)
 class ShotSource:
     shot_id: str
     # Where the shot sits in its scene's timeline.
@@ -283,11 +303,15 @@ class ShotSource:
     evidence: EvidenceSource | None = None
     # The plan's one-sentence description of the shot, shown on its placeholder (SCN-003).
     description: str | None = None
+    # A sound bite shot (SB-008) plays a real person's clip, which SB-009 makes: until then it
+    # has no video, so a scene render shows a placeholder and a full render is refused.
+    is_soundbite: bool = False
+    soundbite: SoundbiteSource | None = None
 
     @property
     def is_drawn(self) -> bool:
-        """A graphic or an evidence shot: drawn by code, no take, no sound of its own."""
-        return self.is_graphic or self.is_evidence
+        """A graphic, an evidence or a sound bite shot: no take, no sound of its own from H3."""
+        return self.is_graphic or self.is_evidence or self.is_soundbite
 
     @property
     def drawn(self) -> GraphicSource | EvidenceSource | None:
@@ -593,15 +617,23 @@ def voice_pieces(
     the `(start, end)` samples, on the story's timeline, of the shots whose own voice is used: the
     take is silent for exactly those spans. `take_map` (at `rate` samples a second) says how far
     later than `take_start_sample + in_sample` a piece plays, because of the clips that replace
-    parts of the take (none yet, SB-002).
+    parts of the take (sound bites, SB-008).
 
     Each piece plays the part `in_sample` to `in_sample + length_samples` of the take at
     `start_sample` of the story. A piece that borders a clip span reaches `fade_samples` into it
     and fades out (or in) over that stretch, while the clip's own sound fades in (or out) over
     the same samples, so the cut between the two voices does not click. With no span the take is
     one piece with no fades. A take that starts outside the video has none.
+
+    A stretch the map replaces (a sound bite) is cut out of the take for good: no piece plays
+    any of it. The pieces beside it stop at its edge, never reaching into it, and fade over
+    `BITE_EDGE_FADE_S` inside themselves, so the cut makes no click and nothing of the take is
+    heard under the clip.
     """
-    length = min(take_samples, total_samples - take_start_sample)
+    bites = take_map.replaced_take_samples(rate)
+    # With a replaced span the take takes more room on the story than its own length, so the
+    # room is checked for each piece below.
+    length = take_samples if bites else min(take_samples, total_samples - take_start_sample)
     if length < 1:
         return []
     spans: list[list[int]] = []
@@ -614,22 +646,46 @@ def voice_pieces(
             spans[-1][1] = max(spans[-1][1], high)
         else:
             spans.append([low, high])
-    # The stretches of the take between the spans, each with whether a span lies before / after.
-    gaps: list[tuple[int, int, bool, bool]] = []
+    # Every stretch of the take that does not play as the take, in order: `(low, high, is_bite)`.
+    cuts: list[tuple[int, int, bool]] = [(low, high, False) for low, high in spans]
+    for low, high in bites:
+        low, high = max(0, low), min(length, high)
+        if high > low:
+            cuts.append((low, high, True))
+    cuts.sort()
+    # The stretches of the take between the cuts, each with the cut before / after it, if any.
+    gaps: list[tuple[int, int, bool | None, bool | None]] = []
     cursor = 0
-    for position, (low, high) in enumerate(spans):
-        gaps.append((cursor, low, position > 0, True))
+    for position, (low, high, bite) in enumerate(cuts):
+        gaps.append((cursor, low, cuts[position - 1][2] if position > 0 else None, bite))
         cursor = high
-    gaps.append((cursor, length, bool(spans), False))
+    gaps.append((cursor, length, cuts[-1][2] if cuts else None, None))
 
+    edge = round(BITE_EDGE_FADE_S * rate)
     pieces: list[dict[str, int]] = []
-    for gap_start, gap_end, has_before, has_after in gaps:
-        if gap_end <= gap_start and not (has_before and has_after):
+    for gap_start, gap_end, before, after in gaps:
+        # A clip span (False) is crossfaded into; a sound bite (True) is cut at its edge.
+        crossfades_before, crossfades_after = before is False, after is False
+        if gap_end <= gap_start and not (crossfades_before and crossfades_after):
             continue
-        start = max(0, gap_start - fade_samples) if has_before else gap_start
-        end = min(length, gap_end + fade_samples) if has_after else gap_end
+        start = max(0, gap_start - fade_samples) if crossfades_before else gap_start
+        end = min(length, gap_end + fade_samples) if crossfades_after else gap_end
+        if bites:
+            # The take's own place on the story, which the clips before it moved later.
+            room = total_samples - (
+                take_start_sample + start + take_map.bite_shift_samples_at(start, rate)
+            )
+            end = min(end, start + room)
         if end <= start:
             continue
+        if crossfades_before:
+            fade_in = min(fade_samples, gap_start - start)
+        else:
+            fade_in = min(edge, end - start) if before is True else 0
+        if crossfades_after:
+            fade_out = min(fade_samples, end - gap_end)
+        else:
+            fade_out = min(edge, end - start) if after is True else 0
         pieces.append(
             {
                 "in_sample": start,
@@ -637,8 +693,8 @@ def voice_pieces(
                 + start
                 + take_map.bite_shift_samples_at(start, rate),
                 "length_samples": end - start,
-                "fade_in_samples": min(fade_samples, gap_start - start) if has_before else 0,
-                "fade_out_samples": min(fade_samples, end - gap_end) if has_after else 0,
+                "fade_in_samples": fade_in,
+                "fade_out_samples": fade_out,
             }
         )
     return pieces
@@ -819,10 +875,30 @@ def _check_scenes(scenes: list[SceneSource]) -> None:
             raise RenderPlanError(f"{_scene_label(scene)} has no shots yet.")
 
 
+def _words_outside(
+    words: Sequence[tuple[str, float, float]],
+    unit_start_s: float,
+    windows: Sequence[tuple[float, float]],
+) -> tuple[tuple[str, float, float], ...]:
+    """The words of a unit that are not inside a window of its scene (a sound bite's shot).
+    `words` are `(text, start_s, end_s)` from the unit's start at `unit_start_s` of the scene; a
+    word is inside a window when its middle is strictly inside it. With no window, all words."""
+    if not windows:
+        return tuple(words)
+    return tuple(
+        word
+        for word in words
+        if not any(start < unit_start_s + (word[1] + word[2]) / 2 < end for start, end in windows)
+    )
+
+
 def placeholder_reason(shot: ShotSource) -> str | None:
     """Why a shot has nothing to show yet (a scene render puts a placeholder there), or None when
     its clip, or the video of its graphic, is there.
     """
+    if shot.is_soundbite:
+        # SB-009 makes the clip. Until then the shot always has none.
+        return PLACEHOLDER_NO_SOUNDBITE
     if shot.is_graphic:
         if shot.graphic is None:
             return PLACEHOLDER_NO_GRAPHIC
@@ -854,12 +930,15 @@ def _check_takes(scenes: list[SceneSource], *, placeholders: bool = False) -> No
     missing_graphic: list[str] = []
     without_evidence: list[str] = []
     missing_evidence: list[str] = []
+    without_soundbite: list[str] = []
     for scene in scenes:
         for shot in scene.shots:
             if placeholders and placeholder_reason(shot) is not None:
                 continue
             label = f"{shot.shot_id} of scene {scene.index}"
-            if shot.is_graphic:
+            if shot.is_soundbite:
+                without_soundbite.append(label)
+            elif shot.is_graphic:
                 if shot.graphic is None:
                     without_graphic.append(label)
                 elif not shot.graphic.file_exists:
@@ -873,6 +952,12 @@ def _check_takes(scenes: list[SceneSource], *, placeholders: bool = False) -> No
                 without_clip.append(label)
             elif not shot.take.file_exists:
                 missing_file.append(label)
+    if without_soundbite:
+        raise RenderPlanError(
+            f"These sound bite shots have no clip yet: {_named(without_soundbite)}. The clip of "
+            "a sound bite is made in a later step; until then only a scene render, which shows a "
+            "placeholder for it, can be made."
+        )
     if without_clip:
         raise RenderPlanError(
             f"These shots have no clip yet: {_named(without_clip)}. Generate them first."
@@ -1146,6 +1231,10 @@ def _build(
     # shots drawn split (EVD-016) are apart: a callout may start in them.
     graphic_spans: list[tuple[int, int]] = []
     split_spans: list[tuple[int, int]] = []
+    # The sound bite shots (SB-008): no callout is on screen over a real person's clip either, but
+    # the warning for a callout left out says so in its own words.
+    bite_spans: list[tuple[int, int]] = []
+    warned_bites: set[str] = set()
     narration: list[dict[str, Any]] = []
     narration_spans: list[tuple[float, float]] = []
     dialogue_spans: list[tuple[float, float]] = []
@@ -1172,6 +1261,9 @@ def _build(
         assert scene.story_start_s is not None  # `_check_scenes` made sure
         # The shots of this scene that have nothing to show yet (a scene render only).
         stand_ins: dict[str, str] = {}
+        # The sound bite shots of this scene, which the narrator's words are not heard in.
+        scene_bites = [candidate for candidate in scene.shots if candidate.is_soundbite]
+        bite_windows = [(candidate.start_s, candidate.end_s) for candidate in scene_bites]
         if placeholders:
             for candidate in scene.shots:
                 found = placeholder_reason(candidate)
@@ -1189,6 +1281,8 @@ def _build(
             label = f"{shot.shot_id} of scene {scene.index}"
             if frames < 1:
                 raise RenderPlanError(f"The shot {label} lasts less than one frame.")
+            if shot.is_soundbite:
+                bite_spans.append((start_ms, end_ms))
             needed = source_frames_needed(frames, fps)
             if short_clips_as_placeholders and shot.shot_id not in stand_ins:
                 # One source frame short is allowed, as below.
@@ -1204,7 +1298,7 @@ def _build(
                         else PLACEHOLDER_CLIP_TOO_SHORT
                     )
             if shot.shot_id in stand_ins:
-                if shot.is_drawn:
+                if shot.is_drawn and not shot.is_soundbite:
                     graphic_spans.append((start_ms, end_ms))
                 shots.append(
                     {
@@ -1231,6 +1325,19 @@ def _build(
                             "description": shot.description,
                             "seconds": round(frames / fps, 3),
                         },
+                        # Which clip the shot waits for and how long it plays, so a scene render
+                        # can tell that a new cut changed it (SB-008).
+                        **(
+                            {
+                                "soundbite": {
+                                    "claim_id": shot.soundbite.claim_id,
+                                    "item_key": shot.soundbite.item_key,
+                                    "seconds": shot.soundbite.seconds,
+                                }
+                            }
+                            if shot.soundbite is not None
+                            else {}
+                        ),
                     }
                 )
                 warnings.append(
@@ -1390,15 +1497,36 @@ def _build(
             )
             if captions is not None and timing is not None:
                 assert unit.audio_id is not None
-                timed_units.append(
-                    caption_plan.TimedUnit(
-                        scene_id=scene.scene_id,
-                        unit_id=unit.unit_id,
-                        audio_id=unit.audio_id,
-                        start_ms=_ms(start_s),
-                        words=timing.words,
+                # The narrator's words under a sound bite's clip are not heard, so they are not
+                # captioned either (SB-008).
+                caption_words = _words_outside(timing.words, unit.start_s, bite_windows)
+                if len(caption_words) < len(timing.words):
+                    for bite in scene_bites:
+                        if bite.shot_id not in warned_bites and any(
+                            bite.start_s < unit.start_s + (word[1] + word[2]) / 2 < bite.end_s
+                            for word in timing.words
+                        ):
+                            warned_bites.add(bite.shot_id)
+                            warnings.append(
+                                {
+                                    "code": SOUNDBITE_CAPTIONS_DROPPED,
+                                    "scene_id": scene.scene_id,
+                                    "shot_id": bite.shot_id,
+                                    "message": f"The words of the sound bite shot {bite.shot_id} "
+                                    f"of scene {scene.index} are left out of the captions: the "
+                                    "clip plays there, not the narrator.",
+                                }
+                            )
+                if caption_words or not timing.words:
+                    timed_units.append(
+                        caption_plan.TimedUnit(
+                            scene_id=scene.scene_id,
+                            unit_id=unit.unit_id,
+                            audio_id=unit.audio_id,
+                            start_ms=_ms(start_s),
+                            words=caption_words,
+                        )
                     )
-                )
                 if timing.estimated_now:
                     estimated_units.append(f"{unit.unit_id} of scene {scene.index}")
             if callouts is not None:
@@ -1563,6 +1691,7 @@ def _build(
             measure or font_metrics.measure,
             graphics=graphic_spans,
             splits=split_spans,
+            bites=bite_spans,
         )
         callouts_entry = callout_render.track_dict(resolution.track)
         callouts_entry["plan_id"] = callouts.plan_id

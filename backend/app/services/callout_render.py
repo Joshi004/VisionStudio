@@ -666,6 +666,30 @@ def _named(labels: list[str]) -> str:
     return shown if len(labels) <= 5 else f"{shown} and {len(labels) - 5} more"
 
 
+def _clear_of(
+    candidates: list[_Placed], spans: Sequence[tuple[int, int]], dropped: list[str]
+) -> list[_Placed]:
+    """The callouts that are clear of `spans` (the shots of graphics, evidence or sound bites):
+    one that starts inside a span is left out, and one that would run into the next span ends
+    `CUT_BEFORE_NEXT_MS` before it, or is left out when it would then show for less than
+    `MIN_VISIBLE_MS`. The labels of the callouts left out are added to `dropped`."""
+    clear: list[_Placed] = []
+    for placed in candidates:
+        if any(start <= placed.start_ms < end for start, end in spans):
+            dropped.append(_label(placed.callout))
+            continue
+        next_span = min((start for start, _end in spans if start > placed.start_ms), default=None)
+        if next_span is not None:
+            cut = next_span - CUT_BEFORE_NEXT_MS
+            if placed.natural_end_ms > cut:
+                if cut - placed.start_ms < MIN_VISIBLE_MS:
+                    dropped.append(_label(placed.callout))
+                    continue
+                placed.natural_end_ms = cut
+        clear.append(placed)
+    return clear
+
+
 def resolve(
     source: CalloutSource,
     units: Sequence[CalloutUnit],
@@ -677,6 +701,7 @@ def resolve(
     measure: Measure,
     graphics: Sequence[tuple[int, int]] = (),
     splits: Sequence[tuple[int, int]] = (),
+    bites: Sequence[tuple[int, int]] = (),
 ) -> Resolution:
     """The callout track of a render, and its warnings. `shots` and `dialogue` are
     `(start_ms, end_ms)` spans on the story's timeline, and `total_ms` is the length of the video.
@@ -684,6 +709,10 @@ def resolve(
     that starts inside one is left out, and one that would run into one ends `CUT_BEFORE_NEXT_MS`
     before it, or is left out when it would then show for less than `MIN_VISIBLE_MS`. Without
     graphics, nothing changes.
+
+    `bites` are the spans of the sound bite shots (SB-008), handled as `graphics` are, but named in
+    a sentence of their own: a callout over a real person's clip would hide the clip. Without
+    sound bites, nothing changes.
 
     `splits` are the spans of the evidence shots drawn split (EVD-016). A callout that starts
     inside one is kept, drawn in the callout panel and ended with the shot (it is left out, with
@@ -708,28 +737,15 @@ def resolve(
         candidates.append(placed)
     candidates.sort(key=lambda item: item.start_ms)
 
+    on_bite: list[str] = []
+    if bites:
+        candidates = _clear_of(candidates, bites, on_bite)
     on_graphic: list[str] = []
     if graphics:
-        clear: list[_Placed] = []
-        for placed in candidates:
-            if any(start <= placed.start_ms < end for start, end in graphics):
-                on_graphic.append(_label(placed.callout))
-                continue
-            next_graphic = min(
-                (start for start, _end in graphics if start > placed.start_ms), default=None
-            )
-            if next_graphic is not None:
-                cut = next_graphic - CUT_BEFORE_NEXT_MS
-                if placed.natural_end_ms > cut:
-                    if cut - placed.start_ms < MIN_VISIBLE_MS:
-                        on_graphic.append(_label(placed.callout))
-                        continue
-                    placed.natural_end_ms = cut
-            clear.append(placed)
-        candidates = clear
+        candidates = _clear_of(candidates, graphics, on_graphic)
 
     if splits:
-        clear = []
+        clear: list[_Placed] = []
         for placed in candidates:
             inside = next(((s, e) for s, e in splits if s <= placed.start_ms < e), None)
             if inside is not None:
@@ -818,13 +834,18 @@ def resolve(
                 f"show where their line starts: {_named(guessed)}.",
             }
         )
-    if lost or on_graphic:
+    if lost or on_graphic or on_bite:
         # One warning, so a render's warnings keep one entry for the code.
         sentences: list[str] = []
         if lost:
             sentences.append(
                 "These callouts are left out because they would overlap another "
                 f"callout, or have no place in the video: {_named(lost)}."
+            )
+        if on_bite:
+            sentences.append(
+                "These callouts are left out because they fall on a sound bite, where a real "
+                f"person's clip plays: {_named(on_bite)}."
             )
         if on_graphic:
             sentences.append(

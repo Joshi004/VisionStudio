@@ -538,7 +538,32 @@ async def scene_sources(
                     for shot in entry.row.content["shots"]
                     if shot.get("type") == scene_timeline.EVIDENCE_SHOT_TYPE
                 }
+            # The sound bite shots (SB-008) have no take either: SB-009 makes their clip.
+            bite_ids = {
+                str(shot["id"]): shot["soundbite"]
+                for shot in (entry.row.content["shots"] if entry.row is not None else [])
+                if shot.get("type") == scene_timeline.SOUNDBITE_SHOT_TYPE
+                and isinstance(shot.get("soundbite"), dict)
+            }
             for span in entry.timeline.shots:
+                if span.shot_id in bite_ids:
+                    bite = bite_ids[span.shot_id]
+                    shots.append(
+                        story_render_plan.ShotSource(
+                            shot_id=span.shot_id,
+                            start_s=span.start_s,
+                            end_s=span.end_s,
+                            take=None,
+                            is_soundbite=True,
+                            soundbite=story_render_plan.SoundbiteSource(
+                                claim_id=str(bite["claim_id"]),
+                                item_key=str(bite["item_key"]),
+                                seconds=round(span.end_s - span.start_s, 3),
+                            ),
+                            description=descriptions.get(span.shot_id),
+                        )
+                    )
+                    continue
                 if span.shot_id in graphic_ids:
                     # No take (EXG-007): the video is the one the graphic rule picks.
                     shots.append(

@@ -282,6 +282,30 @@ def _music_reasons(recorded: dict[str, Any], context: _Context) -> list[str]:
     return reasons
 
 
+def _soundbite_reasons(
+    shot: dict[str, Any], entry: shot_plans.SceneEntry, shot_label: str
+) -> list[str]:
+    """Why a recorded sound bite shot (SB-008) is not what the cut plan and the timeline have
+    now: its clip changed, or its cut was trimmed again so it plays for another time. Its
+    placeholder has nothing else to go out of date until SB-009 makes the clip."""
+    recorded = shot["soundbite"]
+    current = None
+    if entry.row is not None:
+        for planned in entry.row.content.get("shots") or []:
+            if isinstance(planned, dict) and planned.get("id") == shot.get("shot_id"):
+                current = planned.get("soundbite")
+    spans = entry.timeline.shots if entry.timeline is not None else []
+    span = next((item for item in spans if item.shot_id == shot.get("shot_id")), None)
+    if not isinstance(current, dict) or span is None:
+        return [f"{shot_label} is no longer a sound bite shot."]
+    if current.get("item_key") != recorded.get("item_key"):
+        return [f"{shot_label} plays another clip now."]
+    seconds = recorded.get("seconds")
+    if isinstance(seconds, int | float) and abs(seconds - (span.end_s - span.start_s)) > 0.001:
+        return [f"{shot_label} plays a clip that was trimmed again since this video was made."]
+    return []
+
+
 def _scene_reasons(
     row: SceneRender,
     entry: shot_plans.SceneEntry | None,
@@ -320,6 +344,9 @@ def _scene_reasons(
             continue
         if isinstance(shot.get("evidence"), dict):
             reasons.extend(story_renders.evidence_reasons(shot, context.evidence))
+            continue
+        if isinstance(shot.get("soundbite"), dict):
+            reasons.extend(_soundbite_reasons(shot, entry, shot_label))
             continue
         now = shots_now.get(key)
         if now is None:

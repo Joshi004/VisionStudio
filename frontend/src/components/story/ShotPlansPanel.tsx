@@ -259,6 +259,27 @@ function EntryRow({
               ))}
             </Stack>
           )}
+          {entry.shots !== null &&
+            entry.shots.soundbites.some((result) => !result.planned) && (
+              <Stack gap={2}>
+                <Text size="xs" fw={500}>
+                  Sound bites left to the narrator
+                </Text>
+                {entry.shots.soundbites
+                  .filter((result) => !result.planned)
+                  .map((result) => (
+                    <Text key={result.claim_id} size="xs">
+                      <Text span fs="italic">
+                        “{result.text}”
+                      </Text>
+                      <Text span c="dimmed">
+                        {" "}
+                        — {result.reason ?? "No reason given."}
+                      </Text>
+                    </Text>
+                  ))}
+              </Stack>
+            )}
           {triesUsed && (
             <Text size="xs" c="dimmed">
               {replanMaxTries === 0

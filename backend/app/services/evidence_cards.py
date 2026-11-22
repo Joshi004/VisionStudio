@@ -16,7 +16,8 @@ numbers as `ShotSpan.start_s` and `end_s`.
 - A card is at least `MIN_CARD_S` long, and at most `MAX_CARD_S`, and runs `TAIL_S` past the claim's
   last word when there is room. With less than `MIN_CARD_S` of room after the first word, it
   starts up to `MAX_LEAD_S` before it.
-- A card is only over shots that are not drawn: never over a graphic or an evidence shot. It ends
+- A card is only over shots that are not drawn: never over a graphic, an evidence or a sound bite
+  shot. It ends
   `GAP_S` before the next one, and at the end of the scene. It may cross a cut between two other
   shots.
 - A claim whose first word is on a graphic shot and that has no evidence shot of its own gets a
@@ -44,6 +45,8 @@ MAX_LEAD_S: Final = 1.0
 
 GRAPHIC: Final = "graphic"
 EVIDENCE: Final = "evidence"
+# A sound bite's clip (SB-008) is on screen like a drawn shot: no card is ever over it.
+SOUNDBITE: Final = "soundbite"
 
 NO_ROOM: Final = "no_room"
 TOO_LATE: Final = "too_late"
@@ -86,7 +89,7 @@ class Slot:
 
     @property
     def drawn(self) -> bool:
-        return self.type in (GRAPHIC, EVIDENCE)
+        return self.type in (GRAPHIC, EVIDENCE, SOUNDBITE)
 
 
 @dataclass(frozen=True)

@@ -278,7 +278,7 @@ Planning in SB-001 decides the names. The feature needs:
 | SB-005 | Marking sound bites and the script rules | Code | SB-001 | Completed (2026-11-22) |
 | SB-006 | Importing clips: transcription, fidelity, trim, flags | Code | SB-001, SB-003 | Completed (2026-11-22) |
 | SB-007 | The review screen for sound bites | Code | SB-006 | Completed (2026-11-22) |
-| SB-008 | Sound bite shots in the cut plan and the timeline | Code | SB-002, SB-007 | Not Started |
+| SB-008 | Sound bite shots in the cut plan and the timeline | Code | SB-002, SB-007 | Completed (2026-11-22) |
 | SB-009 | The sound bite in the render | Code | SB-008 | Not Started |
 | SB-010 | The Nvidia explainer end to end | Owner | SB-004, SB-005, SB-009 | Not Started |
 | SB-011 | Insert mode: cold open, montage, back-ID | Code, later | SB-010 | Deferred |
@@ -292,7 +292,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 6 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007); 1 in progress (SB-004, Claude Code run pending).
+**Progress snapshot:** 7 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008); 1 in progress (SB-004, Claude Code run pending).
 
 ---
 
@@ -620,7 +620,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-008 — Sound bite shots in the cut plan and the timeline
 
-**Status:** Not Started
+**Status:** Completed (2026-11-22)
 
 **Objective.** Each accepted sound bite gets its own shot on the quote's words, and the timeline gives that shot the clip's length.
 
@@ -645,13 +645,24 @@ Planning in SB-001 decides the names. The feature needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] `soundbite` shot type and planner rule
-- [ ] Replaced spans in the mapping
-- [ ] Captions, callouts, evidence, graphics
-- [ ] Out-of-date rules
-- [ ] Standard checks
+- [x] `soundbite` shot type and planner rule
+- [x] Replaced spans in the mapping
+- [x] Captions, callouts, evidence, graphics
+- [x] Out-of-date rules
+- [x] Standard checks
+- [ ] Identity check of a project without sound bites on a snapshot of the real database (asked of the owner first; not run by the agent)
 
-**Completion notes.** _To be filled in._
+**Completion notes** (2026-11-22).
+- **Decisions of planning (owner's).** (1) **The bite's length is exactly the accepted cut** `out_s - in_s`, rounded to whole frames at 24 fps (`frame_time`); SB-009 only fades inside it and never changes the timeline. (2) **The planner is told each bite as a fixed shot** and `check_answer` refuses any other placement; code does not split a planned shot afterwards.
+- **What was built.** `evidence_review.shown_soundbites` (same gate as `shown_claims`; accepted, shown `video` clips of sound bite claims, with the cut's length) feeds `shot_plans._prepare`, which adds `take["soundbites"]` (each quote's word positions; `[]` when the quote is not one unbroken run in the take, overlaps an earlier bite or runs past the scene) and `inputs.soundbites_sha256`. `cut_planning_writer` adds the type `soundbite` (only known when the take has a bite), the `SOUND BITES (JSON)` block, the `soundbite_claim` mark on each quote word, `_check_soundbites` and `content.soundbites`. `scene_timeline.SOUNDBITE_SHOT_TYPE` is in `DRAWN_SHOT_TYPES`, so `shot_definitions`, `music_cues` and `shot_continuity_writer` treat it as a drawn shot with no further change. `shot_plans._take_map_of` builds the map's replaced spans from the plan's `soundbite` shots and the clips' lengths (a bite whose clip is not current gets the narrator's own length, so the timeline never fails). `take_map.place_s` puts a time that falls inside a replaced span at the same share of the clip window and never raises; `is_word_replaced` and `replaced_take_samples` are the other additions; `elapsed_s` keeps the old formula when no time is inside a span.
+- **Everything that reads times follows.** Scene totals, story offsets, units, captions, callouts, evidence cards and source lines go through the map. Evidence claims on a quote that is a sound bite are `on_soundbite` and get no evidence shot, card or source line; a graphic suggestion on bite words loses those words (and says why when none are left), so a graphic shot is never planned over a quote. A callout that starts inside a bite is dropped with a warning (`callout_render.resolve(..., bites=)`, and the cut-plan split in `_split_shots`); no callout shows over a bite either. The narrator's words under a bite are left out of the captions (warning `soundbite_captions_dropped`; callouts still match against the full words).
+- **The scene render.** A bite shot is a placeholder of the clip's length ("Sound bite clip not made yet") that carries `soundbite {claim_id, item_key, seconds}`; a full render is refused while a scene has one ("These sound bite shots have no clip yet"). `voice_pieces` cuts the take at every replaced span: no piece plays any of it, and the pieces beside it fade over 10 ms (`BITE_EDGE_FADE_S`, inside the take, never into the clip; SB-009 may change it) with their start moved by the clips before them; without a bite the pieces are the same as before. A scene render goes out of date when a bite's clip or length changed ("... plays a clip that was trimmed again since this video was made."). The frozen timeline is still version 6 (the new key is only present for a bite).
+- **Out-of-date rules.** The plan is out of date when a bite is accepted, rejected, no longer shown, or its item or words change (`inputs.soundbites_sha256`, "The sound bites of this scene changed since these shots were planned."). A new trim changes only the timeline, so the plan stays current and the scene render goes out of date.
+- **API and screen.** `"soundbite"` is in the six `ShotType` literals; `ShotSoundbiteOut` on `ShotOut` and `soundbites` on the plan entry; `schema.d.ts` regenerated from the app's own OpenAPI document (only these additions); the plans panel lists each quote left to the narrator with the reason; `SHOT_TYPE.soundbite` is labelled "Sound bite" and cannot be chosen when editing a shot.
+- **Known limitation.** The shot after a bite cannot be merged into another, so a bite followed by a very short final sentence can make a plan fail the minimum shot length check; the plan is then refused with that reason (the planner may succeed on a retry; otherwise the quote's place in the story has to change).
+- **Checked** (2026-11-22; throwaway scripts on a throwaway `DATA_DIR`, removed afterwards; no real data touched). On a take of 30 s with two bites (4 s and 6 s clips for cuts of 4 s each): the planner accepts the correct answer and refuses a plan with no bite shot, a bite shot on the wrong word, a late next shot, two shots for one bite, and the type itself when the take has no bite; the scene is 2.0 s longer, exactly the sum of the shifts, every later shot moves by the right amount, a bite shot is exactly its clip's length, there are no timeline problems; 22 of 30 words of the unit remain in the captions; the voice pieces leave out both bites exactly, have the 10 ms fades beside them and start where the timeline says; a scene render plan with two bites has the bite entries, both warnings and the full render's refusal; with no replaced span `voice_pieces` gives the old pieces. `ruff check`, `ruff format --check` (backend), `eslint` and `tsc -b` (frontend) pass.
+- **Not checked.** (1) The identity check of a project with no sound bites on a snapshot of the real database (asked of the owner; not run). By construction no new key, hash input or timeline value appears without a bite. (2) `shot_plans._prepare` and the out-of-date reads were checked by reading, not run against a database with accepted clips; nor were a real planner call (the model's answer to the new block) or `callout_render.resolve` with a bite. (3) The planning screen in a browser (the new "left to the narrator" lines).
+- **Not done by the agent:** the real app was not rebuilt or touched; rebuild with `docker compose up --build -d` (never `down -v`) to apply this phase. SB-009 will find a `soundbite` shot with no clip and give it its picture and sound.
 
 ### SB-009 — The sound bite in the render
 
@@ -799,3 +810,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | 2026-11-22 | SB-005 | Completed: `services/soundbite_rules.py` (block on whole sentences in quotation marks; warnings for lead-in, attribution, parroting, filler; number hint), worked out on read in `evidence_claims.state()`, enforced in `update_claim`, a broken sound bite holds back the brief; "Sound bite" controls on the claim card. No migration. |
 | 2026-11-22 | SB-006 | Completed: the import reads `video` pieces (media checks), `transcribe_evidence_clip` job and handler, `services/soundbite_analysis.py` (fidelity, trim, flags), read-only clip panel and "Transcribe again" in the review; no migration. Verified on a throwaway app with a fake GPU server; Parakeet checked on five real clips (words right, word times off by 0.1 to 0.3 s, so the trim is searched in the audio; the "quiet" limit was tuned from them). |
 | 2026-11-22 | SB-007 | Completed: the review of a sound bite clip (`SoundbiteClipPanel.tsx`, `SoundbitePlayer.tsx`): player with the cut marked, word-by-word trim whose cut the server finds in the clip's audio (`trim_for`, `GET .../review/items/{item_key}/trim`), lower third fields, confirmed recording date, flags to tick, rights note; `evidence_review.check_clip` and the `soundbite` object in `evidence_review.content`; clips are left out of `shown_claims` until SB-008. No migration. Verified on a throwaway app with real clips and made-up word times. |
+| 2026-11-22 | SB-008 | Completed: `soundbite` shot type (fixed in the planner's request, refused otherwise), `shown_soundbites`, `inputs.soundbites_sha256`, replaced spans filled from the clips' cut lengths, `take_map.place_s`, the take cut at each bite in `voice_pieces`, narrator captions and callouts dropped under a bite, scene render placeholder for the bite, `ShotType` literals and `schema.d.ts`, plans panel lines. No migration. Verified on throwaway scripts (pure functions); the identity check on a real snapshot is pending the owner's go-ahead. |

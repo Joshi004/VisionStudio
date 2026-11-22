@@ -14325,7 +14325,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -14852,7 +14852,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -16509,7 +16509,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Target Duration */
             target_duration: number;
             /**
@@ -16749,7 +16749,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Target Duration */
             target_duration: number;
             /**
@@ -16777,6 +16777,7 @@ export interface components {
             /** Spoken Text */
             spoken_text?: string | null;
             evidence?: components["schemas"]["ShotEvidenceOut"] | null;
+            soundbite?: components["schemas"]["ShotSoundbiteOut"] | null;
         };
         /** ShotPlacementOut */
         ShotPlacementOut: {
@@ -16809,6 +16810,11 @@ export interface components {
              * @default []
              */
             evidence: components["schemas"]["EvidenceResultOut"][];
+            /**
+             * Soundbites
+             * @default []
+             */
+            soundbites: components["schemas"]["SoundbiteResultOut"][];
         };
         /** ShotPlanEditIn */
         ShotPlanEditIn: {
@@ -17149,7 +17155,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -17225,7 +17231,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Description */
             description: string;
             /** Source Event Ids */
@@ -17238,6 +17244,13 @@ export interface components {
             start_seconds: number | null;
             /** Place */
             place?: string | null;
+        };
+        /** ShotSoundbiteOut */
+        ShotSoundbiteOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Item Key */
+            item_key: string;
         };
         /** ShotSpanOut */
         ShotSpanOut: {
@@ -17681,6 +17694,23 @@ export interface components {
             start: number;
             /** End */
             end: number;
+        };
+        /**
+         * SoundbiteResultOut
+         * @description What became of one sound bite of a scene (SB-008): it got its shot (`planned`), or it did
+         *     not, and `left_out` is a code and `reason` a sentence.
+         */
+        SoundbiteResultOut: {
+            /** Claim Id */
+            claim_id: string;
+            /** Text */
+            text: string;
+            /** Planned */
+            planned: boolean;
+            /** Left Out */
+            left_out?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * SoundbiteTranscriptionOut
@@ -18907,7 +18937,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic" | "evidence" | "soundbite";
             /** Description */
             description: string;
             /** Duration Seconds */

@@ -63,6 +63,7 @@ ShotType = Literal[
     "presenter",
     "graphic",
     "evidence",
+    "soundbite",
 ]
 
 
@@ -72,6 +73,11 @@ ShotType = Literal[
 class ShotEvidenceOut(BaseModel):
     claim_id: str
     piece: int
+
+
+class ShotSoundbiteOut(BaseModel):
+    claim_id: str
+    item_key: str
 
 
 class ShotOut(BaseModel):
@@ -106,6 +112,9 @@ class ShotOut(BaseModel):
     # EVD-009: only an evidence shot has this: the claim it proves and which of the claim's
     # chosen pieces (counted from 1) it shows.
     evidence: ShotEvidenceOut | None = None
+    # SB-008: only a sound bite shot has this: the claim whose quote it plays and the item (the
+    # video) its clip is cut from.
+    soundbite: ShotSoundbiteOut | None = None
 
 
 class EvidenceResultOut(BaseModel):
@@ -117,6 +126,17 @@ class EvidenceResultOut(BaseModel):
     text: str
     pieces: int
     shown: int
+    left_out: str | None = None
+    reason: str | None = None
+
+
+class SoundbiteResultOut(BaseModel):
+    """What became of one sound bite of a scene (SB-008): it got its shot (`planned`), or it did
+    not, and `left_out` is a code and `reason` a sentence."""
+
+    claim_id: str
+    text: str
+    planned: bool
     left_out: str | None = None
     reason: str | None = None
 
@@ -140,6 +160,8 @@ class ShotPlanContentOut(BaseModel):
     graphic_suggestions: list[GraphicSuggestionResultOut] = []
     # Only a plan made for a scene with evidence to show has them (EVD-009).
     evidence: list[EvidenceResultOut] = []
+    # Only a plan made for a scene with sound bites has them (SB-008).
+    soundbites: list[SoundbiteResultOut] = []
 
 
 # --- The stage's state ----------------------------------------------------------------------
