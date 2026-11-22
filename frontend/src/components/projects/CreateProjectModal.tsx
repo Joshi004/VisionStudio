@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -14,15 +14,28 @@ import {
 } from "@mantine/core";
 import { useNavigate } from "react-router";
 
-import { useLibraryCharacters } from "../../api/characterLab";
-import { useLibraryEnvironments } from "../../api/environmentLab";
-import { describeError } from "../../api/errors";
+import {
+  useCharacterOutfits,
+  useLibraryCharacter,
+  useLibraryCharacters,
+} from "../../api/characterLab";
+import { useLibraryEnvironment, useLibraryEnvironments } from "../../api/environmentLab";
+import { ApiError, describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
 import { PresenterOutfitField } from "./PresenterOutfitField";
 import { CALLOUT_STYLES, isCalloutStyle } from "./calloutStyles";
 import type { CalloutStyle } from "./calloutStyles";
 import { CAPTION_MODES, isCaptionMode } from "./captionModes";
 import type { CaptionMode } from "./captionModes";
+import {
+  DEFAULT_SETTINGS,
+  clearLastSettings,
+  readLastSettings,
+  writeLastSettings,
+} from "./lastProjectSettings";
+import type { NewProjectSettings } from "./lastProjectSettings";
+import { ORIENTATIONS, isOrientation } from "./orientations";
+import type { Orientation } from "./orientations";
 import { PROJECT_KINDS, STAGING_MAX_CHARS, isProjectKind } from "./projectKinds";
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
@@ -32,15 +45,17 @@ import type { TakeSource } from "./takeSources";
 import { DELIVERY_MAX_CHARS, VOICE_TRACKS, isVoiceTrack } from "./voiceTracks";
 import type { VoiceTrack } from "./voiceTracks";
 
-const ORIENTATIONS = [
-  { value: "landscape", label: "Landscape", size: "1920 x 1080" },
-  { value: "portrait", label: "Portrait", size: "1080 x 1920" },
-] as const;
-
-type Orientation = (typeof ORIENTATIONS)[number]["value"];
-
-function isOrientation(value: string): value is Orientation {
-  return ORIENTATIONS.some((option) => option.value === value);
+/** A character can present only with a saved voice, a visible mouth and a finished look. */
+function canPresent(character: {
+  voice: object | null;
+  has_visible_mouth: boolean;
+  current_look: { status: string } | null;
+}): boolean {
+  return (
+    character.voice !== null &&
+    character.has_visible_mouth &&
+    character.current_look?.status === "ready"
+  );
 }
 
 /**
@@ -63,6 +78,59 @@ function PresenterFields({
   const characterItems = (characters.data?.pages ?? []).flatMap((page) => page.characters);
   const environmentItems = (environments.data?.pages ?? []).flatMap((page) => page.environments);
 
+  // A presenter or set from the last project may be past the first page of the list, so it is
+  // loaded by its id. One that was deleted, archived or is no longer usable is cleared.
+  const listedCharacter = characterItems.find((item) => String(item.id) === presenterId);
+  const savedCharacter = useLibraryCharacter(
+    presenterId !== null && characters.isSuccess && listedCharacter === undefined
+      ? Number(presenterId)
+      : null,
+  );
+  const presenter = listedCharacter ?? savedCharacter.data;
+  const presenterGone =
+    presenter !== undefined
+      ? presenter.archived || !canPresent(presenter)
+      : savedCharacter.error instanceof ApiError && savedCharacter.error.status === 404;
+  useEffect(() => {
+    if (presenterGone) {
+      onPresenter(null);
+    }
+  }, [presenterGone, onPresenter]);
+
+  const listedEnvironment = environmentItems.find((item) => String(item.id) === setId);
+  const savedEnvironment = useLibraryEnvironment(
+    setId !== null && environments.isSuccess && listedEnvironment === undefined
+      ? Number(setId)
+      : null,
+  );
+  const set = listedEnvironment ?? savedEnvironment.data;
+  const setGone =
+    set !== undefined
+      ? set.archived || set.image === null
+      : savedEnvironment.error instanceof ApiError && savedEnvironment.error.status === 404;
+  useEffect(() => {
+    if (setGone) {
+      onSet(null);
+    }
+  }, [setGone, onSet]);
+
+  const characterOptions = characterItems.map((character) => ({
+    value: String(character.id),
+    label: character.name,
+    disabled: !canPresent(character),
+  }));
+  if (listedCharacter === undefined && presenter !== undefined && !presenterGone) {
+    characterOptions.push({ value: String(presenter.id), label: presenter.name, disabled: false });
+  }
+  const environmentOptions = environmentItems.map((environment) => ({
+    value: String(environment.id),
+    label: environment.name,
+    disabled: environment.image === null,
+  }));
+  if (listedEnvironment === undefined && set !== undefined && !setGone) {
+    environmentOptions.push({ value: String(set.id), label: set.name, disabled: false });
+  }
+
   return (
     <>
       <Select
@@ -72,14 +140,7 @@ function PresenterFields({
         searchable
         value={presenterId}
         onChange={onPresenter}
-        data={characterItems.map((character) => ({
-          value: String(character.id),
-          label: character.name,
-          disabled:
-            character.voice === null ||
-            !character.has_visible_mouth ||
-            character.current_look?.status !== "ready",
-        }))}
+        data={characterOptions}
         error={characters.isError ? describeError(characters.error) : undefined}
         nothingFoundMessage="No characters"
       />
@@ -101,11 +162,7 @@ function PresenterFields({
         searchable
         value={setId}
         onChange={onSet}
-        data={environmentItems.map((environment) => ({
-          value: String(environment.id),
-          label: environment.name,
-          disabled: environment.image === null,
-        }))}
+        data={environmentOptions}
         error={environments.isError ? describeError(environments.error) : undefined}
         nothingFoundMessage="No environments"
       />
@@ -127,23 +184,60 @@ function PresenterFields({
 function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const create = useCreateProject();
-  const [orientation, setOrientation] = useState<Orientation | null>(null);
-  const [speechMode, setSpeechMode] = useState<SpeechMode>("both");
-  const [kind, setKind] = useState<ProjectKind>("story");
-  const [presenterId, setPresenterId] = useState<string | null>(null);
-  const [setId, setSetId] = useState<string | null>(null);
-  const [captionMode, setCaptionMode] = useState<CaptionMode>("burned");
-  const [callouts, setCallouts] = useState(true);
-  const [calloutStyle, setCalloutStyle] = useState<CalloutStyle>("boxes");
-  const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
-  const [takeSource, setTakeSource] = useState<TakeSource>("generated");
-  const [delivery, setDelivery] = useState("");
-  const [staging, setStaging] = useState("");
-  const [outfit, setOutfit] = useState("");
-  const [outfitId, setOutfitId] = useState<number | null>(null);
-  const [graphics, setGraphics] = useState(true);
-  const [evidence, setEvidence] = useState(true);
+  // The settings of the last project that was created; the name is always new.
+  const [initial] = useState(readLastSettings);
+  const [orientation, setOrientation] = useState<Orientation | null>(initial.orientation);
+  const [speechMode, setSpeechMode] = useState<SpeechMode>(initial.speechMode);
+  const [kind, setKind] = useState<ProjectKind>(initial.kind);
+  const [presenterId, setPresenterId] = useState<string | null>(initial.presenterId);
+  const [setId, setSetId] = useState<string | null>(initial.setId);
+  const [captionMode, setCaptionMode] = useState<CaptionMode>(initial.captionMode);
+  const [callouts, setCallouts] = useState(initial.callouts);
+  const [calloutStyle, setCalloutStyle] = useState<CalloutStyle>(initial.calloutStyle);
+  const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>(initial.voiceTrack);
+  const [takeSource, setTakeSource] = useState<TakeSource>(initial.takeSource);
+  const [delivery, setDelivery] = useState(initial.delivery);
+  const [staging, setStaging] = useState(initial.staging);
+  const [outfit, setOutfit] = useState(initial.outfit);
+  const [outfitId, setOutfitId] = useState<number | null>(initial.outfitId);
+  const [graphics, setGraphics] = useState(initial.graphics);
+  const [evidence, setEvidence] = useState(initial.evidence);
   const [name, setName] = useState("");
+
+  // A saved outfit is only kept while it is still one of the presenter's saved outfits.
+  const presenterOutfits = useCharacterOutfits(presenterId === null ? null : Number(presenterId));
+  const savedOutfits = presenterOutfits.data;
+  const outfitIsGone =
+    outfitId !== null &&
+    savedOutfits !== undefined &&
+    !savedOutfits.some((item) => item.id === outfitId);
+  if (outfitIsGone) {
+    setOutfitId(null);
+  }
+
+  function applySettings(settings: NewProjectSettings) {
+    setOrientation(settings.orientation);
+    setSpeechMode(settings.speechMode);
+    setKind(settings.kind);
+    setPresenterId(settings.presenterId);
+    setSetId(settings.setId);
+    setCaptionMode(settings.captionMode);
+    setCallouts(settings.callouts);
+    setCalloutStyle(settings.calloutStyle);
+    setVoiceTrack(settings.voiceTrack);
+    setTakeSource(settings.takeSource);
+    setDelivery(settings.delivery);
+    setStaging(settings.staging);
+    setOutfit(settings.outfit);
+    setOutfitId(settings.outfitId);
+    setGraphics(settings.graphics);
+    setEvidence(settings.evidence);
+  }
+
+  function resetToDefaults() {
+    clearLastSettings();
+    applySettings(DEFAULT_SETTINGS);
+  }
 
   // Motion callouts are only for a continuous explainer with graphics and callouts on.
   const canChooseCalloutStyle =
@@ -190,6 +284,24 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
       },
       {
         onSuccess: (project) => {
+          writeLastSettings({
+            orientation,
+            kind,
+            speechMode,
+            presenterId,
+            setId,
+            staging,
+            outfitId,
+            outfit,
+            voiceTrack,
+            takeSource,
+            delivery,
+            graphics,
+            evidence,
+            captionMode,
+            callouts,
+            calloutStyle,
+          });
           onClose();
           void navigate(`/projects/${project.id}`);
         },
@@ -482,13 +594,23 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
 
         {create.isError && <Alert color="red">{describeError(create.error)}</Alert>}
 
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onClose} disabled={create.isPending}>
-            Cancel
+        <Group justify="space-between">
+          <Button
+            variant="subtle"
+            color="gray"
+            onClick={resetToDefaults}
+            disabled={create.isPending}
+          >
+            Reset to defaults
           </Button>
-          <Button type="submit" disabled={!canCreate} loading={create.isPending}>
-            Create project
-          </Button>
+          <Group>
+            <Button variant="default" onClick={onClose} disabled={create.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canCreate} loading={create.isPending}>
+              Create project
+            </Button>
+          </Group>
         </Group>
       </Stack>
     </form>
