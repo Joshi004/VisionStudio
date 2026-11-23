@@ -136,10 +136,7 @@ export function useEvidenceReview(projectId: number, enabled = true) {
     enabled: enabled && isValidProjectId(projectId),
     refetchInterval: (query) =>
       query.state.data?.claims.some((claim) =>
-        claim.items.some(
-          (item) =>
-            isJobActive(item.preview) || item.soundbite?.transcription.status === "in_progress",
-        ),
+        claim.items.some((item) => isJobActive(item.preview)),
       )
         ? ACTIVE_POLL_MS
         : false,
@@ -201,31 +198,6 @@ export function useStartEvidencePreview(projectId: number) {
       if (!data) {
         throw new ApiError(
           detailMessage(error, `Could not start the preview (HTTP ${response.status}).`),
-          response.status,
-        );
-      }
-      return data;
-    },
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: evidenceReviewKey(projectId) }),
-        invalidateAfterJobAction(queryClient),
-      ]),
-  });
-}
-
-/** Queues the transcription of a sound bite clip again, after it failed. */
-export function useTranscribeEvidenceClip(projectId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (itemKey: string) => {
-      const { data, error, response } = await api.POST(
-        "/api/projects/{project_id}/evidence/review/items/{item_key}/transcribe",
-        { params: { path: { project_id: projectId, item_key: itemKey } } },
-      );
-      if (!data) {
-        throw new ApiError(
-          detailMessage(error, `Could not start the transcription (HTTP ${response.status}).`),
           response.status,
         );
       }

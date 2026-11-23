@@ -1,19 +1,21 @@
-"""What the app knows about a sound bite clip once Parakeet has heard it (SB-006,
+"""What the app knows about a sound bite clip from the words of its source's captions (SB-006,
 `Sound_bite_implementation_phases.md` §4.6 and §4.7).
 
-Pure: heard words, samples and details go in, the fidelity class, the proposed trim and the flags
-come out. Nothing here reads a file or the database; `services/soundbite_clips.py` decodes the
-audio and stores the result.
+Pure: the clip's words, samples and details go in, the fidelity class, the proposed trim and the
+flags come out. Nothing here reads a file or the database; `services/soundbite_clips.py` decodes
+the audio and stores the result.
 
-The agent's quote and YouTube's captions only found the moment (SB-6). **The words are proved
-here**, by comparing what Parakeet heard in the clip with the claim's words:
+The clip's words are the words of the source's captions (`words_from_captions`), not words the
+app heard: the app does not transcribe the clip. The owner listens to the clip and decides
+whether the words are said properly when accepting it. The words are compared here with the
+claim's words:
 
 - `find_quote` finds the stretch of heard words that best matches the quote;
-- `fidelity_of` names how well it matches: `exact`, `near`, `paraphrase` or `mismatch` (only the
-  first two can be shown);
+- `fidelity_of` names how well it matches: `exact`, `near`, `paraphrase` or `mismatch` (a
+  paraphrase or a mismatch is shown to the owner as a warning before Accept);
 - `propose_trim` puts the in and out points in the quietest place of the gap next to the first and
-  last quote word, using the audio itself and not only the word times (Parakeet's times are on an
-  ~80 ms grid);
+  last quote word, using the audio itself and not only the word times (the captions' times are
+  only estimates);
 - `flags` lists what the owner must acknowledge before accepting the clip (never a refusal).
 
 Every number that decides a result is a constant below. They are starting values, checked on real
@@ -33,7 +35,7 @@ from numpy.typing import NDArray
 
 from app.services.dialogue_check import normalize_words
 
-ANALYSIS_VERSION: Final = 1
+ANALYSIS_VERSION: Final = 2  # 2: the words come from the source's captions, not Parakeet
 
 FIDELITIES: Final = ("exact", "near", "paraphrase", "mismatch")
 
@@ -105,6 +107,12 @@ QUIET_MIN_BELOW_SPEECH_DB: Final = 10.0
 ROOM_TONE_PERCENTILE: Final = 10
 # The in point is looked for from this long before the first word to MIN_EDGE_GAP_S before it.
 IN_REACH_S: Final = 0.5
+# The words' times come from the captions, which are estimates and often show a line a little
+# after it is said (0.2 to 0.3 s on the clips checked). When the in point found as above is not in
+# a quiet gap, it is looked for again from this long before the first word, even before the end
+# of the previous word. It is used only when that gives a quiet frame, so the cut never starts
+# inside speech because of it.
+IN_REACH_ESTIMATED_S: Final = 0.45
 # The out point from OUT_NEAR_S to OUT_REACH_S after the last word (never into the next word); in
 # a gap too short for that, from MIN_EDGE_GAP_S.
 OUT_NEAR_S: Final = 0.15
@@ -189,7 +197,8 @@ _LAUGH_LABEL: Final = re.compile(r"[\[(][^\])]*laugh[^\])]*[\])]", re.IGNORECASE
 
 @dataclass(frozen=True)
 class HeardWord:
-    """One word Parakeet heard, in seconds from the start of the clip."""
+    """One word of a clip, as the source's captions give it, in seconds from the start of the
+    clip."""
 
     text: str
     start: float
@@ -245,6 +254,99 @@ def _heard_tokens(words: list[HeardWord]) -> list[tuple[str, int]]:
         for token in tokens_of(word.text):
             found.append((token, position))
     return found
+
+
+# --- the words from the source's captions ------------------------------------------------------
+
+_SOUND_LABEL: Final = re.compile(r"\[[^\]]*\]")
+# The longest a word is taken to last when the captions time each word (the next word may be much
+# later, after a pause).
+MAX_TIMED_WORD_S: Final = 0.8
+# A caption line that has no length is given this long for each of its characters.
+FALLBACK_CHAR_S: Final = 0.07
+
+
+def _json_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _words_of_event(event: dict[str, Any]) -> list[tuple[str, float, float]] | None:
+    """The words of one caption event as (text, start s, end s) in seconds of the video, or None
+    when the event holds no words.
+
+    Automatic captions time each word (`tOffsetMs`): the word starts then, and lasts until the
+    next word, at most MAX_TIMED_WORD_S. Manual captions time only the line: its words are
+    spread over the line's time in proportion to their length. Both are estimates of where the
+    words are said.
+    """
+    start_ms = _json_number(event.get("tStartMs"))
+    segments = event.get("segs")
+    if start_ms is None or not isinstance(segments, list):
+        return None
+    duration_ms = _json_number(event.get("dDurationMs")) or 0.0
+    texts: list[tuple[str, float]] = []
+    word_timed = False
+    for segment in segments:
+        if not isinstance(segment, dict) or not isinstance(segment.get("utf8"), str):
+            continue
+        offset = _json_number(segment.get("tOffsetMs"))
+        if offset is not None and offset > 0:
+            word_timed = True
+        for text in _SOUND_LABEL.sub(" ", segment["utf8"]).split():
+            if any(char.isalnum() for char in text):
+                texts.append((text, max(offset or 0.0, 0.0)))
+    if not texts:
+        return None
+
+    line_end = (start_ms + duration_ms) / 1000
+    if word_timed:
+        starts = [(start_ms + offset) / 1000 for _text, offset in texts]
+        words = []
+        for index, (text, _offset) in enumerate(texts):
+            ceiling = starts[index + 1] if index + 1 < len(starts) else line_end
+            end = min(ceiling, starts[index] + MAX_TIMED_WORD_S)
+            words.append((text, starts[index], max(end, starts[index])))
+        return words
+
+    weights = [len(text) + 1 for text, _offset in texts]
+    total = sum(weights)
+    span_s = duration_ms / 1000 if duration_ms > 0 else total * FALLBACK_CHAR_S
+    begin_s = start_ms / 1000
+    words = []
+    used = 0
+    for (text, _offset), weight in zip(texts, weights, strict=True):
+        word_start = begin_s + span_s * used / total
+        used += weight
+        words.append((text, word_start, begin_s + span_s * used / total))
+    return words
+
+
+def words_from_captions(captions: Any, window_start_s: float, duration_s: float) -> list[HeardWord]:
+    """The words of a clip, from the `json3` captions of its video, in seconds from the clip's
+    start. `window_start_s` is where the clip starts in the video and `duration_s` is its length.
+    Words that end before the clip starts or start after it ends are left out; one that crosses
+    an edge is cut to it. Sound labels such as `[Applause]` are not words. Pure.
+
+    These are the words the source's captions give, not words the app heard: the owner listens
+    to the clip before accepting it.
+    """
+    events = captions.get("events") if isinstance(captions, dict) else None
+    found: list[tuple[str, float, float]] = []
+    for event in events if isinstance(events, list) else []:
+        if not isinstance(event, dict):
+            continue
+        found.extend(_words_of_event(event) or [])
+    found.sort(key=lambda word: word[1])  # stable: words at one time keep their order
+    words: list[HeardWord] = []
+    for text, start, end in found:
+        begin = max(start - window_start_s, 0.0)
+        finish = min(end - window_start_s, duration_s)
+        if finish <= 0 or begin >= duration_s:
+            continue
+        words.append(HeardWord(text, round(begin, 3), round(max(finish, begin), 3)))
+    return words
 
 
 # --- finding the quote -------------------------------------------------------------------------
@@ -416,6 +518,14 @@ def propose_trim(
     else:
         in_s = max(0.0, (previous_end + onset) / 2) if first > 0 else max(0.0, onset - 0.05)
         in_clean = False
+    if not in_clean:
+        # The word's time may be late (see IN_REACH_ESTIMATED_S): try a longer reach back.
+        wide_low = max(onset - IN_REACH_ESTIMATED_S, 0.0)
+        if high >= wide_low:
+            frame = _quietest(level, wide_low, high, onset - PREFERRED_IN_BEFORE_S)
+            if level[frame] <= quiet_limit:
+                in_s = frame * FRAME_S
+                in_clean = True
 
     # Out point.
     next_start = words[last + 1].start if last + 1 < len(words) else None
@@ -498,7 +608,7 @@ def flags(
         found.append({"code": code, "message": message})
 
     if not words:
-        add("no_speech", "Nothing was heard in the clip.")
+        add("no_speech", "The source's captions have no words for this clip.")
 
     if match is not None:
         heard_tokens = _heard_tokens(words)

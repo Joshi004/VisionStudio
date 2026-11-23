@@ -47,7 +47,7 @@ from typing import Any, Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import EvidenceItem, EvidenceReview, Job, Project
+from app.db.models import EvidenceItem, EvidenceReview, Project
 from app.jobs import store
 from app.services import (
     evidence_claims,
@@ -64,8 +64,6 @@ VERDICTS: Final = (ACCEPTED, REJECTED)
 
 # --- Sound bite clips (SB-007) -------------------------------------------------------------
 
-# The fidelity classes that can be shown (SB-6).
-SHOWABLE_FIDELITIES: Final = ("exact", "near")
 # The lower third's lines, and the rights note.
 SPEAKER_MAX_CHARS: Final = evidence_claims.SPEAKER_MAX_CHARS
 LINE_MAX_CHARS: Final = 80
@@ -92,10 +90,6 @@ class ClaimNotInRoundError(EvidenceReviewError):
 
 class ImportRunningError(EvidenceReviewError):
     """An import is going on, so the pieces to decide on are about to change."""
-
-
-class TranscriptionRunningError(EvidenceReviewError):
-    """The clip's transcription is already queued or running."""
 
 
 # --- Decisions (pure) ----------------------------------------------------------------------
@@ -272,15 +266,15 @@ def _real_date(value: object) -> date | None:
 def check_clip(key: str, facts: ClipFacts, details: dict[str, Any] | None, today: date) -> None:
     """Raises EvidenceReviewError when an accepted clip of a sound bite claim lacks something
     (the rules of SB-007 as SB-016 relaxed them), with one sentence. `details` is the `soundbite`
-    object with its cut filled in. What the app needs: the clip was heard, its words are the
-    quote's, a cut of 3 to 15 s and a speaker. The owner no longer confirms the role, the venue,
-    the date, the flags or a rights note. Pure.
+    object with its cut filled in. What the app needs: the clip has words (from the source's
+    captions), a cut of 3 to 15 s and a speaker. Whether the words are the quote's is the owner's
+    decision: the review warns when they differ (`facts.fidelity`), and the owner may accept
+    anyway. The owner no longer confirms the role, the venue, the date, the flags or a rights
+    note. Pure.
     """
     if not facts.words:
-        raise EvidenceReviewError("This clip has not been heard yet, so it cannot be accepted.")
-    if facts.fidelity not in SHOWABLE_FIDELITIES:
         raise EvidenceReviewError(
-            "The words of this clip are not the quote's words, so it cannot be accepted."
+            "The captions gave no words for this clip, so it cannot be accepted."
         )
     if details is None:
         raise EvidenceReviewError("The app found no cut for this clip, so it cannot be accepted.")
@@ -1074,37 +1068,6 @@ async def finish_review(session: AsyncSession, project: Project) -> ReviewView:
     return await view(session, project)
 
 
-async def retry_transcription(session: AsyncSession, project: Project, item_key: str) -> Job:
-    """Queues the transcription of a sound bite clip again ("Transcribe again"). Only for a usable
-    clip of the newest import that has no heard words and no active job. Commits. Raises
-    TranscriptionRunningError (a job is active) or EvidenceReviewError.
-    """
-    loaded = await _load(session, project)
-    if isinstance(loaded, EvidenceReviewError):
-        raise loaded
-    if loaded.refusal is not None:
-        raise loaded.refusal
-    item = next(
-        (
-            entry
-            for claim in loaded.view.claims
-            for entry in claim.items
-            if entry.item_key == item_key
-        ),
-        None,
-    )
-    if item is None or not item.usable or item.kind != "video":
-        raise EvidenceReviewError("This is not a usable clip of the newest import.")
-    if item.transcribe_job_id is None:
-        raise EvidenceReviewError("This clip is not for a sound bite, so it is not transcribed.")
-    if item.heard_words is not None:
-        raise EvidenceReviewError("This clip is transcribed already.")
-    job = (await soundbite_clips.jobs_of(session, [item])).get(item.id)
-    if job is not None and job.status in store.ACTIVE_STATUSES:
-        raise TranscriptionRunningError("The clip is being transcribed. Wait for it to finish.")
-    return await soundbite_clips.queue(session, item, commit=True)
-
-
 @dataclass(frozen=True)
 class TrimPreview:
     """A cut the owner is trying, before anything is saved: the points, the length, the flags that
@@ -1135,7 +1098,9 @@ async def preview_trim(
         raise EvidenceReviewError("This is not a usable clip of the newest import.")
     facts = next(found[item_key] for found in loaded.clips.values() if item_key in found)
     if not facts.words:
-        raise EvidenceReviewError("This clip has not been heard yet, so it cannot be trimmed.")
+        raise EvidenceReviewError(
+            "The captions gave no words for this clip, so it cannot be trimmed."
+        )
     if not 0 <= first <= last < len(facts.words):
         raise EvidenceReviewError("The start and end words are not words of this clip.")
     try:

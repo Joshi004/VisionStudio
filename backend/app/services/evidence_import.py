@@ -578,10 +578,10 @@ async def make_import(
             if piece.usable and piece.kind == "video" and claim_id in soundbite_claims:
                 clips.append(row_item)
     await session.flush()
-    # The clips of sound bite claims are transcribed (SB-006). A video kept as context for an
-    # ordinary claim is only imported.
+    # The clips of sound bite claims get their words from the captions that came with them
+    # (SB-006). A video kept as context for an ordinary claim is only imported.
     for clip in clips:
-        await soundbite_clips.queue(session, clip)
+        await soundbite_clips.analyse_now(session, clip)
     return record
 
 

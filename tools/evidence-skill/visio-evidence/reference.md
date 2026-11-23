@@ -83,7 +83,7 @@ The tool reads the video's English captions, finds the quote in them, and downlo
 | `--recorded ... is later than the upload date` | The date is wrong or is the date of something else. Find the right date, or leave `--recorded` out and say so. |
 | `No --recorded date was given` | Fine only when you could not find the date; the lower third then uses the upload date. Say so in `--what-it-says`. |
 | `No --role or no --venue was given` | Fine only when you could not find it. The lower third shows only what is given. |
-| `The captions are YouTube's automatic ones` | Names and numbers may be wrong in `e1.txt`. The app transcribes the clip itself later, so this is not a problem for the clip. |
+| `The captions are YouTube's automatic ones` | Names and numbers may be wrong in `e1.txt`. The app does not transcribe the clip: it uses these captions as the clip's words, and the owner listens to the clip before accepting it. Check the quote against what you can see in `e1.txt` and say so in `--what-it-says` if a name or number looks doubtful. |
 | A message that ends with advice about `blocked` (bot check, age gate, private, members only, unavailable, no English captions) | The video cannot be captured. Report the claim `blocked` if this was the right video and you kept nothing else, and add an `--attempt`. |
 | `yt-dlp could not get the video` with a note about `uv lock --upgrade-package yt-dlp` | It may be a fault of the downloader and not of the video. Tell the owner, and report the claim as `blocked` with that attempt. |
 | `ffmpeg is not installed` | Tell the owner (`brew install ffmpeg`). Do not try to install it yourself. |

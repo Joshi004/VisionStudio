@@ -826,28 +826,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{project_id}/evidence/review/items/{item_key}/transcribe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Transcribe Evidence Item
-         * @description Queues the transcription of a sound bite clip again (SB-006), when it failed. 422 when the
-         *     piece is not a clip of the newest import that has no heard words, 409 while it is already
-         *     being transcribed or an import runs.
-         */
-        post: operations["transcribe_evidence_item_api_projects__project_id__evidence_review_items__item_key__transcribe_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{project_id}/evidence/review/items/{item_key}/trim": {
         parameters: {
             query?: never;
@@ -859,7 +837,7 @@ export interface paths {
          * Get Clip Trim
          * @description The cut for a sound bite clip whose quote runs from heard word `first_word` to heard word
          *     `last_word` (positions in the clip's heard words), found in the clip's own audio. Nothing is
-         *     stored. 422 when the piece is not a transcribed clip of the newest import or the words are
+         *     stored. 422 when the piece is not a clip with words of the newest import or the words are
          *     not words of the clip.
          */
         get: operations["get_clip_trim_api_projects__project_id__evidence_review_items__item_key__trim_get"];
@@ -8318,8 +8296,8 @@ export interface components {
         };
         /**
          * CutWordsIn
-         * @description The first and last heard word of the cut the owner chose for a clip (SB-017). The app
-         *     finds the cut's times in the clip's audio.
+         * @description The first and last heard word of the cut the owner chose for a clip (SB-017). The app finds
+         *     the cut's times in the clip's audio and fills in the other details itself.
          */
         CutWordsIn: {
             /** First Word */
@@ -17699,7 +17677,6 @@ export interface components {
             venue: string | null;
             window: components["schemas"]["SoundbiteWindowOut"] | null;
             quote_at_s: components["schemas"]["SoundbiteQuoteAtOut"] | null;
-            transcription: components["schemas"]["SoundbiteTranscriptionOut"];
             heard: components["schemas"]["SoundbiteHeardOut"] | null;
             /** Fidelity */
             fidelity: ("exact" | "near" | "paraphrase" | "mismatch") | null;
@@ -17734,21 +17711,6 @@ export interface components {
             left_out?: string | null;
             /** Reason */
             reason?: string | null;
-        };
-        /**
-         * SoundbiteTranscriptionOut
-         * @description Whether the app has heard the clip yet. `failed` says why and can be asked again.
-         */
-        SoundbiteTranscriptionOut: {
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "none" | "in_progress" | "failed" | "done";
-            /** Error */
-            error: string | null;
-            /** Job Id */
-            job_id: number | null;
         };
         /**
          * SoundbiteTrimOut
@@ -17789,7 +17751,7 @@ export interface components {
         };
         /**
          * SoundbiteWordOut
-         * @description A word Parakeet heard, in seconds from the start of the downloaded window.
+         * @description A word of the source's captions, in seconds from the start of the downloaded window.
          */
         SoundbiteWordOut: {
             /** Text */
@@ -22204,56 +22166,6 @@ export interface operations {
         };
     };
     preview_evidence_item_api_projects__project_id__evidence_review_items__item_key__preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: number;
-                item_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvidenceBriefRun"];
-                };
-            };
-            /** @description No such project, or no such claim in the round. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The results are being imported. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    transcribe_evidence_item_api_projects__project_id__evidence_review_items__item_key__transcribe_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -1,13 +1,9 @@
 import { useState } from "react";
 
-import { Alert, Badge, Button, Group, Loader, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import {
-  useSoundbiteTrim,
-  useTranscribeEvidenceClip,
-  type EvidenceReviewItem,
-} from "../../api/evidence";
+import { useSoundbiteTrim, type EvidenceReviewItem } from "../../api/evidence";
 import { SoundbitePlayer } from "./SoundbitePlayer";
 
 const FIDELITY_LABEL: Record<string, string> = {
@@ -74,7 +70,7 @@ function monthYear(recorded: string): string {
   return month >= 1 && month <= 12 ? `${MONTHS[month - 1]} ${Number(found[1])}` : "";
 }
 
-/** The first and last heard word of a cut, as the server takes them (`CutWordsIn`). */
+/** The first and last word of a cut, as the server takes them (`CutWordsIn`). */
 export type CutWords = { first_word: number; last_word: number };
 
 /** What the panel needs to know about the claim the clip belongs to. */
@@ -96,15 +92,15 @@ type Props = {
 };
 
 /**
- * A sound bite clip in the review (SB-006, SB-016, SB-017): the video at the app's cut, what the
- * app heard in it, how close that is to the quote, the cut and the lower third the app made, and
- * Accept or Reject. The only thing the owner can change is the cut, one word at a time; the
- * server finds the quiet points and fills in the rest when the clip is accepted. Flags that
- * guard the meaning of the quote are shown in red and ask once more before Accept. A clip of a
- * claim that is not a sound bite is shown read-only, as context.
+ * A sound bite clip in the review (SB-006, SB-016, SB-017): the video at the app's cut, the words
+ * of the source's captions, how close they are to the quote, the cut and the lower third the app
+ * made, and Accept or Reject. The words are not checked by the app: the owner listens and
+ * decides. The only thing the owner can change is the cut, one word at a time; the server finds
+ * the quiet points and fills in the rest when the clip is accepted. Flags that guard the meaning
+ * of the quote, and caption words that differ from the quote, are shown in red and ask once more
+ * before Accept. A clip of a claim that is not a sound bite is shown read-only, as context.
  */
 export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept, onReject }: Props) {
-  const retry = useTranscribeEvidenceClip(projectId);
   const clip = item.soundbite;
   const isBite = claim.want === "soundbite";
   const saved = clip?.decision ?? null;
@@ -141,7 +137,6 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
     return null;
   }
 
-  const status = clip.transcription.status;
   const accepted = item.verdict === "accepted";
 
   // The cut: for words other than the proposed ones the server's answer (once it is there), else
@@ -169,10 +164,7 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
   // Why the app cannot make a usable clip. Nothing here is for the owner to fix: reject the clip.
   const blockers: string[] = [];
   if (words.length === 0) {
-    blockers.push("the clip has to be heard first");
-  }
-  if (clip.fidelity !== "exact" && clip.fidelity !== "near") {
-    blockers.push("the clip's words are not the quote's words");
+    blockers.push("the captions gave no words for this clip");
   }
   if (cut === null && otherThanProposed) {
     blockers.push(
@@ -205,10 +197,13 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
   ).filter((flag) => flag.code !== "length");
   const riskyFlags = isBite ? flags.filter((flag) => RISKY_FLAG_CODES.includes(flag.code)) : [];
   const otherFlags = flags.filter((flag) => !riskyFlags.includes(flag));
+  // The caption words are not the quote's words (a paraphrase, or nothing like it). The owner
+  // may still accept after listening to the clip.
+  const wordsDiffer = isBite && (clip.fidelity === "paraphrase" || clip.fidelity === "mismatch");
 
-  // Accept (or saving a new cut) asks once more when a risky flag is there.
+  // Accept (or saving a new cut) asks once more when a risky flag or different words are there.
   const send = () => {
-    if (riskyFlags.length > 0 && !confirming) {
+    if ((riskyFlags.length > 0 || wordsDiffer) && !confirming) {
       setConfirming(true);
       return;
     }
@@ -222,6 +217,15 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
 
   return (
     <Stack gap="xs">
+      {wordsDiffer && (
+        <Alert color="red" p="xs" title="The caption words differ from the quote">
+          <Text size="xs">
+            The words in the source&apos;s captions are not the claim&apos;s words. Listen to the
+            clip before you accept it.
+          </Text>
+        </Alert>
+      )}
+
       {riskyFlags.length > 0 && (
         <Alert color="red" p="xs" title="Check the meaning before you accept">
           <Stack gap={2}>
@@ -272,41 +276,19 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
           .join(", ")}
       </Text>
 
-      {status === "in_progress" && (
-        <Group gap="xs">
-          <Loader size="xs" />
-          <Text size="xs">Listening to the clip...</Text>
-        </Group>
-      )}
-
-      {status === "failed" && (
-        <Alert color="red" p="xs" title="Transcription failed">
-          <Stack gap={4}>
-            <Text size="xs">{clip.transcription.error ?? "The clip could not be transcribed."}</Text>
-            <Group>
-              <Button
-                size="compact-xs"
-                variant="light"
-                loading={retry.isPending}
-                disabled={disabled}
-                onClick={() => retry.mutate(item.item_key)}
-              >
-                Transcribe again
-              </Button>
-            </Group>
-            {retry.isError && (
-              <Text size="xs" c="red">
-                {describeError(retry.error)}
-              </Text>
-            )}
-          </Stack>
+      {isBite && heard === null && (
+        <Alert color="red" p="xs" title="No words">
+          <Text size="xs">
+            The captions that came with this clip gave no words for it. Reject it, or ask for the
+            research again.
+          </Text>
         </Alert>
       )}
 
       {heard !== null && (
         <Stack gap={2}>
           <Text size="xs" fw={600}>
-            What the app heard
+            Words from the source captions
           </Text>
           {isBite && words.length > 0 ? (
             <Text size="sm" component="div" style={{ lineHeight: 1.9 }}>
@@ -334,7 +316,9 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
               })}
             </Text>
           ) : (
-            <Text size="sm">{heard.text !== "" ? heard.text : "No words were heard."}</Text>
+            <Text size="sm">
+              {heard.text !== "" ? heard.text : "The captions have no words here."}
+            </Text>
           )}
           {isBite && words.length > 0 && (
             <Text size="xs" c="dimmed">
@@ -351,9 +335,10 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
           </Text>
           {match.diff.map((entry, index) => (
             <Text key={index} size="xs" c="dimmed">
-              {entry.op === "insert" && `Added in the clip: "${entry.heard}"`}
-              {entry.op === "delete" && `Missing from the clip: "${entry.script}"`}
-              {entry.op === "replace" && `"${entry.script}" is heard as "${entry.heard}"`}
+              {entry.op === "insert" && `Added in the captions: "${entry.heard}"`}
+              {entry.op === "delete" && `Missing from the captions: "${entry.script}"`}
+              {entry.op === "replace" &&
+                `"${entry.script}" is written in the captions as "${entry.heard}"`}
             </Text>
           ))}
         </Stack>
@@ -482,8 +467,10 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
             <Alert color="red" p="xs" title="Are you sure?">
               <Stack gap={4}>
                 <Text size="xs">
-                  This clip may change meaning when it is cut. Read the red notes above, then
-                  decide.
+                  {wordsDiffer && riskyFlags.length === 0
+                    ? "The caption words differ from the quote. Have you listened to the clip?"
+                    : "This clip may change meaning when it is cut. Read the red notes above, " +
+                      "then decide."}
                 </Text>
                 <Group gap="xs">
                   <Button size="compact-xs" color="red" disabled={disabled} onClick={send}>

@@ -420,7 +420,8 @@ def capture_video(
     if source == "automatic":
         notes.append(
             "The captions are YouTube's automatic ones: names and numbers may be wrong. The app "
-            "transcribes the clip itself on import."
+            "does not transcribe the clip: it uses these captions as the clip's words, and the "
+            "owner listens to the clip before accepting it."
         )
     upload_date = capture["upload_date"]
     if described.published and upload_date and described.published > upload_date:

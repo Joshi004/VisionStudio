@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import EvidenceItem, Job, Project
+from app.db.models import EvidenceItem, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.services import (
@@ -436,7 +436,7 @@ class SoundbiteQuoteAtOut(BaseModel):
 
 
 class SoundbiteWordOut(BaseModel):
-    """A word Parakeet heard, in seconds from the start of the downloaded window."""
+    """A word of the source's captions, in seconds from the start of the downloaded window."""
 
     text: str
     start: float
@@ -508,14 +508,6 @@ class SoundbiteDecisionOut(BaseModel):
     music_drop: bool
 
 
-class SoundbiteTranscriptionOut(BaseModel):
-    """Whether the app has heard the clip yet. `failed` says why and can be asked again."""
-
-    status: Literal["none", "in_progress", "failed", "done"]
-    error: str | None
-    job_id: int | None
-
-
 class SoundbiteOut(BaseModel):
     """What the app knows about an imported clip of a `video` piece (SB-006), and the owner's
     details when the clip is accepted (SB-007)."""
@@ -530,7 +522,6 @@ class SoundbiteOut(BaseModel):
     venue: str | None
     window: SoundbiteWindowOut | None
     quote_at_s: SoundbiteQuoteAtOut | None
-    transcription: SoundbiteTranscriptionOut
     heard: SoundbiteHeardOut | None
     fidelity: Literal["exact", "near", "paraphrase", "mismatch"] | None
     proposed_trim: SoundbiteTrimOut | None
@@ -569,7 +560,7 @@ class ReviewItemOut(BaseModel):
     readability: ReadabilityOut | None
     # Null until a preview was asked for.
     preview: PreviewOut | None
-    # Only for a `video` piece (SB-006): what the app heard in the clip, and how it compares.
+    # Only for a `video` piece (SB-006): the words of the source's captions, and how they compare.
     soundbite: SoundbiteOut | None
 
 
@@ -752,10 +743,8 @@ def _number_or_none(value: Any) -> float | None:
     return float(value)
 
 
-def _soundbite_out(
-    item: EvidenceItem, job: Job | None, details: dict[str, Any] | None
-) -> SoundbiteOut:
-    """The view of a clip: its capture details, its transcription status, what the analysis
+def _soundbite_out(item: EvidenceItem, details: dict[str, Any] | None) -> SoundbiteOut:
+    """The view of a clip: its capture details, what the analysis of the source's captions
     stored and the owner's details (`details`, as `evidence_review.read_soundbite` gives them,
     for an accepted clip). Every stored value is read defensively and sent as plain data."""
     capture = item.capture if isinstance(item.capture, dict) else {}
@@ -775,7 +764,6 @@ def _soundbite_out(
         and _number_or_none(at.get("end")) is not None
         else None
     )
-    state, error = soundbite_clips.transcription_status(item, job)
     heard = item.heard_words if isinstance(item.heard_words, dict) else None
     heard_out = None
     if heard is not None:
@@ -827,9 +815,6 @@ def _soundbite_out(
         venue=_text(capture.get("venue")),
         window=window_out,
         quote_at_s=at_out,
-        transcription=SoundbiteTranscriptionOut(
-            status=state, error=error, job_id=job.id if job is not None else None
-        ),
         heard=heard_out,
         fidelity=cast(Any, item.fidelity),
         proposed_trim=trim_out,
@@ -853,7 +838,6 @@ def _item_out(
     verdict: str | None,
     frame: tuple[int, int],
     preview: evidence_clips.Preview | None,
-    job: Job | None,
     details: dict[str, Any] | None,
 ) -> ReviewItemOut:
     capture = item.capture if isinstance(item.capture, dict) else {}
@@ -892,7 +876,7 @@ def _item_out(
         preview=(
             _preview_out(preview) if item.usable and (not is_video or details is not None) else None
         ),
-        soundbite=_soundbite_out(item, job, details) if is_video else None,
+        soundbite=_soundbite_out(item, details) if is_video else None,
     )
 
 
@@ -900,7 +884,6 @@ def _claim_out(
     claim: evidence_review.ReviewClaim,
     frame: tuple[int, int],
     previews: dict[str, evidence_clips.Preview],
-    jobs: dict[int, Job],
 ) -> ReviewClaimOut:
     entry, result = claim.entry, claim.result
     problems = [text for text in result.get("problems", []) if isinstance(text, str)]
@@ -933,7 +916,6 @@ def _claim_out(
                 claim.decision.verdicts.get(item.item_key),
                 frame,
                 previews.get(item.item_key),
-                jobs.get(item.id),
                 claim.decision.soundbites.get(item.item_key),
             )
             for item in claim.items
@@ -959,9 +941,6 @@ async def _review_out(
         and (details := claim.decision.soundbites.get(item.item_key)) is not None
     }
     previews = await evidence_clips.previews_for(session, project, keys, accepted_clips)
-    jobs = await soundbite_clips.jobs_of(
-        session, [item for claim in view.claims for item in claim.items if item.kind == "video"]
-    )
     return EvidenceReviewOut(
         round_id=view.round_id,
         import_version=view.import_version,
@@ -970,16 +949,14 @@ async def _review_out(
         editable=view.editable,
         blocked_reason=view.blocked_reason,
         undecided=view.undecided,
-        claims=[_claim_out(claim, frame, previews, jobs) for claim in view.claims],
+        claims=[_claim_out(claim, frame, previews) for claim in view.claims],
     )
 
 
 def _review_refusal(exc: evidence_review.EvidenceReviewError) -> HTTPException:
     if isinstance(exc, evidence_review.ClaimNotInRoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
-    if isinstance(
-        exc, evidence_review.ImportRunningError | evidence_review.TranscriptionRunningError
-    ):
+    if isinstance(exc, evidence_review.ImportRunningError):
         return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
@@ -1076,28 +1053,6 @@ async def preview_evidence_item(
     return EvidenceBriefRun(job_id=job.id)
 
 
-@router.post(
-    "/projects/{project_id}/evidence/review/items/{item_key}/transcribe",
-    response_model=EvidenceBriefRun,
-    status_code=status.HTTP_202_ACCEPTED,
-    responses=_REVIEW_REFUSED,
-)
-async def transcribe_evidence_item(
-    project_id: int, item_key: str, session: SessionDep
-) -> EvidenceBriefRun:
-    """Queues the transcription of a sound bite clip again (SB-006), when it failed. 422 when the
-    piece is not a clip of the newest import that has no heard words, 409 while it is already
-    being transcribed or an import runs.
-    """
-    project = await load_project(session, project_id)
-    try:
-        job = await evidence_review.retry_transcription(session, project, item_key)
-    except evidence_review.EvidenceReviewError as exc:
-        raise _review_refusal(exc) from exc
-    dispatcher.nudge()
-    return EvidenceBriefRun(job_id=job.id)
-
-
 @router.get(
     "/projects/{project_id}/evidence/review/items/{item_key}/trim",
     response_model=TrimPreviewOut,
@@ -1112,7 +1067,7 @@ async def get_clip_trim(
 ) -> TrimPreviewOut:
     """The cut for a sound bite clip whose quote runs from heard word `first_word` to heard word
     `last_word` (positions in the clip's heard words), found in the clip's own audio. Nothing is
-    stored. 422 when the piece is not a transcribed clip of the newest import or the words are
+    stored. 422 when the piece is not a clip with words of the newest import or the words are
     not words of the clip.
     """
     project = await load_project(session, project_id)

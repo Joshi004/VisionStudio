@@ -23,8 +23,7 @@
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), the research brief of the evidence layer
-  (`write_evidence_brief.py`), the import of a round's results (`import_evidence.py`), the
-  transcription of a sound bite clip (`transcribe_evidence_clip.py`), the video
+  (`write_evidence_brief.py`), the import of a round's results (`import_evidence.py`), the video
   of a piece of evidence (`render_evidence_clip.py`), the
   generated component, the block scene and the preview of a motion callout
   (`write_callout_component.py`, `write_callout_scene.py`, `render_callout_preview.py`), and the
@@ -105,7 +104,6 @@ def register_handlers() -> None:
     from app.jobs.time_lab_speech_words import TimeLabSpeechWordsHandler
     from app.jobs.time_speech_words import TimeSpeechWordsHandler
     from app.jobs.time_voice_recording import TimeVoiceRecordingHandler
-    from app.jobs.transcribe_evidence_clip import TranscribeEvidenceClipHandler
     from app.jobs.write_callout_component import WriteCalloutComponentHandler
     from app.jobs.write_callout_look import WriteCalloutLookHandler
     from app.jobs.write_callout_plan import WriteCalloutPlanHandler
@@ -202,7 +200,6 @@ def register_handlers() -> None:
     handlers.register(SuggestEvidenceClaimsHandler())
     handlers.register(WriteEvidenceBriefHandler())
     handlers.register(ImportEvidenceHandler())
-    handlers.register(TranscribeEvidenceClipHandler())
     handlers.register(RenderEvidenceClipHandler())
     handlers.register(WriteThumbnailConceptsHandler())
     handlers.register(WriteYouTubeDraftHandler())
