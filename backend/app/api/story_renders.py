@@ -66,6 +66,8 @@ WarningCode = Literal[
     "scene_start_unknown",
     "card_without_clip",
     "evidence_split_empty",
+    "soundbite_captions_dropped",
+    "soundbite_music_drops",
 ]
 
 
