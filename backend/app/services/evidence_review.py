@@ -24,9 +24,11 @@ is no longer accepted. A claim whose piece changed in a re-import is then undeci
 
 **Sound bite clips (SB-007).** A usable `video` piece has a verdict like any other. For a clip of
 a sound bite claim, an `accepted` verdict also carries a `soundbite` object (`SOUNDBITE_FIELDS`):
-the owner's start and end words, the cut found in the clip's audio from those words (the browser
-sends words, never times: `_with_cuts`), the lower third's lines, the confirmed recording date,
-the flags acknowledged and the rights note. `check_clip` lists the rules; a clip that is not
+the start and end words, the cut found in the clip's audio from those words (the browser sends
+words, never times: `_with_clip_details`), the lower third's lines, the recording date, the flags
+acknowledged and the rights note. Since SB-016 the owner only presses Accept: the app fills all of
+this in (`_auto_details`: the proposed cut, the claim's speaker, the role and venue the agent
+gave, the date). `check_clip` lists the rules; a clip that is not
 accepted has no details, and an accepted one whose details are missing or no longer fit its words
 reads as undecided again. At most one clip is shown per claim, and then nothing else; a video of
 a claim that is not a sound bite is only context and is never shown. `shown_claims` leaves clips
@@ -68,11 +70,9 @@ SHOWABLE_FIDELITIES: Final = ("exact", "near")
 SPEAKER_MAX_CHARS: Final = evidence_claims.SPEAKER_MAX_CHARS
 LINE_MAX_CHARS: Final = 80
 RIGHTS_NOTE_MAX_CHARS: Final = 300
-# Licences that need a rights note from the owner (everything but Creative Commons).
-LICENCES_WITHOUT_NOTE: Final = ("creative_commons",)
-# Flags the owner does not acknowledge: the length is checked on its own, the admission words
-# are worked out again for the owner's trim, and the date flags are replaced by the date the
-# owner confirms (which must be a real date not later than the upload).
+# Flags that are never listed as to acknowledge: the length is checked on its own, the admission
+# words are worked out again for the cut, and the date flags are replaced by the recording date
+# the app fills in (which must be a real date not later than the upload).
 DATE_FLAG_CODES: Final = ("date_missing", "date_after_upload")
 UNACKNOWLEDGED_FLAG_CODES: Final = (*soundbite_analysis.TRIM_FLAG_CODES, *DATE_FLAG_CODES)
 _DATE_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -267,8 +267,10 @@ def _real_date(value: object) -> date | None:
 
 def check_clip(key: str, facts: ClipFacts, details: dict[str, Any] | None, today: date) -> None:
     """Raises EvidenceReviewError when an accepted clip of a sound bite claim lacks something
-    (the rules of SB-007), with one sentence. `details` is the `soundbite` object with its cut
-    filled in. Pure.
+    (the rules of SB-007 as SB-016 relaxed them), with one sentence. `details` is the `soundbite`
+    object with its cut filled in. What the app needs: the clip was heard, its words are the
+    quote's, a cut of 3 to 15 s and a speaker. The owner no longer confirms the role, the venue,
+    the date, the flags or a rights note. Pure.
     """
     if not facts.words:
         raise EvidenceReviewError("This clip has not been heard yet, so it cannot be accepted.")
@@ -277,7 +279,7 @@ def check_clip(key: str, facts: ClipFacts, details: dict[str, Any] | None, today
             "The words of this clip are not the quote's words, so it cannot be accepted."
         )
     if details is None:
-        raise EvidenceReviewError("Fill in the sound bite details before accepting this clip.")
+        raise EvidenceReviewError("The app found no cut for this clip, so it cannot be accepted.")
     first, last = details.get("first_word"), details.get("last_word")
     if (
         not isinstance(first, int)
@@ -297,42 +299,24 @@ def check_clip(key: str, facts: ClipFacts, details: dict[str, Any] | None, today
             f"The cut is {length:.1f} s long; a sound bite is {low:.0f} to {high:.0f} s."
         )
     if _line_problem(details.get("speaker"), SPEAKER_MAX_CHARS):
-        raise EvidenceReviewError("Write the speaker's name for the lower third.")
-    if _line_problem(details.get("role"), LINE_MAX_CHARS):
-        raise EvidenceReviewError("Write the speaker's role at the time for the lower third.")
-    if _line_problem(details.get("venue"), LINE_MAX_CHARS):
-        raise EvidenceReviewError("Write the venue or event for the lower third.")
-    recorded = _real_date(details.get("recorded"))
-    if recorded is None:
-        raise EvidenceReviewError("Confirm the recording date (year, month and day).")
-    if recorded > today:
-        raise EvidenceReviewError("The recording date cannot be in the future.")
-    uploaded = _real_date(facts.upload_date)
-    if uploaded is not None and recorded > uploaded:
-        raise EvidenceReviewError("The recording date cannot be later than the upload date.")
-    acknowledged = details.get("acknowledged_flags")
-    acknowledged = acknowledged if isinstance(acknowledged, list) else []
-    missing = [
-        code
-        for code in facts.required_flags({"in_s": start, "out_s": end})
-        if code not in acknowledged
-    ]
-    if missing:
-        raise EvidenceReviewError(
-            f"Acknowledge every flag of this clip before accepting it: {', '.join(missing)}."
-        )
-    note = details.get("rights_note")
-    note = note if isinstance(note, str) else ""
-    if len(note) > RIGHTS_NOTE_MAX_CHARS or not all(
-        char.isprintable() or char in "\n\t" for char in note
-    ):
-        raise EvidenceReviewError(
-            f"The rights note can be at most {RIGHTS_NOTE_MAX_CHARS} characters of plain text."
-        )
-    if facts.licence not in LICENCES_WITHOUT_NOTE and not note.strip():
-        raise EvidenceReviewError(
-            "This clip is not under a Creative Commons licence: write a one-line rights note."
-        )
+        raise EvidenceReviewError("The claim has no speaker name for the lower third.")
+    # The role and the venue may be empty (the lower third leaves them out); when there, each is
+    # one line that can be shown.
+    for name in ("role", "venue"):
+        line = details.get(name)
+        if line != "" and _line_problem(line, LINE_MAX_CHARS):
+            raise EvidenceReviewError(f"The {name} of the lower third cannot be shown.")
+    # The recording date may be empty; when there, it is a real date that is not in the future
+    # and not after the upload.
+    if details.get("recorded") != "":
+        recorded = _real_date(details.get("recorded"))
+        if recorded is None:
+            raise EvidenceReviewError("The recording date is not a date (year, month and day).")
+        if recorded > today:
+            raise EvidenceReviewError("The recording date cannot be in the future.")
+        uploaded = _real_date(facts.upload_date)
+        if uploaded is not None and recorded > uploaded:
+            raise EvidenceReviewError("The recording date cannot be later than the upload date.")
 
 
 def check_decision(
@@ -851,13 +835,80 @@ async def _loaded_for_edit(session: AsyncSession, project: Project) -> _Loaded:
 _CUT_FIELDS: Final = ("in_s", "out_s", "in_clean", "out_clean")
 
 
-async def _with_cuts(loaded: _Loaded, claim_id: str, decision: Decision) -> Decision:
-    """The decision with the cut of each clip set from the owner's start and end words, and each
-    clip's acknowledged flags kept to the ones that are asked for. The browser sends words, never
-    times: the cut is found in the clip's own audio (as the proposed cut is), or is the stored one
-    when the words did not change. A clip whose details cannot be used is left as it is, for
-    `check_decision` to refuse with its reason. Raises EvidenceReviewError when the audio cannot
-    be read.
+def _clean_line(value: object, limit: int = LINE_MAX_CHARS) -> str:
+    """A text as one line, or the empty text when it is not text or cannot be shown."""
+    if not isinstance(value, str):
+        return ""
+    line = " ".join(value.split())
+    return "" if _line_problem(line, limit) else line
+
+
+def _auto_recorded(item: EvidenceItem, facts: ClipFacts, today: date) -> str:
+    """The recording date the app uses for a clip: the date the agent gave (`source.published`)
+    when it is a real date that is not in the future and not after the upload, else the upload
+    date, else the empty text."""
+    uploaded = _real_date(facts.upload_date)
+    source = item.source if isinstance(item.source, dict) else {}
+    for candidate in (source.get("published"), facts.upload_date):
+        found = _real_date(candidate)
+        if found is None or found > today or (uploaded is not None and found > uploaded):
+            continue
+        return found.isoformat()
+    return ""
+
+
+def _auto_details(item: EvidenceItem, facts: ClipFacts, today: date) -> dict[str, Any] | None:
+    """The `soundbite` object of an accepted clip when the owner only pressed Accept (SB-016): the
+    words and the cut the app proposed for the quote, the claim's speaker, the role and venue the
+    agent gave, the recording date (`_auto_recorded`), every flag acknowledged, no rights note and
+    the music only lowered. None when the clip has no usable match or proposed cut, for
+    `check_decision` to refuse with its reason."""
+    heard = item.heard_words if isinstance(item.heard_words, dict) else {}
+    match = heard.get("match")
+    trim = item.proposed_trim
+    if not isinstance(match, dict) or not isinstance(trim, dict):
+        return None
+    first, last = match.get("first"), match.get("last")
+    if (
+        not isinstance(first, int)
+        or not isinstance(last, int)
+        or isinstance(first, bool)
+        or isinstance(last, bool)
+        or not 0 <= first <= last < len(facts.words)
+    ):
+        return None
+    start, end = trim.get("in_s"), trim.get("out_s")
+    if not _is_number(start) or not _is_number(end):
+        return None
+    cut = {
+        "in_s": float(start),
+        "out_s": float(end),
+        "in_clean": trim.get("in_clean") is True,
+        "out_clean": trim.get("out_clean") is True,
+    }
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    return {
+        "first_word": first,
+        "last_word": last,
+        **cut,
+        "speaker": _clean_line(facts.brief_entry.get("speaker"), SPEAKER_MAX_CHARS),
+        "role": _clean_line(capture.get("role")),
+        "venue": _clean_line(capture.get("venue")),
+        "recorded": _auto_recorded(item, facts, today),
+        "acknowledged_flags": facts.required_flags(cut),
+        "rights_note": "",
+        "music_drop": False,
+    }
+
+
+async def _with_clip_details(loaded: _Loaded, claim_id: str, decision: Decision) -> Decision:
+    """The decision with the cut of each clip set from the start and end words, and each clip's
+    acknowledged flags kept to the ones that are asked for. An accepted clip of a sound bite claim
+    that comes without details gets the app's own (`_auto_details`), or the ones stored for it.
+    The browser sends words, never times: the cut is found in the clip's own audio (as the
+    proposed cut is), or is the stored one when the words did not change. A clip whose details
+    cannot be used is left as it is, for `check_decision` to refuse with its reason. Raises
+    EvidenceReviewError when the audio cannot be read.
     """
     clips = loaded.clips[claim_id]
     before = loaded.decisions[claim_id].soundbites
@@ -892,6 +943,14 @@ async def _with_cuts(loaded: _Loaded, claim_id: str, decision: Decision) -> Deci
             **cut,
             "acknowledged_flags": [code for code in required if code in sent],
         }
+    today = date.today()
+    for key, verdict in decision.verdicts.items():
+        facts = clips.get(key)
+        if verdict != ACCEPTED or facts is None or not facts.soundbite or key in filled:
+            continue
+        details = before.get(key) or _auto_details(loaded.clip_items[key], facts, today)
+        if details is not None:
+            filled[key] = details
     return replace(decision, soundbites=filled)
 
 
@@ -905,7 +964,7 @@ async def save_claim_decision(
     loaded = await _loaded_for_edit(session, project)
     if claim_id not in loaded.keys:
         raise ClaimNotInRoundError(UNKNOWN_CLAIM_MESSAGE)
-    decision = await _with_cuts(loaded, claim_id, decision)
+    decision = await _with_clip_details(loaded, claim_id, decision)
     check_decision(decision, loaded.keys[claim_id], loaded.clips[claim_id])
     row = loaded.current.round
     assert row is not None

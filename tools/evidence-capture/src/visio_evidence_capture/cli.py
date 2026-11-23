@@ -108,6 +108,15 @@ def build_parser() -> argparse.ArgumentParser:
         dest="as_context",
         help="allow a video for a claim that is not a sound bite claim (context only)",
     )
+    video.add_argument(
+        "--role",
+        help="the speaker's role at the time, for the lower third (for example: CEO, Nvidia)",
+    )
+    video.add_argument(
+        "--venue",
+        help="the event or place of the recording, for the lower third "
+        "(for example: SIEPR Economic Summit)",
+    )
     _add_described(video, video=True)
 
     report = commands.add_parser(
@@ -217,6 +226,8 @@ def _run_video(args: argparse.Namespace) -> int:
         quote=args.quote,
         near=args.near,
         as_context=args.as_context,
+        role=args.role,
+        venue=args.venue,
         described=described,
     )
     rnd.store_evidence(args.claim, captured.entry, captured.files)

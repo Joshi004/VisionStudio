@@ -1,25 +1,7 @@
-import {
-  Alert,
-  Badge,
-  Button,
-  Checkbox,
-  Group,
-  Loader,
-  Stack,
-  Switch,
-  Text,
-  Textarea,
-  TextInput,
-} from "@mantine/core";
-import { useState } from "react";
+import { Alert, Badge, Button, Group, Loader, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import {
-  useSoundbiteTrim,
-  useTranscribeEvidenceClip,
-  type EvidenceReviewItem,
-  type SoundbiteDecision,
-} from "../../api/evidence";
+import { useTranscribeEvidenceClip, type EvidenceReviewItem } from "../../api/evidence";
 import { SoundbitePlayer } from "./SoundbitePlayer";
 
 const FIDELITY_LABEL: Record<string, string> = {
@@ -42,29 +24,39 @@ const LICENCE_LABEL: Record<string, string> = {
   unknown: "Licence unknown",
 };
 
-// The server checks all of these again; they only keep the buttons honest.
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+// The server checks all of these again; they only keep the Accept button honest.
 const MIN_CLIP_S = 3;
 const MAX_CLIP_S = 15;
-const SPEAKER_MAX = 100;
-const LINE_MAX = 80;
-const NOTE_MAX = 300;
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_PATTERN = /^(\d{4})-(\d{2})-\d{2}$/;
 
 function seconds(value: number): string {
   return `${value.toFixed(2)} s`;
 }
 
-/** The fields the owner fills in, as the screen holds them. */
-type Fields = {
-  speaker: string;
-  role: string;
-  venue: string;
-  recorded: string;
-  dateConfirmed: boolean;
-  acknowledged: string[];
-  rightsNote: string;
-  musicDrop: boolean;
-};
+/** `2024-03-01` as `March 2024`, or the empty text when it is not a date. */
+function monthYear(recorded: string): string {
+  const found = DATE_PATTERN.exec(recorded);
+  if (found === null) {
+    return "";
+  }
+  const month = Number(found[2]);
+  return month >= 1 && month <= 12 ? `${MONTHS[month - 1]} ${Number(found[1])}` : "";
+}
 
 /** What the panel needs to know about the claim the clip belongs to. */
 export type ClipClaim = {
@@ -79,21 +71,15 @@ type Props = {
   projectId: number;
   claim: ClipClaim;
   disabled: boolean;
-  // Accepts the clip with these details, or saves new details of an accepted clip.
-  onAccept: (details: SoundbiteDecision) => void;
+  onAccept: () => void;
   onReject: () => void;
 };
 
-function sameList(a: string[], b: string[]): boolean {
-  return a.length === b.length && [...a].sort().every((value, index) => value === [...b].sort()[index]);
-}
-
 /**
- * A sound bite clip in the review (SB-006, SB-007): the video with its cut, what the app heard
- * in it, how close that is to the quote, the cut moved word by word, the lower third's lines, the
- * recording date, the flags and the rights note. The cut is found by the server in the clip's
- * own audio; the browser only says which words the clip starts and ends with. A clip of a claim
- * that is not a sound bite is shown read-only, as context.
+ * A sound bite clip in the review (SB-006, SB-016): the video at the app's cut, what the app
+ * heard in it, how close that is to the quote, the cut and the lower third the app made, and
+ * Accept or Reject. There is nothing to fill in: the server picks the cut and the details when
+ * the clip is accepted. A clip of a claim that is not a sound bite is shown read-only, as context.
  */
 export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept, onReject }: Props) {
   const retry = useTranscribeEvidenceClip(projectId);
@@ -104,127 +90,52 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
   const words = heard?.words ?? [];
   const match = heard?.match ?? null;
 
-  // The owner's changes only; what is not changed reads from the saved decision, else from the
-  // proposal, so nothing has to be copied when the clip is heard late or saved.
-  const [cutWords, setCutWords] = useState<{ first: number; last: number } | null>(null);
-  const [edits, setEdits] = useState<Partial<Fields>>({});
-
-  const first = cutWords?.first ?? saved?.first_word ?? match?.first ?? null;
-  const last = cutWords?.last ?? saved?.last_word ?? match?.last ?? null;
-  const published = item.source?.published ?? "";
-  const fields: Fields = {
-    speaker: edits.speaker ?? saved?.speaker ?? claim.speaker ?? "",
-    role: edits.role ?? saved?.role ?? "",
-    venue: edits.venue ?? saved?.venue ?? "",
-    recorded: edits.recorded ?? saved?.recorded ?? (DATE_PATTERN.test(published) ? published : ""),
-    dateConfirmed: edits.dateConfirmed ?? saved !== null,
-    acknowledged: edits.acknowledged ?? saved?.acknowledged_flags ?? [],
-    rightsNote: edits.rightsNote ?? saved?.rights_note ?? "",
-    musicDrop: edits.musicDrop ?? saved?.music_drop ?? false,
-  };
-  const edit = (change: Partial<Fields>) => setEdits((current) => ({ ...current, ...change }));
-
-  const trimQuery = useSoundbiteTrim(
-    projectId,
-    item.item_key,
-    first ?? 0,
-    last ?? 0,
-    isBite && first !== null && last !== null,
-  );
-  const trim = trimQuery.data;
-  const trimReady = trim !== undefined && !trimQuery.isPlaceholderData;
-
   if (clip === null || !item.usable) {
     return null;
   }
+
   const status = clip.transcription.status;
-  const proposed = clip.proposed_trim;
   const accepted = item.verdict === "accepted";
 
-  const moveCut = (change: { first?: number; last?: number }) => {
-    if (first === null || last === null) {
-      return;
-    }
-    setCutWords({ first: change.first ?? first, last: change.last ?? last });
-  };
+  // The cut: the one stored with the accepted clip, else the one the app proposed.
+  const cut = saved ?? clip.proposed_trim;
+  const length = cut !== null ? cut.out_s - cut.in_s : null;
+  const first = saved?.first_word ?? match?.first ?? null;
+  const last = saved?.last_word ?? match?.last ?? null;
 
-  // The flags to tick: the ones stored at import that are asked for, and the ones that depend on
-  // the cut being tried (the admission words).
-  const askedFlags = [
-    ...clip.flags.filter((flag) => flag.acknowledge),
-    ...(trimReady ? trim.flags.filter((flag) => flag.acknowledge) : []),
-  ].filter((flag, index, all) => all.findIndex((other) => other.code === flag.code) === index);
-  const otherFlags = clip.flags.filter((flag) => !flag.acknowledge && flag.code !== "length");
-  const askedCodes = askedFlags.map((flag) => flag.code);
-  const ticked = fields.acknowledged.filter((code) => askedCodes.includes(code));
+  // The lower third as the accepted clip has it, or as the app will make it.
+  const published = item.source?.published ?? "";
+  const estimatedDate = DATE_PATTERN.test(published) ? published : (clip.upload_date ?? "");
+  const speaker = saved?.speaker ?? claim.speaker ?? "";
+  const place = [saved?.role ?? clip.role ?? "", saved?.venue ?? clip.venue ?? ""]
+    .filter((part) => part !== "")
+    .join(" · ");
+  const when = monthYear(saved?.recorded ?? estimatedDate);
+  const secondLine = place !== "" && when !== "" ? `${place}, ${when}` : place || when;
 
-  const needsNote = clip.licence !== "creative_commons";
-  const length = trimReady ? trim.length_s : null;
-  const missing: string[] = [];
+  // Why the app cannot make a usable clip. Nothing here is for the owner to fix: reject the clip.
+  const blockers: string[] = [];
   if (words.length === 0) {
-    missing.push("the clip has to be heard first");
+    blockers.push("the clip has to be heard first");
   }
   if (clip.fidelity !== "exact" && clip.fidelity !== "near") {
-    missing.push("the clip's words have to be the quote's words");
+    blockers.push("the clip's words are not the quote's words");
   }
-  if (!trimReady) {
-    missing.push("the cut is still being found");
+  if (cut === null) {
+    blockers.push("the app found no cut for this clip");
   } else if (length !== null && (length < MIN_CLIP_S || length > MAX_CLIP_S)) {
-    missing.push(`the cut has to be ${MIN_CLIP_S} to ${MAX_CLIP_S} s`);
+    blockers.push(`the cut is ${length.toFixed(1)} s and has to be ${MIN_CLIP_S} to ${MAX_CLIP_S} s`);
   }
-  if (fields.speaker.trim() === "" || fields.speaker.length > SPEAKER_MAX) {
-    missing.push("the speaker's name");
+  if (speaker.trim() === "") {
+    blockers.push("the claim has no speaker name");
   }
-  if (fields.role.trim() === "" || fields.role.length > LINE_MAX) {
-    missing.push("the role at the time");
-  }
-  if (fields.venue.trim() === "" || fields.venue.length > LINE_MAX) {
-    missing.push("the venue or event");
-  }
-  if (!DATE_PATTERN.test(fields.recorded)) {
-    missing.push("the recording date");
-  } else if (!fields.dateConfirmed) {
-    missing.push("a confirmed recording date");
-  }
-  if (askedCodes.some((code) => !ticked.includes(code))) {
-    missing.push("every flag ticked");
-  }
-  if (needsNote && fields.rightsNote.trim() === "") {
-    missing.push("a rights note");
-  }
-
-  const details: SoundbiteDecision | null =
-    first !== null && last !== null
-      ? {
-          first_word: first,
-          last_word: last,
-          speaker: fields.speaker.trim(),
-          role: fields.role.trim(),
-          venue: fields.venue.trim(),
-          recorded: fields.recorded,
-          acknowledged_flags: ticked,
-          rights_note: fields.rightsNote.trim(),
-          music_drop: fields.musicDrop,
-        }
-      : null;
-  const dirty =
-    saved === null ||
-    details === null ||
-    details.first_word !== saved.first_word ||
-    details.last_word !== saved.last_word ||
-    details.speaker !== saved.speaker ||
-    details.role !== saved.role ||
-    details.venue !== saved.venue ||
-    details.recorded !== saved.recorded ||
-    details.rights_note !== saved.rights_note ||
-    details.music_drop !== saved.music_drop ||
-    !sameList(details.acknowledged_flags, saved.acknowledged_flags);
 
   const quoteSpan =
     match !== null && words[match.first] !== undefined && words[match.last] !== undefined
       ? { start: words[match.first].start, end: words[match.last].end }
       : null;
-  const cutSpan = isBite && trimReady ? { start: trim.in_s, end: trim.out_s } : null;
+  const cutSpan = isBite && cut !== null ? { start: cut.in_s, end: cut.out_s } : null;
+  const otherFlags = clip.flags.filter((flag) => flag.code !== "length");
 
   return (
     <Stack gap="xs">
@@ -242,11 +153,7 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
           {isBite ? "Sound bite clip" : "Video for context"}
         </Badge>
         {clip.licence !== null && (
-          <Badge
-            size="sm"
-            variant="outline"
-            color={clip.licence === "unknown" ? "orange" : "gray"}
-          >
+          <Badge size="sm" variant="outline" color="gray">
             {LICENCE_LABEL[clip.licence] ?? clip.licence}
           </Badge>
         )}
@@ -357,159 +264,23 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
         </Stack>
       )}
 
-      {!isBite && proposed !== null && (
+      {cut !== null && (
         <Text size="xs" c="dimmed">
-          Proposed cut: {seconds(proposed.in_s)} to {seconds(proposed.out_s)} of the clip
-          {proposed.in_clean && proposed.out_clean ? "" : " (an edge is not in a quiet gap)"}
+          {isBite ? "The cut" : "Proposed cut"}: {seconds(cut.in_s)} to {seconds(cut.out_s)} of the
+          clip{length !== null ? `, ${length.toFixed(1)} s` : ""}
+          {cut.in_clean && cut.out_clean ? "" : " (an edge is not in a quiet gap)"}
         </Text>
       )}
 
-      {!isBite && (
-        <Text size="xs" c="dimmed">
-          This claim is not a sound bite, so the video is context only: it can be accepted for
-          the description&apos;s sources, but it is never shown on video.
-        </Text>
-      )}
-
-      {isBite && first !== null && last !== null && words.length > 0 && (
-        <Stack gap={4}>
+      {isBite && (speaker !== "" || secondLine !== "") && (
+        <Stack gap={0}>
           <Text size="xs" fw={600}>
-            The cut
+            Lower third
           </Text>
-          <Group gap="xs">
-            <Button
-              size="compact-xs"
-              variant="default"
-              disabled={disabled || first <= 0}
-              onClick={() => moveCut({ first: first - 1 })}
-            >
-              Start earlier
-            </Button>
-            <Button
-              size="compact-xs"
-              variant="default"
-              disabled={disabled || first >= last}
-              onClick={() => moveCut({ first: first + 1 })}
-            >
-              Start later
-            </Button>
-            <Button
-              size="compact-xs"
-              variant="default"
-              disabled={disabled || last <= first}
-              onClick={() => moveCut({ last: last - 1 })}
-            >
-              End earlier
-            </Button>
-            <Button
-              size="compact-xs"
-              variant="default"
-              disabled={disabled || last >= words.length - 1}
-              onClick={() => moveCut({ last: last + 1 })}
-            >
-              End later
-            </Button>
-            {match !== null && (first !== match.first || last !== match.last) && (
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                disabled={disabled}
-                onClick={() => setCutWords({ first: match.first, last: match.last })}
-              >
-                Back to the proposed cut
-              </Button>
-            )}
-          </Group>
-          {trimQuery.isError && (
-            <Text size="xs" c="red">
-              {describeError(trimQuery.error)}
-            </Text>
-          )}
-          {trim !== undefined && (
-            <Stack gap={2}>
-              <Group gap="xs">
-                {trimQuery.isFetching && <Loader size="xs" />}
-                <Text
-                  size="sm"
-                  c={length !== null && (length < MIN_CLIP_S || length > MAX_CLIP_S) ? "red" : undefined}
-                >
-                  {seconds(trim.in_s)} to {seconds(trim.out_s)}, {trim.length_s.toFixed(1)} s (a
-                  sound bite is {MIN_CLIP_S} to {MAX_CLIP_S} s)
-                </Text>
-              </Group>
-              <Text size="xs" c={trim.in_clean ? "dimmed" : "orange"}>
-                Start: {trim.in_clean ? "in a quiet gap" : "not in a quiet gap. Listen to it."}
-              </Text>
-              <Text size="xs" c={trim.out_clean ? "dimmed" : "orange"}>
-                End: {trim.out_clean ? "in a quiet gap" : "not in a quiet gap. Listen to it."}
-              </Text>
-              {trim.warnings.map((text) => (
-                <Text key={text} size="xs" c="orange">
-                  {text}
-                </Text>
-              ))}
-            </Stack>
-          )}
-        </Stack>
-      )}
-
-      {isBite && (
-        <Stack gap="xs">
-          <Text size="xs" fw={600}>
-            Lower third and recording date
-          </Text>
-          <Group grow align="flex-start">
-            <TextInput
-              size="xs"
-              label="Name"
-              value={fields.speaker}
-              maxLength={SPEAKER_MAX}
-              disabled={disabled}
-              onChange={(event) => edit({ speaker: event.currentTarget.value })}
-            />
-            <TextInput
-              size="xs"
-              label="Role at the time"
-              placeholder="CEO, Nvidia"
-              value={fields.role}
-              maxLength={LINE_MAX}
-              disabled={disabled}
-              onChange={(event) => edit({ role: event.currentTarget.value })}
-            />
-            <TextInput
-              size="xs"
-              label="Venue or event"
-              placeholder="SIEPR Economic Summit"
-              value={fields.venue}
-              maxLength={LINE_MAX}
-              disabled={disabled}
-              onChange={(event) => edit({ venue: event.currentTarget.value })}
-            />
-          </Group>
-          <Group align="flex-end">
-            <TextInput
-              size="xs"
-              type="date"
-              label="Recording date"
-              value={fields.recorded}
-              max={clip.upload_date ?? undefined}
-              disabled={disabled}
-              onChange={(event) =>
-                edit({ recorded: event.currentTarget.value, dateConfirmed: false })
-              }
-            />
-            <Checkbox
-              size="xs"
-              label="This is when it was recorded, not when it was uploaded"
-              checked={fields.dateConfirmed}
-              disabled={disabled || !DATE_PATTERN.test(fields.recorded)}
-              onChange={(event) => edit({ dateConfirmed: event.currentTarget.checked })}
-            />
-          </Group>
-          {published === "" && (
-            <Text size="xs" c="orange">
-              The agent found no recording date. Find it (the event&apos;s own page) before you
-              confirm one.
+          <Text size="sm">{speaker}</Text>
+          {secondLine !== "" && (
+            <Text size="xs" c="dimmed">
+              {secondLine}
             </Text>
           )}
         </Stack>
@@ -521,85 +292,25 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
         </Text>
       ))}
 
-      {isBite && askedFlags.length > 0 && (
-        <Stack gap={4}>
-          <Text size="xs" fw={600}>
-            Flags to check. Tick each one when you have checked it.
-          </Text>
-          {askedFlags.map((flag) => (
-            <Checkbox
-              key={flag.code}
-              size="xs"
-              label={flag.message}
-              checked={ticked.includes(flag.code)}
-              disabled={disabled}
-              onChange={(event) =>
-                edit({
-                  acknowledged: event.currentTarget.checked
-                    ? [...ticked, flag.code]
-                    : ticked.filter((code) => code !== flag.code),
-                })
-              }
-            />
-          ))}
-        </Stack>
-      )}
-      {!isBite &&
-        clip.flags.map((flag) => (
-          <Text key={flag.code} size="xs" c="orange">
-            {flag.message}
-          </Text>
-        ))}
-
-      {isBite && needsNote && (
-        <Textarea
-          size="xs"
-          label="Rights note"
-          description="One line: why showing this clip is fair or permitted (the licence is not Creative Commons)."
-          autosize
-          minRows={1}
-          maxRows={3}
-          maxLength={NOTE_MAX}
-          value={fields.rightsNote}
-          disabled={disabled}
-          onChange={(event) => edit({ rightsNote: event.currentTarget.value })}
-        />
-      )}
-
-      {isBite && (
-        <Switch
-          size="xs"
-          label="Music off under this clip"
-          description="Instead of only lowering it. Use it for a clip where any music would be heard. More than three of these in ten minutes can feel choppy."
-          checked={fields.musicDrop}
-          disabled={disabled}
-          onChange={(event) => edit({ musicDrop: event.currentTarget.checked })}
-        />
+      {!isBite && (
+        <Text size="xs" c="dimmed">
+          This claim is not a sound bite, so the video is context only: it can be accepted for
+          the description&apos;s sources, but it is never shown on video.
+        </Text>
       )}
 
       {isBite && (
         <Stack gap={4}>
           <Group gap="sm">
-            {accepted ? (
-              <Button
-                size="xs"
-                color="green"
-                disabled={disabled || missing.length > 0 || !dirty || details === null}
-                onClick={() => details !== null && onAccept(details)}
-              >
-                Save changes
-              </Button>
-            ) : (
-              <Button
-                size="xs"
-                color="green"
-                variant="light"
-                disabled={disabled || missing.length > 0 || details === null}
-                onClick={() => details !== null && onAccept(details)}
-              >
-                Accept
-              </Button>
-            )}
+            <Button
+              size="xs"
+              color="green"
+              variant={accepted ? "filled" : "light"}
+              disabled={disabled || accepted || blockers.length > 0}
+              onClick={onAccept}
+            >
+              {accepted ? "Accepted" : "Accept"}
+            </Button>
             <Button
               size="xs"
               color="gray"
@@ -610,9 +321,9 @@ export function SoundbiteClipPanel({ item, projectId, claim, disabled, onAccept,
               Reject
             </Button>
           </Group>
-          {missing.length > 0 && (
+          {!accepted && blockers.length > 0 && (
             <Text size="xs" c="dimmed">
-              To accept this clip: {missing.join("; ")}.
+              This clip cannot be accepted: {blockers.join("; ")}.
             </Text>
           )}
         </Stack>

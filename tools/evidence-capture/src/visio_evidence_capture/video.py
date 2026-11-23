@@ -49,6 +49,8 @@ MAX_QUOTE_S: Final = MAX_WINDOW_S - 2 * VIDEO_PAD_S
 # A sound bite is 3 to 15 s (§4.7). The review enforces it; the tool only says so early.
 LONG_QUOTE_S: Final = 15.0
 PROBE_TIMEOUT_S: Final = 60
+# The most characters of the role and of the venue (the lower third's lines, as in the app).
+LINE_MAX_CHARS: Final = 80
 
 FORMAT: Final = f"bv*[height<={MAX_VIDEO_HEIGHT}]+ba/b[height<={MAX_VIDEO_HEIGHT}]"
 # Passed to the ffmpeg that makes the window (`external_downloader_args`, the output side).
@@ -267,10 +269,15 @@ def capture_video(
     near: str | None,
     as_context: bool,
     described: Described,
+    role: str | None = None,
+    venue: str | None = None,
 ) -> Captured:
     """Find `quote` in the captions of the video at `url`, and download the window around it.
-    Refuses clearly when anything is wrong.
+    Refuses clearly when anything is wrong. `role` and `venue` are the agent's words for the
+    lower third of a sound bite clip.
     """
+    role = _line("role", role)
+    venue = _line("venue", venue)
     claim = rnd.claim(claim_id)
     if claim.get("want", "evidence") != "soundbite" and not as_context:
         raise Refused(
@@ -390,6 +397,8 @@ def capture_video(
         "channel_id": _text(info.get("channel_id")),
         "upload_date": upload_date_of(info),
         "licence": licence_of(info),
+        "role": role,
+        "venue": venue,
         "duration_s": float(duration),
         "window": {"start_s": window_start, "end_s": window_end},
         "quote_at_s": {"start": round(match.start_s, 3), "end": round(quote_end, 3)},
@@ -421,8 +430,13 @@ def capture_video(
         )
     if not described.published:
         notes.append(
-            "No --recorded date was given. The review needs the recording date, not the upload "
-            "date: say how you know it in --what-it-says."
+            "No --recorded date was given, so the lower third will use the upload date. Give the "
+            "recording date when you can find it, and say how you know it in --what-it-says."
+        )
+    if not role or not venue:
+        notes.append(
+            "No --role or no --venue was given. The lower third shows only what is given: add "
+            "them (the speaker's role at the time, the event) when you can find them."
         )
     for warning in log.warnings:
         notes.append(f"yt-dlp: {warning[:300]}")
@@ -438,6 +452,21 @@ def capture_video(
         capture=capture,
     )
     return Captured(entry=entry, files=files, notes=notes)
+
+
+def _line(label: str, value: str | None) -> str | None:
+    """A lower third line the agent gave: one printable line of at most `LINE_MAX_CHARS`
+    characters, or None when it is empty or not given. Refuses a longer one."""
+    if value is None or not value.strip():
+        return None
+    text = " ".join(value.split())
+    if not text.isprintable():
+        raise Refused(f"{label} has a character that cannot be shown.")
+    if len(text) > LINE_MAX_CHARS:
+        raise Refused(
+            f"{label} is too long ({len(text)} characters, the limit is {LINE_MAX_CHARS})."
+        )
+    return text
 
 
 def _text(value: object, limit: int = 200) -> str | None:

@@ -98,6 +98,8 @@ MAX_WINDOW_S: Final = 90.0
 VIDEO_DURATION_TOLERANCE_S: Final = 0.5
 MAX_VIDEO_HEIGHT: Final = 1080
 LICENCES: Final = ("standard", "creative_commons", "unknown")
+# The most characters of a clip's role and venue, the lines of the lower third (SB-016).
+LINE_MAX_CHARS: Final = 80
 VIDEO_ID: Final = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_HOSTS: Final = ("youtube.com", "youtu.be")
 
@@ -832,6 +834,15 @@ def _check_video_capture(capture: dict[str, Any], problem: _Reasons) -> None:
         value = capture.get(key)
         if value is not None and not (isinstance(value, str) and len(value) <= 200):
             problem(f"capture.{key} is not text or is too long.")
+    for key in ("role", "venue"):
+        line = capture.get(key)
+        if line is not None and not (
+            isinstance(line, str) and 0 < len(line) <= LINE_MAX_CHARS and line.isprintable()
+        ):
+            problem(
+                f"capture.{key} must be one printable line of at most "
+                f"{LINE_MAX_CHARS} characters, or null."
+            )
 
     duration = capture.get("duration_s")
     window = capture.get("window")
@@ -892,6 +903,8 @@ def _tidy_video_capture(capture: dict[str, Any]) -> dict[str, Any]:
         "channel_id": capture.get("channel_id"),
         "upload_date": capture.get("upload_date"),
         "licence": capture["licence"],
+        "role": capture.get("role"),
+        "venue": capture.get("venue"),
         "duration_s": float(capture["duration_s"]),
         "window": {"start_s": float(window["start_s"]), "end_s": float(window["end_s"])},
         "quote_at_s": {"start": float(at["start"]), "end": float(at["end"])},

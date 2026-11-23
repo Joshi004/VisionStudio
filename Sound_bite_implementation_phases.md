@@ -286,6 +286,7 @@ Planning in SB-001 decides the names. The feature needs:
 | SB-013 | Face tracking for portrait | Code, later | SB-010 | Deferred |
 | SB-014 | Sharper edges: forced alignment and speaker change | Code, later | SB-010 | Deferred |
 | SB-015 | GLM chooses the sound bites | Code | SB-005 | Completed (2026-11-23) |
+| SB-016 | Accept or reject only: the app fills in the clip's details | Code | SB-007 | Completed (2026-11-23) |
 
 **Tracks that can run at the same time:**
 
@@ -293,7 +294,7 @@ Planning in SB-001 decides the names. The feature needs:
 - **Mac tools:** SB-003 → SB-004, now. They depend only on §4.4 and §4.5.
 - **Backend:** SB-001 → {SB-005, SB-006} → SB-007 → SB-008 → SB-009.
 
-**Progress snapshot:** 9 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008, SB-009, SB-015); 1 in progress (SB-004, Claude Code run pending).
+**Progress snapshot:** 10 completed (SB-001, SB-002, SB-003, SB-005, SB-006, SB-007, SB-008, SB-009, SB-015, SB-016); 1 in progress (SB-004, Claude Code run pending).
 
 ---
 
@@ -576,7 +577,7 @@ Planning in SB-001 decides the names. The feature needs:
 
 ### SB-007 — The review screen for sound bites
 
-**Status:** Completed (2026-11-22)
+**Status:** Completed (2026-11-22). **Amended by SB-016:** the owner no longer types or ticks anything for a clip; the trim, lower third, date, flags and rights note below are now filled in by the app, and the owner only accepts or rejects.
 
 **Objective.** The owner can judge a clip as a journalist would before accepting it.
 
@@ -779,6 +780,23 @@ Re-align only the two edge words with a forced aligner (about 20 ms against Para
 
 **Limits.** GLM cannot know whether a recording exists; a wrong choice costs one research attempt and the narrator's reading is the fallback. A quote that breaks the cut rule is still refused: the app never rewrites the script (SB-9).
 
+### SB-016 — Accept or reject only: the app fills in the clip's details
+
+**Status:** Completed (2026-11-23)
+
+**Objective.** This is a prototype and the owner does not want to handle licences, fair use or form fields. Reviewing a sound bite clip is Accept or Reject; the app decides where the clip starts and ends and everything else. Web and PDF pieces, and a video kept only as context, are reviewed as before.
+
+**What was built.**
+
+- **The agent gives role and venue.** The `video` command takes `--role` and `--venue` (one printable line each, at most 80 characters; optional). They are stored in `capture.role` and `capture.venue`, checked by `validate` and by the import (`evidence_checks._check_video_capture`, `_tidy_video_capture`). `SKILL.md` and `reference.md` ask for them; the skill was reinstalled.
+- **The app fills the details on Accept.** `evidence_review._auto_details` builds the `soundbite` object: the first and last word of the heard match, the cut the import proposed (`proposed_trim`), the claim's speaker, `capture.role` and `capture.venue`, the recording date (`source.published` when it is a real date, not in the future and not after the upload, else the upload date, else empty), every required flag acknowledged, no rights note, music only lowered. `_with_clip_details` (was `_with_cuts`) uses it for an accepted clip that comes without details, or keeps the details stored for it.
+- **Relaxed `check_clip`.** Still required: the clip was heard, its fidelity is `exact` or `near`, the cut exists and is 3 to 15 s, a speaker. Gone: the role, venue, recording date, flag and rights note requirements. When a role, venue or date is there it must still be showable (a real date, not in the future, not after the upload).
+- **The card.** `SoundbiteClipPanel.tsx` shows the player at the cut, the heard words, the fidelity, the cut, the lower third as the app made it, the flags as plain text, and Accept and Reject. Accept is disabled only when the app itself cannot make a usable clip, with the reason shown. `SoundbiteOut` has `role` and `venue`.
+
+**What does not change.** The render (`lower_third_lines` already leaves out empty parts), the cut plan, the claims, the brief, text and PDF evidence, and decisions already stored (their details are kept as they are). The trim preview endpoint and `useSoundbiteTrim` are no longer used by the card.
+
+**Limits.** Nothing in the app now records why a clip may be shown (no rights note, no acknowledged flags): get legal advice before publishing. A clip whose proposed cut is outside 3 to 15 s can only be rejected, since the owner cannot move the cut. A round captured before this phase has no role or venue, so its lower third shows only the name and the date.
+
 ---
 
 ## 7. Progress tracking
@@ -843,3 +861,4 @@ From `explainer_scripts/nvidia/script.txt`. **None has been searched for on YouT
 | 2026-11-22 | SB-008 | Completed: `soundbite` shot type (fixed in the planner's request, refused otherwise), `shown_soundbites`, `inputs.soundbites_sha256`, replaced spans filled from the clips' cut lengths, `take_map.place_s`, the take cut at each bite in `voice_pieces`, narrator captions and callouts dropped under a bite, scene render placeholder for the bite, `ShotType` literals and `schema.d.ts`, plans panel lines. No migration. Verified on throwaway scripts (pure functions); the identity check on a real snapshot is pending the owner's go-ahead. |
 | 2026-11-22 | SB-009 | Completed: the sound bite in the render. `evidence_clip` `soundbite` (clip cut on the accepted points, fitted full or over a blurred copy, motion overlay with lower third and credit, own sound kept) and the review's rendered preview, both through `render_evidence_clip`; the bite shot plays the clip with a static gain against the narrator, a deeper music duck or the per-bite music drop, speaker-coloured captions (ASS, YTT), `?t=` link in the description, out-of-date rules, `music_drop` in the decision. No migration. Verified on throwaway scripts with a throwaway motion service; the identity check on a real snapshot is pending the owner's go-ahead. |
 | 2026-11-23 | SB-015 | Completed: GLM chooses sound bites when it proposes claims (prompt, `Answer` with `soundbite`/`speaker` and `soundbites`, code gate in `save_ai_version`, `want_by` on claims, `job.output.soundbites` and `soundbites_left_out`, "Sound bite · GLM" badge). No migration. SB-3 amended. |
+| 2026-11-23 | SB-016 | Completed: the owner only accepts or rejects a sound bite clip. `--role`/`--venue` on the capture tool (stored in `capture`, checked on import), skill reinstalled; `evidence_review._auto_details` and `_with_clip_details` fill the cut, speaker, role, venue, date and flags; `check_clip` relaxed (no role, venue, date, flag or rights note requirement); `SoundbiteClipPanel.tsx` reduced to read-only information, Accept and Reject; `role` and `venue` in `SoundbiteOut`. No migration. SB-007 amended. |

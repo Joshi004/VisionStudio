@@ -525,6 +525,9 @@ class SoundbiteOut(BaseModel):
     channel: str | None
     upload_date: str | None
     licence: Literal["standard", "creative_commons", "unknown"] | None
+    # The agent's lines for the lower third (SB-016), from the capture; null when not given.
+    role: str | None
+    venue: str | None
     window: SoundbiteWindowOut | None
     quote_at_s: SoundbiteQuoteAtOut | None
     transcription: SoundbiteTranscriptionOut
@@ -810,6 +813,8 @@ def _soundbite_out(
         channel=_text(capture.get("channel")),
         upload_date=_text(capture.get("upload_date")),
         licence=cast(Any, capture.get("licence")),
+        role=_text(capture.get("role")),
+        venue=_text(capture.get("venue")),
         window=window_out,
         quote_at_s=at_out,
         transcription=SoundbiteTranscriptionOut(

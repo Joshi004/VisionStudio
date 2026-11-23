@@ -150,7 +150,7 @@ type PieceProps = {
   shown: boolean;
   disabled: boolean;
   onVerdict: (verdict: "accepted" | "rejected") => void;
-  onAcceptClip: (details: SoundbiteDecision) => void;
+  onAcceptClip: () => void;
   onShown: (shown: boolean) => void;
   previewStarting: boolean;
   onPreview: () => void;
@@ -568,7 +568,7 @@ function ClaimCard({
             shown={claim.shown.includes(item.item_key)}
             disabled={disabled}
             onVerdict={(verdict) => setVerdict(item.item_key, verdict)}
-            onAcceptClip={(details) => setVerdict(item.item_key, "accepted", details)}
+            onAcceptClip={() => setVerdict(item.item_key, "accepted")}
             onShown={(on) => setShown(item.item_key, on)}
             previewStarting={previewingKey === item.item_key}
             onPreview={() => onPreview(item.item_key)}

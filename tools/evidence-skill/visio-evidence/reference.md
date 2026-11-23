@@ -57,17 +57,18 @@ TOOL video --claim c4 --evidence e1 --url "https://www.youtube.com/watch?v=XXXXX
   --relation supports --tier primary \
   --publisher "Example University" \
   --what-it-says "One plain sentence: who says it, where, and how the date and the context were checked." \
-  --recorded 2026-03-20
+  --recorded 2026-03-20 --role "Professor of Economics, Example University" --venue "Example Economic Summit"
 ```
 
 The tool reads the video's English captions, finds the quote in them, and downloads only that part of the video (the quote plus about 15 seconds on each side, at most 90 seconds, at most 1080p). It writes `e1.mp4`, `e1-captions.json`, `e1.txt` (the captions of the window as plain text) and the result. A capture takes about half a minute.
 
 - Required: `--claim`, `--evidence`, `--url`, `--quote`, `--relation`, `--tier`, `--publisher`, `--what-it-says`.
-- Optional: `--near MM:SS` (or `H:MM:SS`, or plain seconds), `--recorded YYYY-MM-DD`, `--title`, `--author`, `--archive-url`, `--notes`, `--as-context`.
+- Optional: `--near MM:SS` (or `H:MM:SS`, or plain seconds), `--recorded YYYY-MM-DD`, `--role`, `--venue`, `--title`, `--author`, `--archive-url`, `--notes`, `--as-context`.
 - `--url` is one YouTube video (`youtube.com/watch?v=...` or `youtu.be/...`). A playlist, a channel or any other site is refused. There is no cookie, login or account.
 - `--quote`: at least 4 words, as the captions have them. A loose match is used (most of the words, in order), so a "you know" or a different spelling does not matter. Use the claim's `text` first.
 - `--near`: where in the video the quote is, when you know it. The tool uses it to choose between several matches.
 - `--recorded`: the recording date, not the upload date. It is stored as the evidence's `published` date. Say in `--what-it-says` how you know it.
+- `--role` and `--venue`: the two lines of the lower third under the clip, as you give them: the speaker's role at the time (for example `"CEO, Nvidia"`) and the event (for example `"SIEPR Economic Summit"`). One line each, at most 80 characters. The owner does not type them, so give only what you have checked, and leave one out when you do not know it.
 - `--as-context`: only for a claim that is **not** a sound bite claim and needs a video as background. A sound bite claim never needs it.
 - `--publisher` is the channel's owner (for example the university), `--title` defaults to the video's title.
 - Check the clip's quote length: a sound bite is 3 to 15 seconds.
@@ -80,7 +81,8 @@ The tool reads the video's English captions, finds the quote in them, and downlo
 | `The quote is in the captions N times` | Run again with `--near` set to the time you want. |
 | `The quote runs for about N s ... the review will not accept a longer one` | Choose a shorter quote that carries the point, or keep the clip and report `partial` with the reason. |
 | `--recorded ... is later than the upload date` | The date is wrong or is the date of something else. Find the right date, or leave `--recorded` out and say so. |
-| `No --recorded date was given` | Fine only when you could not find the date. Say so in `--what-it-says`. |
+| `No --recorded date was given` | Fine only when you could not find the date; the lower third then uses the upload date. Say so in `--what-it-says`. |
+| `No --role or no --venue was given` | Fine only when you could not find it. The lower third shows only what is given. |
 | `The captions are YouTube's automatic ones` | Names and numbers may be wrong in `e1.txt`. The app transcribes the clip itself later, so this is not a problem for the clip. |
 | A message that ends with advice about `blocked` (bot check, age gate, private, members only, unavailable, no English captions) | The video cannot be captured. Report the claim `blocked` if this was the right video and you kept nothing else, and add an `--attempt`. |
 | `yt-dlp could not get the video` with a note about `uv lock --upgrade-package yt-dlp` | It may be a fault of the downloader and not of the video. Tell the owner, and report the claim as `blocked` with that attempt. |
@@ -204,7 +206,7 @@ TOOL video --claim c4 --evidence e1 --url "https://www.youtube.com/watch?v=AAAAA
   --quote "build the thing people ask for not the thing you like" --near 12:40 \
   --relation supports --tier primary --publisher "Example University" \
   --what-it-says "Ana Reyes says it at the university's 2025 founders' lecture; the date is on the event page; the next sentences keep the point." \
-  --recorded 2025-05-14
+  --recorded 2025-05-14 --role "Founder and CEO, Example Labs" --venue "Example University Founders' Lecture"
 TOOL report --claim c4 --status found \
   --summary "Clip captured from Example University's own channel; the captions show Reyes saying the words and the next sentences repeat the point." \
   --attempt "https://www.youtube.com/watch?v=BBBBBBBBBBB" "an explainer channel retelling the lecture, not the original"
@@ -246,7 +248,7 @@ TOOL video --claim c8 --evidence e1 --url "https://www.youtube.com/watch?v=EEEEE
   --quote "we will never open the platform to outside developers" \
   --relation partly_supports --tier primary --publisher "Example Corp" \
   --what-it-says "The CEO says it at the 2024 keynote, but in the next sentence (see e1.txt) she says that this changed the following year." \
-  --recorded 2024-09-10
+  --recorded 2024-09-10 --role "CEO, Example Corp" --venue "Example Corp 2024 keynote"
 TOOL report --claim c8 --status partial \
   --summary "Clip captured from the company's own channel, but the speaker turns the point in the next sentence, so the clip alone would mislead."
 ```

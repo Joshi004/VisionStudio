@@ -17681,6 +17681,10 @@ export interface components {
             upload_date: string | null;
             /** Licence */
             licence: ("standard" | "creative_commons" | "unknown") | null;
+            /** Role */
+            role: string | null;
+            /** Venue */
+            venue: string | null;
             window: components["schemas"]["SoundbiteWindowOut"] | null;
             quote_at_s: components["schemas"]["SoundbiteQuoteAtOut"] | null;
             transcription: components["schemas"]["SoundbiteTranscriptionOut"];

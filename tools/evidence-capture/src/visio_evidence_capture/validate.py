@@ -37,7 +37,7 @@ from . import (
 from .pdf import find_in_text, open_pdf, page_text
 from .rounds import DATE_TEXT, EVIDENCE_ID, Refused, Round
 from .text import normalise, normalise_with_map
-from .video import media_problems, probe_video
+from .video import LINE_MAX_CHARS, media_problems, probe_video
 from .youtube import (
     MIN_QUOTE_WORDS,
     VIDEO_ID,
@@ -523,6 +523,15 @@ def _validate_video(
             date.fromisoformat(upload_date)
         except ValueError:
             problem("capture.upload_date must be a date written YYYY-MM-DD, or null.")
+    for key in ("role", "venue"):
+        line = capture.get(key)
+        if line is not None and not (
+            isinstance(line, str) and 0 < len(line) <= LINE_MAX_CHARS and line.isprintable()
+        ):
+            problem(
+                f"capture.{key} must be one printable line of at most "
+                f"{LINE_MAX_CHARS} characters, or null."
+            )
 
     usable = _video_files(rnd, folder, capture, named, problem)
     length = _check_window(capture, problem)
