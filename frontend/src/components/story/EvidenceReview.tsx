@@ -27,7 +27,7 @@ import {
   type SoundbiteDecision,
 } from "../../api/evidence";
 import { EvidencePreview, ReadabilityWarning } from "./EvidencePreview";
-import { SoundbiteClipPanel, type ClipClaim } from "./SoundbiteClipPanel";
+import { SoundbiteClipPanel, type ClipClaim, type CutWords } from "./SoundbiteClipPanel";
 import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
 
 type EvidenceReviewProps = {
@@ -150,7 +150,7 @@ type PieceProps = {
   shown: boolean;
   disabled: boolean;
   onVerdict: (verdict: "accepted" | "rejected") => void;
-  onAcceptClip: () => void;
+  onAcceptClip: (cut?: CutWords) => void;
   onShown: (shown: boolean) => void;
   previewStarting: boolean;
   onPreview: () => void;
@@ -439,12 +439,19 @@ function ClaimCard({
     itemKey: string,
     verdict: "accepted" | "rejected",
     soundbite?: SoundbiteDecision,
+    cut?: CutWords,
   ) => {
     const current = decisionOf(claim);
     const item = claim.items.find((entry) => entry.item_key === itemKey);
+    // A cut is only the owner's words: the server finds the times and fills in the details.
     const items = [
       ...current.items.filter((entry) => entry.item_key !== itemKey),
-      { item_key: itemKey, verdict, ...(soundbite !== undefined ? { soundbite } : {}) },
+      {
+        item_key: itemKey,
+        verdict,
+        ...(soundbite !== undefined ? { soundbite } : {}),
+        ...(cut !== undefined ? { cut } : {}),
+      },
     ];
     const others = current.shown.filter((entry) => entry !== itemKey);
     // An accepted piece is shown by default; the owner can untick it. Saving new details of a
@@ -568,7 +575,7 @@ function ClaimCard({
             shown={claim.shown.includes(item.item_key)}
             disabled={disabled}
             onVerdict={(verdict) => setVerdict(item.item_key, verdict)}
-            onAcceptClip={() => setVerdict(item.item_key, "accepted")}
+            onAcceptClip={(cut) => setVerdict(item.item_key, "accepted", undefined, cut)}
             onShown={(on) => setShown(item.item_key, on)}
             previewStarting={previewingKey === item.item_key}
             onPreview={() => onPreview(item.item_key)}

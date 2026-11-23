@@ -8316,6 +8316,17 @@ export interface components {
             /** Look Id */
             look_id: number;
         };
+        /**
+         * CutWordsIn
+         * @description The first and last heard word of the cut the owner chose for a clip (SB-017). The app
+         *     finds the cut's times in the clip's audio.
+         */
+        CutWordsIn: {
+            /** First Word */
+            first_word: number;
+            /** Last Word */
+            last_word: number;
+        };
         /** DatabaseStatus */
         DatabaseStatus: {
             /** Ok */
@@ -10854,6 +10865,7 @@ export interface components {
              */
             verdict: "accepted" | "rejected";
             soundbite?: components["schemas"]["SoundbiteDecisionIn"] | null;
+            cut?: components["schemas"]["CutWordsIn"] | null;
         };
         /** JobCapacity */
         JobCapacity: {

@@ -113,6 +113,10 @@ class Decision:
     # item_key -> the owner's sound bite details of an accepted clip (SB-007), as stored in
     # `evidence_review.content` (see `SOUNDBITE_FIELDS`).
     soundbites: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # item_key -> (first_word, last_word): the cut the owner chose for an accepted clip, as words
+    # of the clip (SB-017). Only for a decision being saved: `_with_clip_details` turns it into
+    # `soundbites`, and it is never stored.
+    cuts: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
 # The fields of a clip's `soundbite` object, in the order they are stored.
@@ -331,7 +335,8 @@ def check_decision(
     clips (`clips`, by item key, for every usable `video` piece; SB-007): an accepted clip of a
     sound bite claim must pass `check_clip`; sound bite details belong only to such a clip; a
     video that is only context is never shown; at most one clip is shown, and then nothing
-    else. Pure.
+    else. A cut (SB-017) belongs only to an accepted clip of a sound bite claim and must name
+    words of the clip. Pure.
     """
     clips = clips or {}
     allowed = set(usable_keys)
@@ -358,6 +363,14 @@ def check_decision(
             )
         if decision.verdicts.get(key) != ACCEPTED:
             raise EvidenceReviewError("Sound bite details belong only to an accepted clip.")
+    for key, (first, last) in decision.cuts.items():
+        facts = clips.get(key)
+        if facts is None or not facts.soundbite:
+            raise EvidenceReviewError("A cut belongs only to a clip of a sound bite claim.")
+        if decision.verdicts.get(key) != ACCEPTED:
+            raise EvidenceReviewError("A cut belongs only to an accepted clip.")
+        if not 0 <= first <= last < len(facts.words):
+            raise EvidenceReviewError("The start and end words are not words of this clip.")
     for key, verdict in decision.verdicts.items():
         facts = clips.get(key)
         if facts is not None and facts.soundbite and verdict == ACCEPTED:
@@ -843,6 +856,42 @@ def _clean_line(value: object, limit: int = LINE_MAX_CHARS) -> str:
     return "" if _line_problem(line, limit) else line
 
 
+_LICENCE_NOTE: Final = {
+    "standard": "standard",
+    "creative_commons": "Creative Commons",
+    "unknown": "unknown",
+}
+CHANNEL_NOTE_MAX_CHARS: Final = 60
+
+
+def clip_note(item: EvidenceItem, facts: ClipFacts, cut: dict[str, Any]) -> str:
+    """One line on why a clip may be used (SB-017), made from what the app knows and stored as the
+    clip's `rights_note`: whose channel it is, how long the excerpt is, that the narrator comments
+    on it, the licence and how well the words match. `cut` holds `in_s` and `out_s`. It is a
+    record of the app's own facts, not legal advice. Pure.
+    """
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    channel = _clean_line(capture.get("channel"), CHANNEL_NOTE_MAX_CHARS)
+    named = f" ({channel})" if channel else ""
+    if "channel_not_publisher" in facts.flag_codes:
+        source = f"Not the publisher's channel{named}"
+    elif item.source_tier == "primary":
+        source = f"Official channel{named}"
+    elif item.source_tier == "secondary":
+        source = f"Outlet's upload{named}"
+    else:
+        source = f"Other channel{named}"
+    length = float(cut["out_s"]) - float(cut["in_s"])
+    parts = [
+        source,
+        f"{length:.1f} s excerpt",
+        "used with commentary",
+        f"licence: {_LICENCE_NOTE.get(facts.licence or '', 'unknown')}",
+        f"words: {facts.fidelity or 'unknown'}",
+    ]
+    return _clean_line(", ".join(parts) + ".", RIGHTS_NOTE_MAX_CHARS)
+
+
 def _auto_recorded(item: EvidenceItem, facts: ClipFacts, today: date) -> str:
     """The recording date the app uses for a clip: the date the agent gave (`source.published`)
     when it is a real date that is not in the future and not after the upload, else the upload
@@ -860,9 +909,9 @@ def _auto_recorded(item: EvidenceItem, facts: ClipFacts, today: date) -> str:
 def _auto_details(item: EvidenceItem, facts: ClipFacts, today: date) -> dict[str, Any] | None:
     """The `soundbite` object of an accepted clip when the owner only pressed Accept (SB-016): the
     words and the cut the app proposed for the quote, the claim's speaker, the role and venue the
-    agent gave, the recording date (`_auto_recorded`), every flag acknowledged, no rights note and
-    the music only lowered. None when the clip has no usable match or proposed cut, for
-    `check_decision` to refuse with its reason."""
+    agent gave, the recording date (`_auto_recorded`), every flag acknowledged, the app's own note
+    on why the clip may be used (`clip_note`) and the music only lowered. None when the clip has
+    no usable match or proposed cut, for `check_decision` to refuse with its reason."""
     heard = item.heard_words if isinstance(item.heard_words, dict) else {}
     match = heard.get("match")
     trim = item.proposed_trim
@@ -896,7 +945,7 @@ def _auto_details(item: EvidenceItem, facts: ClipFacts, today: date) -> dict[str
         "venue": _clean_line(capture.get("venue")),
         "recorded": _auto_recorded(item, facts, today),
         "acknowledged_flags": facts.required_flags(cut),
-        "rights_note": "",
+        "rights_note": clip_note(item, facts, cut),
         "music_drop": False,
     }
 
@@ -944,6 +993,37 @@ async def _with_clip_details(loaded: _Loaded, claim_id: str, decision: Decision)
             "acknowledged_flags": [code for code in required if code in sent],
         }
     today = date.today()
+    # A clip that comes with a cut and no details (SB-017): the stored or automatic details, with
+    # the cut found in the clip's audio for the chosen words. A cut that does not belong to an
+    # accepted clip, or whose words are not the clip's, is left for `check_decision` to refuse.
+    for key, (first, last) in decision.cuts.items():
+        facts = clips.get(key)
+        if (
+            facts is None
+            or not facts.soundbite
+            or decision.verdicts.get(key) != ACCEPTED
+            or key in filled
+            or not 0 <= first <= last < len(facts.words)
+        ):
+            continue
+        item = loaded.clip_items[key]
+        details = before.get(key) or _auto_details(item, facts, today)
+        if details is None:
+            continue
+        if (details["first_word"], details["last_word"]) != (first, last):
+            try:
+                cut = await soundbite_clips.trim_for(item, first, last)
+            except soundbite_clips.SoundbiteClipError as exc:
+                raise EvidenceReviewError(str(exc)) from exc
+            details = {
+                **details,
+                "first_word": first,
+                "last_word": last,
+                **cut,
+                "acknowledged_flags": facts.required_flags(cut),
+                "rights_note": clip_note(item, facts, cut),
+            }
+        filled[key] = details
     for key, verdict in decision.verdicts.items():
         facts = clips.get(key)
         if verdict != ACCEPTED or facts is None or not facts.soundbite or key in filled:

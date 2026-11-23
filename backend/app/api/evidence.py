@@ -651,11 +651,21 @@ class SoundbiteDecisionIn(BaseModel):
     music_drop: bool = False
 
 
+class CutWordsIn(BaseModel):
+    """The first and last heard word of the cut the owner chose for a clip (SB-017). The app finds
+    the cut's times in the clip's audio and fills in the other details itself."""
+
+    first_word: int = Field(ge=0, le=100_000)
+    last_word: int = Field(ge=0, le=100_000)
+
+
 class ItemVerdictIn(BaseModel):
     item_key: str = Field(max_length=64)
     verdict: Verdict
-    # Only for an accepted clip of a sound bite claim.
+    # Only for an accepted clip of a sound bite claim, and not together with `cut`.
     soundbite: SoundbiteDecisionIn | None = None
+    # Only for an accepted clip of a sound bite claim: the owner moved the cut (SB-017).
+    cut: CutWordsIn | None = None
 
 
 class ClaimDecisionIn(BaseModel):
@@ -998,20 +1008,29 @@ async def put_evidence_claim_decision(
     project = await load_project(session, project_id)
     verdicts: dict[str, str] = {}
     soundbites: dict[str, dict[str, Any]] = {}
+    cuts: dict[str, tuple[int, int]] = {}
     for entry in body.items:
         if entry.item_key in verdicts:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "A piece of evidence has two verdicts.",
             )
+        if entry.soundbite is not None and entry.cut is not None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A clip can come with its details or with a cut, not both.",
+            )
         verdicts[entry.item_key] = entry.verdict
         if entry.soundbite is not None:
             soundbites[entry.item_key] = _soundbite_details(entry.soundbite)
+        if entry.cut is not None:
+            cuts[entry.item_key] = (entry.cut.first_word, entry.cut.last_word)
     decision = evidence_review.Decision(
         verdicts=verdicts,
         shown=list(body.shown),
         no_proof_on_screen=body.no_proof_on_screen,
         soundbites=soundbites,
+        cuts=cuts,
     )
     try:
         result = await evidence_review.save_claim_decision(session, project, claim_id, decision)
