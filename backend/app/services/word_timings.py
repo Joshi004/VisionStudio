@@ -154,7 +154,7 @@ def _fill_gaps(
         while run_end < len(times) and times[run_end] is None:
             run_end += 1
         previous = filled[-1][1] if filled else 0.0
-        following = times[run_end]
+        following = times[run_end] if run_end < len(times) else None
         gap_end = following[0] if following is not None else duration_s
         gap_end = max(gap_end, previous)
         filled.extend(

@@ -5,7 +5,7 @@ A **sound bite** is a short clip (3 to 15 s) of a real person saying, on camera,
 Sound bites are a new kind of evidence (`video`), built on the evidence layer (`Evidence_layer_implementation_phases.md`): the same claims, research round, capture tool, import, review and owner acceptance. What is new is that a sound bite **replaces part of the narration**: the narrator's reading of the quote is cut out of the take at render time and the clip plays in its place, with its own sound. When no clip is accepted, the narrator's reading simply stays.
 
 - The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) and of `Evidence_layer_implementation_phases.md` apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written was `0099`.
-- Written 2026-11-21, from a design discussion with the owner, a feasibility check on 2026-11-20 (§2) and the research report `reports/Sound bite editing in explainers.md` (notes in `research_notes/Sound bite editing in explainers/`). Defaults marked *practitioner* or *inference* in §4.7 come from that report and are starting values to tune by ear.
+- Written 2026-11-21, from a design discussion with the owner, a feasibility check on 2026-11-20 (§2) and the research report `reports/technical/Sound bite editing in explainers.md` (notes in `reports/technical/research_notes/Sound bite editing in explainers/`). Defaults marked *practitioner* or *inference* in §4.7 come from that report and are starting values to tune by ear.
 
 ---
 

@@ -2,7 +2,7 @@
 
 `script.txt` holds only spoken words, for a word-for-word voice check. About 2,680 words, so roughly 16 to 17 minutes at a brisk narrator pace.
 
-Full research with sources: `reports/Nvidia rise story research.md`. Raw notes: `research_notes/Nvidia rise story research/`.
+Full research with sources: `reports/stories/Nvidia rise story research.md`. Raw notes: `reports/stories/research_notes/Nvidia rise story research/`.
 
 ## Story shape
 
