@@ -4,7 +4,7 @@ Same model. Same few weeks. Opposite answers. And here is the uncomfortable part
 
 I'm Naresh Joshi. I lead several AI research projects, and I'm the CEO of Techsergy, where we advise companies on AI and help them build and fine-tune models of their own. So choosing the right model is not a hobby for me. It is the job.
 
-In this video, I'm going to find out why these tests disagree. I'll read the small print in the official announcements, check the independent scoreboards, and look at what users and YouTubers are actually reporting. By the end, you will know which model to use for what. And you will have five questions that tell you more than any leaderboard.
+In this video, I'm going to find out why these tests disagree. I'll read the small print in the official announcements, check the independent scoreboards, and look at what users and YouTubers are actually reporting and where any why we need to pay attention. By the end, you will know which model to use for what. And you will have five questions that tell you more than any leaderboard.
 
 The model is Kimi K3.1 Pro, from Moonshot AI. Its rival is GLM-5.3, from Z.ai. Both companies are based in China, and both release open weights. In simple words, anyone can download the model itself and run it, instead of only renting it from the company.
 

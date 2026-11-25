@@ -16,6 +16,7 @@ import {
 
 import { describeError } from "../../api/errors";
 import {
+  isPoorMatch,
   measuredSeconds,
   useMakeAllSpeech,
   useMakeOneSpeech,
@@ -205,6 +206,13 @@ function TakeLine({
           Too few words matched ({take.word_timing.match_percent ?? 0}% of{" "}
           {take.word_timing.threshold ?? 0}% needed) to cut on.{" "}
           {recorded ? "Record it again." : "Make the take again."}
+        </Text>
+      )}
+      {take.word_timing !== null && isPoorMatch(take.word_timing) && (
+        <Text size="xs" c="yellow.8">
+          Only {take.word_timing.match_percent}% of the words matched what was
+          heard ({take.word_timing.threshold}% expected). The timing uses the
+          words that were heard, so check the captions around misheard words.
         </Text>
       )}
       {take.blocked_reason !== null &&

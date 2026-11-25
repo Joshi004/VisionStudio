@@ -22,9 +22,10 @@ download:
   way and matched to the region's text. Only its timing is stored: whether it can be used is
   worked out on every read (`full_recordings.RegionStatus`), and nothing is queued after it.
 
-A recording whose heard words match the script too little gets estimated timing, which means the
-recording is refused (R-5): the panel says so and the owner records it again. The job itself
-finishes. Logs hold ids, never the text.
+A recording whose heard words match the script less than the threshold keeps its heard times
+(`keep_poor_match`): the panel shows the poor match as a warning and the split goes ahead. Only a
+recording in which no script word was heard gets estimated timing, which means it is refused
+(R-5) and the owner records it again. The job itself finishes. Logs hold ids, never the text.
 """
 
 from __future__ import annotations
@@ -333,7 +334,9 @@ class TimeVoiceRecordingHandler(TimeSpeechWordsHandler):
             transcriber.SpokenWord(word=item[0], start=float(item[1]), end=float(item[2]))
             for item in _heard_words(recorded.get("heard"))
         ]
-        alignment = word_timings.align(recording.text, spoken, recording.duration_s, threshold)
+        alignment = word_timings.align(
+            recording.text, spoken, recording.duration_s, threshold, keep_poor_match=True
+        )
         timing = VoiceRecordingTiming(
             project_id=recording.project_id,
             voice_recording_id=recording.id,

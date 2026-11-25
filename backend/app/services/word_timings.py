@@ -29,6 +29,9 @@ How `align` works:
 - `match_percent` is the share of script tokens that matched exactly. Below the threshold (or
   when nothing was heard) the whole speech gets **estimated** timing instead: each word gets its
   share of the speech's length by character count.
+- A recording a person made is trusted to hold the script (`keep_poor_match`): below the
+  threshold it keeps the heard times, and the board shows the poor match as a warning. Only a
+  recording in which no script word was heard gets estimated timing.
 """
 
 from __future__ import annotations
@@ -223,9 +226,18 @@ def _words_json(
     return words
 
 
-def align(text: str, spoken: Sequence[SpokenWord], duration_s: float, threshold: int) -> Alignment:
+def align(
+    text: str,
+    spoken: Sequence[SpokenWord],
+    duration_s: float,
+    threshold: int,
+    *,
+    keep_poor_match: bool = False,
+) -> Alignment:
     """Gives every script word of `text` a start and an end time. `threshold` is a percent, 0 to
     100: the share of script tokens that must match what was heard for the heard times to be used.
+    With `keep_poor_match` the heard times are used below the threshold too, as long as at least
+    one script token was heard.
     """
     display = text.split()
     heard_text = " ".join(word.word for word in spoken)
@@ -252,7 +264,7 @@ def align(text: str, spoken: Sequence[SpokenWord], duration_s: float, threshold:
 
     token_times, matched, exact = _matched_times(script, heard, duration_s)
     match_percent = round(100 * matched / len(script), 1)
-    if match_percent < threshold:
+    if match_percent < threshold and not (keep_poor_match and matched > 0):
         return estimated(match_percent)
     words = _words_json(display, owners, token_times, duration_s)
     # A word is heard when all of its tokens matched exactly; a word with no token is heard.

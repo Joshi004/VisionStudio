@@ -13,7 +13,8 @@ except the jobs and the rows they make:
 
 - `transcribing`: the timing job is queued or running.
 - `transcription_failed`: it failed or was cancelled, or there is no job and no timing.
-- `refused`: too few of the script's words were heard (R-5). Record it again.
+- `refused`: none of the script's words were heard (R-5), or its scene boundaries could not be
+  found. Record it again. A match below the threshold is only a warning.
 - `tight`: at least one tight scene boundary (too little pause, or a word next to it was not
   heard, R-7) has no decision of the owner yet (REC-005: `decide`, `keep_all`).
 - `splitting`: every tight boundary is decided and the split job is queued or running.

@@ -45,7 +45,7 @@ from app.jobs.gpu_job import (
 from app.jobs.handlers import MODEL_TRANSCRIPTION, JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
-from app.services import gpu_priority, word_timings
+from app.services import gpu_priority, speech_synthesis, word_timings
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -300,7 +300,13 @@ class TimeSpeechWordsHandler(JobHandler):
                 duration_s = audio.duration_s
                 if duration_s is None:
                     duration_s = max((word.end for word in spoken), default=0.0)
-                alignment = word_timings.align(audio.text, spoken, duration_s, threshold)
+                alignment = word_timings.align(
+                    audio.text,
+                    spoken,
+                    duration_s,
+                    threshold,
+                    keep_poor_match=audio.mode == speech_synthesis.MODE_RECORDED,
+                )
                 session.add(
                     SpeechWordTiming(
                         project_id=audio.project_id,

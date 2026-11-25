@@ -274,6 +274,8 @@ type TightBoundariesProps = {
 type PartRowProps = {
   script: FullScript;
   region: PatchRegion;
+  /** The share of words a recording should match, in percent; a patch below it gets a warning. */
+  threshold: number | null;
   canPatch: boolean;
   uploading: boolean;
   retrying: boolean;
@@ -286,6 +288,7 @@ type PartRowProps = {
 function PartRow({
   script,
   region,
+  threshold,
   canPatch,
   uploading,
   retrying,
@@ -326,6 +329,16 @@ function PartRow({
             {region.patch_message}
           </Text>
         )}
+        {region.patch_stage === "accepted" &&
+          region.patch_match_percent !== null &&
+          threshold !== null &&
+          region.patch_match_percent < threshold && (
+            <Text size="xs" c="yellow.8">
+              Only {region.patch_match_percent}% of this part's words matched
+              what was heard ({threshold}% expected). Listen to it before you
+              splice it in.
+            </Text>
+          )}
         <Group gap="xs">
           <Button size="compact-xs" disabled={!canPatch} onClick={onRecord}>
             {region.patch_id === null ? "Record this part" : "Record it again"}
@@ -478,6 +491,7 @@ function TightBoundaries({ projectId, script, newest }: TightBoundariesProps) {
               key={regionKey(region)}
               script={script}
               region={region}
+              threshold={newest.threshold}
               canPatch={newest.can_patch}
               uploading={sendFile.isPending}
               retrying={retryPatch.isPending}
@@ -681,6 +695,17 @@ export function FullRecordingPanel({ projectId }: FullRecordingPanelProps) {
                 {newest.message}
               </Text>
             )}
+            {newest.stage !== "refused" &&
+              newest.match_percent !== null &&
+              newest.threshold !== null &&
+              newest.match_percent < newest.threshold && (
+                <Text size="xs" c="yellow.8">
+                  Only {newest.match_percent}% of the script's words matched
+                  what was heard ({newest.threshold}% expected). The timing uses
+                  the words that were heard, so check the scene cuts and
+                  captions around misheard words.
+                </Text>
+              )}
             {newest.script_changed && (
               <Text size="xs" c="yellow.8">
                 The script was changed after this was recorded. A scene whose

@@ -11,8 +11,10 @@ the timed words never go backwards.
 - `unit_spans` is pure: the units and the timed words go in, the spans come out.
 - `scene_clocks` reads a project: for each scene with a take it gives the words and spans when
   the take is ready and timed from what Parakeet heard, and otherwise the reason the cut planning
-  (FLOW-005) must wait. A take whose match fell below the threshold has **estimated** timing,
-  which is not good enough to cut on, so it is blocked and has to be made again.
+  (FLOW-005) must wait. A made take whose match fell below the threshold has **estimated**
+  timing, which is not good enough to cut on, so it is blocked and has to be made again. A
+  recorded take keeps its heard times below the threshold (`word_timings.align`), so it is timed
+  and goes on; only one in which no word was heard is estimated.
 
 Nothing here is stored. A take is only `ready` when its text is the current units joined, so the
 word counts always line up with the current units.

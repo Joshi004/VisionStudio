@@ -23,6 +23,18 @@ export function speechAudioKey(projectId: number) {
   return [...PROJECTS_KEY, projectId, "speech-audio"] as const;
 }
 
+type WordTiming = NonNullable<SpeechUnitAudio["word_timing"]>;
+
+/** A recording timed from what was heard although fewer words matched than the threshold. */
+export function isPoorMatch(timing: WordTiming): boolean {
+  return (
+    timing.status === "timed" &&
+    timing.match_percent !== null &&
+    timing.threshold !== null &&
+    timing.match_percent < timing.threshold
+  );
+}
+
 /** The measured length of a unit's audio, or of every unit that has some, in seconds. */
 export function measuredSeconds(units: SpeechUnitAudio[]): number {
   return units.reduce(

@@ -1,5 +1,6 @@
 import { Alert, Badge, Button, Group, Stack, Text, Tooltip } from "@mantine/core";
 
+import { isPoorMatch } from "../../api/speechAudio";
 import type { SpeechUnitAudio } from "../../api/speechAudio";
 import type { SpeechUnit, SpeechUnitsContent } from "../../api/speechUnits";
 
@@ -35,6 +36,13 @@ const TIMING_STATUS: Record<
 };
 
 function timingHint(timing: WordTiming): string | null {
+  if (isPoorMatch(timing)) {
+    return (
+      `Only ${timing.match_percent}% of the script's words matched what was heard ` +
+      `(${timing.threshold}% expected). The times come from the words that were heard. ` +
+      `Heard: "${timing.heard_text ?? ""}"`
+    );
+  }
   if (timing.status === "estimated") {
     return (
       `Only ${timing.match_percent ?? 0}% of the script's words matched what was heard ` +
@@ -52,7 +60,9 @@ export function TimingBadge({ timing }: { timing: WordTiming }) {
   if (timing.status === "none") {
     return null;
   }
-  const status = TIMING_STATUS[timing.status];
+  const status = isPoorMatch(timing)
+    ? { label: "Words timed, low match", color: "yellow" }
+    : TIMING_STATUS[timing.status];
   const hint = timingHint(timing);
   const badge = (
     <Badge variant="light" color={status.color}>
