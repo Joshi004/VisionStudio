@@ -1,0 +1,103 @@
+Two independent tests looked at the same AI model this autumn. The first ranked it the smartest open model in the world. The second ranked it fourth out of four, and found that one long coding session cost a hundred and fifty dollars, more than three times what Claude Opus cost for the same job.
+
+Same model. Same few weeks. Opposite answers. And here is the uncomfortable part. As far as I can tell, neither test is wrong.
+
+I'm Naresh Joshi. I lead several AI research projects, and I'm the CEO of Techsergy, where we advise companies on AI and help them build and fine-tune models of their own. So choosing the right model is not a hobby for me. It is the job.
+
+In this video, I'm going to find out why these tests disagree. I'll read the small print in the official announcements, check the independent scoreboards, and look at what users and YouTubers are actually reporting. By the end, you will know which model to use for what. And you will have five questions that tell you more than any leaderboard.
+
+The model is Kimi K3.1 Pro, from Moonshot AI. Its rival is GLM-5.3, from Z.ai. Both companies are based in China, and both release open weights. In simple words, anyone can download the model itself and run it, instead of only renting it from the company.
+
+Kimi is enormous, built from about two point eight trillion parameters, the tiny adjustable numbers that make up an AI's brain. GLM-5.3 is less than a third of that size, and much cheaper per word. Z.ai calls GLM-5.3 the most capable open model for coding. Moonshot says Kimi matches or approaches the strongest closed models. They can't both be the best. Or can they?
+
+Let's start with what the companies say about themselves.
+
+Moonshot says Kimi scores sixty-five point seven percent on a coding test called Terminal-Bench 4.0, just behind Claude Opus 5.5 and ahead of GPT-6 Astra. Z.ai says GLM-5.3 is fifty percent better at coding than the version before it.
+
+The real story is in the small print. Z.ai's fifty percent comes from Z.ai Code Bench, a test Z.ai built itself and keeps private. Z.ai's own figures show the score at maximum effort moving from twenty-three point four percent to thirty-four point five. A real jump. But it is eleven points, on a test nobody outside Z.ai can run.
+
+Moonshot's small print has a different surprise. Under almost every coding score sits the same short line: "Kimi K3.1 Pro is evaluated with the Claude-Code harness." And on a few tests, Kimi ran inside Moonshot's own tool, Kimi Code, while some rivals ran in Claude Code. To be fair, Moonshot was generous elsewhere. On its main coding test, it gave every competitor the highest score it could find for them.
+
+But hold on to that word. Harness. It matters a lot more than it sounds.
+
+Companies grade their own homework. So who checks it?
+
+The best-known independent referee is Artificial Analysis. It runs the same tests on every model itself, and combines them into one score out of a hundred. Here, Kimi wins clearly. Forty-seven, against thirty-two for GLM-5.3 at maximum effort. And Moonshot's coding claim held up. On Terminal-Bench, Artificial Analysis measured Kimi at sixty-seven percent, the top score of any model it tested on that benchmark, open or closed.
+
+So, case closed? Not quite. In June, Z.ai announced that its previous model, GLM-5.2, scored fifty-one on Artificial Analysis. Today, the newer and better GLM-5.3 scores thirty-two. Did GLM get worse? No. On October 27th, Artificial Analysis switched to a new, much harder set of tests, and scores across the board dropped. Fifty-one and thirty-two are not even on the same ruler.
+
+Lesson one. Always check the date, and the version of the test.
+
+Now, back to the test that ranked Kimi fourth out of four.
+
+Bito, a company that makes AI code review tools, ran open models through long, realistic coding sessions, where the AI keeps working on the same project for twenty rounds in a row. On short, hard problems, Kimi beat GLM, sixty point three percent to fifty-one point two. But in the twenty-round session, everything flipped. GLM scored seventy-four percent. Kimi scored fifty-four point eight. GLM's session cost about thirty-five dollars. Kimi's cost a hundred and fifty, and took more than five hours.
+
+How can the same model be a genius on one test and a money pit on another?
+
+Here is the simple version. An AI model does not remember anything between messages. Every time it takes a step, the whole conversation so far is sent to it again. Every file it read, every command it ran. Imagine having to re-read an entire book before you can write the next sentence, while the book gets longer with every page.
+
+According to Bito, Kimi carried up to a million tokens of history, a token being roughly a piece of a word, and sent it again on every request. Each of its long sessions made more than eight hundred requests. That adds up fast.
+
+On Artificial Analysis, where a task took Kimi about half an hour, the opposite happens. Kimi is actually cheaper per task than GLM at maximum effort. Same two models. Opposite answers on price. The difference is the length of the job.
+
+Lesson two. The price per word means very little. Ask what a finished job costs, on a job like yours.
+
+Now, that word. Harness.
+
+An AI model on its own can only write text. To build software, it needs hands. Something that opens files, runs commands, reads the errors and tries again. That is the harness. Claude Code, Kimi Code and Codex are all harnesses. Think of the model as the driver, and the harness as the car.
+
+So how much does the car matter? The experts don't agree. One research team, 8090, ran a smaller sister of GLM-5.3, called GLM-5.3 Flash, in five different harnesses. In one, it passed twenty-four percent of its runs. In another, fifty-nine. Thirty-five points, with nothing changed except the car.
+
+But a public leaderboard tested that same small model in ten harnesses, and found seven of them statistically tied. And a third team found that for the full GLM-5.3, and for Kimi's previous model, switching harness moved the score by only about two points. Their verdict: "The lab's own harness is not automatically best."
+
+So for some models, on some tasks, the car changes everything. For others, it barely matters. Which means when anyone quotes a score, the first question is: in which car?
+
+There is one more hidden layer. Because these models are open, many companies host them. Kimi K3.1 Pro alone has more than twenty hosts on OpenRouter, a service that passes your request to one of them. Same recipe. Different kitchens.
+
+For accuracy, the big hosts land close together. But for tool calls, the moments when the AI asks the harness to do something, the kitchen can matter a lot. In OpenRouter's data for the past week, GLM-5.3's most reliable host produced a broken tool call about four times in ten thousand. Its least reliable host, about nine times in a hundred.
+
+So when someone writes that GLM is broken, it may be the kitchen, not the recipe.
+
+Which brings us to the users.
+
+GLM-5.3's complaints are consistent. It is slow, and one Reddit user said it "often gets into long reasoning loops." But in the same thread, a developer with a ten-year-old codebase and a detailed instruction file for the AI said it "very rarely requires steering." Same model. Very different setups.
+
+Kimi had a rougher launch. One subscriber on the two-hundred-dollar plan said they burned through two five-hour quotas in under six hours. Within days, Moonshot apologised in public: "These were our issues, and we should have fixed them sooner."
+
+And one developer who ran GLM-5.3 inside Claude Code for four months published his logs. Of almost three thousand failed attempts, the biggest single cause, forty-one percent, was not bad code. The connection was cut mid-response. That is not intelligence. That is plumbing.
+
+Even slow depends on who is talking. Next to Claude or GPT, users call GLM slow. Next to Kimi, GLM is the fast one. Artificial Analysis measured Kimi at roughly half GLM's speed, and found Kimi thinking for more than two and a half minutes before the first word of its answer.
+
+Then there is YouTube. One video's title reads: "Kimi K3.1 Pro Is INSANE! CHEAPER & FASTER Than Claude Opus 5.5?!" The data says otherwise. On Artificial Analysis, Kimi was twelve points behind Opus. In Bito's long session, it took more than twice as long as Opus, and cost more than three times as much.
+
+So why do video reviews feel so positive? A typical test gives the model one question, or one app to build, and judges the result. That is exactly where Kimi shines. Almost nobody runs a five-hour session and then checks the bill.
+
+So, is anything consistent? Yes. Two things.
+
+First, everyone agrees Kimi is slow. The independent tests, the users, and Moonshot's own apology.
+
+Second, Kimi seems to make things up less often. Moonshot says its rate of false claims fell from twenty-three point four percent to eight point three, on a stress test it built itself. The independent check points the same way. On Artificial Analysis's knowledge test, which takes away points for confident wrong answers, Kimi scores thirty. GLM-5.3 scores six, and drops below zero at low effort.
+
+And which one is better at coding? That is where the sources disagree. Now we know why. It depends on how long the job is, which harness runs it, and which host serves it.
+
+So here is my verdict, as of late November 2026.
+
+Choose Kimi K3.1 Pro for hard, one-off problems, where getting it right matters more than waiting. Tricky bugs, research, and work where facts matter. Kimi can also read images, and GLM-5.3 reads text only. Just expect to wait, and watch your bill on long sessions.
+
+Choose GLM-5.3 for long coding sessions on a budget. Use low effort when speed matters, pick a reliable host, and give it clear instructions.
+
+And if you need the very best, neither is it yet. When Artificial Analysis launched its new tests, the best open model sat twelve points behind the best closed one.
+
+Now, the five questions. Use them on any AI comparison, including this one.
+
+One. Who ran the test, the company or someone independent?
+
+Two. Which version of the test, and when?
+
+Three. Which harness? In other words, which car?
+
+Four. What does a finished job cost, not a single word?
+
+Five. Is the complaint about the model, or about the service?
+
+And one last thing. On November 22nd, Z.ai released GLM-5.4. So by the time you watch this, some of these numbers have already moved. That is exactly the point. The leaderboard will change next month. These five questions won't.
