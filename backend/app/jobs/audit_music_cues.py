@@ -59,6 +59,8 @@ class _Task:
     row_ids: list[int]
     bible: dict[str, Any]
     avoid: list[str]
+    # A continuous explainer (EXM-004): the explainer prompt and the palette warnings.
+    explainer: bool = False
 
 
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
@@ -78,17 +80,23 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     ):
         return None
     return _Task(
-        plan_id=plan_id, row_ids=list(row_ids), bible=bible, avoid=[str(item) for item in avoid]
+        plan_id=plan_id,
+        row_ids=list(row_ids),
+        bible=bible,
+        avoid=[str(item) for item in avoid],
+        explainer=job_input.get("explainer") is True,
     )
 
 
-def _audit_reader(items: list[dict[str, Any]], avoid: list[str]) -> llm_call.ReadAnswer:
+def _audit_reader(
+    items: list[dict[str, Any]], avoid: list[str], palette: dict[str, str] | None = None
+) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, Any]:
         if result.finish_reason == "length":
             return _TOO_LONG, None
         try:
             answer = music_cue_writer.parse_answer(result.content)
-            return None, music_cue_writer.check_audit(answer, items, avoid=avoid)
+            return None, music_cue_writer.check_audit(answer, items, avoid=avoid, palette=palette)
         except ValueError as exc:
             return str(exc), None
 
@@ -144,7 +152,7 @@ class AuditMusicCuesHandler(JobHandler):
             server_url=docker_mapped(target.base_url), endpoint=llm_target.endpoint(target)
         )
         body = music_cue_writer.build_audit_request(
-            task.bible, cue_lines, items, model=target.model
+            task.bible, cue_lines, items, model=target.model, explainer=task.explainer
         )
         job_input["calls_sent"] = {
             "audit": {
@@ -159,7 +167,11 @@ class AuditMusicCuesHandler(JobHandler):
             job_id,
             target,
             body,
-            _audit_reader(items, task.avoid),
+            _audit_reader(
+                items,
+                task.avoid,
+                music_cue_writer.palette_of(task.bible) if task.explainer else None,
+            ),
             timeout_s=REQUEST_TIMEOUT_S,
             correct=True,
         )

@@ -1140,35 +1140,40 @@ async def reject(session: AsyncSession, project: Project, take_id: int, note: st
     item_key = _item_key(current.plan.id, item.item_id)
     row.rejected_at = utcnow()
     row.reject_note = text
+    job_input: dict[str, Any] = {
+        "item_key": item_key,
+        "take_id": take_id,
+        "plan_id": current.plan.id,
+        "cue_id": item.item["cue_id"],
+        "item_id": item.item_id,
+        "cue_row_id": cue_view.row.id,
+        "detail_sha256": row.detail_sha256,
+        "round": row.round + 1,
+        "claim": was_selected,
+        "bible": bible.content,
+        "cue": cue_view.cue,
+        "detail": cue_view.row.detail,
+        "item": {**item.item, "wordings": []},
+        "previous": None if is_hit else music_cue_writer.neighbour_view(previous, None),
+        "following": None if is_hit else music_cue_writer.neighbour_view(following, None),
+        "joins": [] if is_hit else joins,
+        "rejected_fields": row.fields,
+        "facts": music_cue_writer.facts_text(row.check_result),
+        "note": text,
+        "avoid": music_cues.avoid_list(bible.content),
+        "partition": partition,
+        "seed": _seed(),
+    }
+    if music_bible.explainer_music(project):
+        # Only a continuous explainer's job has the key, so a story's job input is unchanged
+        # (EXM-004).
+        job_input["explainer"] = True
     job, created = await store.create_job(
         session,
         project_id=project.id,
         type=JOB_TYPE,
         provider="llm",
-        input={
-            "item_key": item_key,
-            "take_id": take_id,
-            "plan_id": current.plan.id,
-            "cue_id": item.item["cue_id"],
-            "item_id": item.item_id,
-            "cue_row_id": cue_view.row.id,
-            "detail_sha256": row.detail_sha256,
-            "round": row.round + 1,
-            "claim": was_selected,
-            "bible": bible.content,
-            "cue": cue_view.cue,
-            "detail": cue_view.row.detail,
-            "item": {**item.item, "wordings": []},
-            "previous": None if is_hit else music_cue_writer.neighbour_view(previous, None),
-            "following": None if is_hit else music_cue_writer.neighbour_view(following, None),
-            "joins": [] if is_hit else joins,
-            "rejected_fields": row.fields,
-            "facts": music_cue_writer.facts_text(row.check_result),
-            "note": text,
-            "avoid": music_cues.avoid_list(bible.content),
-            "partition": partition,
-            "seed": _seed(),
-        },
+        input=job_input,
         commit=False,
         dedupe_key="item_key",
     )

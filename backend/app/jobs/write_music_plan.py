@@ -84,6 +84,8 @@ class _Task:
     # Set for a revision from the cues' objections: the plan to revise and the objections.
     previous_plan: dict[str, Any] | None = None
     notes: list[dict[str, Any]] | None = None
+    # A continuous explainer (EXM-004): the explainer prompts and checks.
+    explainer: bool = False
 
 
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
@@ -127,6 +129,7 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
         saved_inputs=saved_inputs,
         previous_plan=previous,
         notes=notes,
+        explainer=job_input.get("explainer") is True,
     )
 
 
@@ -146,7 +149,13 @@ def _plan_reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
         found: list[str] = []
         try:
             answer = writer.parse_answer(result.content)
-            plan = writer.check_plan(answer, index=index, theme_ids=task.theme_ids, warnings=found)
+            plan = writer.check_plan(
+                answer,
+                index=index,
+                theme_ids=task.theme_ids,
+                warnings=found,
+                explainer=task.explainer,
+            )
         except ValueError as exc:
             return str(exc), None
         warnings[:] = found
@@ -246,6 +255,7 @@ class WriteMusicPlanHandler(JobHandler):
                     task.bible,
                     task.timeline,
                     model=target.model,
+                    explainer=task.explainer,
                 ),
                 lambda warnings: _plan_reader(task, warnings),
             )
@@ -272,7 +282,9 @@ class WriteMusicPlanHandler(JobHandler):
         else:
             outcome = await ask(
                 "plan",
-                writer.build_plan_request(task.bible, task.timeline, model=target.model),
+                writer.build_plan_request(
+                    task.bible, task.timeline, model=target.model, explainer=task.explainer
+                ),
                 lambda warnings: _plan_reader(task, warnings),
             )
             first: dict[str, Any] | None = outcome.value
@@ -286,11 +298,16 @@ class WriteMusicPlanHandler(JobHandler):
         for number in range(1, review_rounds + 1):
             shown = writer.plan_for_model(current)
             critiques: list[dict[str, Any]] = []
-            for lens in writer.LENSES:
+            for lens in writer.lenses(task.explainer):
                 outcome = await ask(
                     f"critic_{number}_{lens}",
                     writer.build_critic_request(
-                        lens, shown, task.bible, task.timeline, model=target.model
+                        lens,
+                        shown,
+                        task.bible,
+                        task.timeline,
+                        model=target.model,
+                        explainer=task.explainer,
                     ),
                     partial(_critic_reader, current),
                 )
@@ -324,7 +341,12 @@ class WriteMusicPlanHandler(JobHandler):
             outcome = await ask(
                 f"revise_{number}",
                 writer.build_revise_request(
-                    shown, asked, task.bible, task.timeline, model=target.model
+                    shown,
+                    asked,
+                    task.bible,
+                    task.timeline,
+                    model=target.model,
+                    explainer=task.explainer,
                 ),
                 lambda warnings: _plan_reader(task, warnings),
             )

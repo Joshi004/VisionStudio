@@ -651,25 +651,30 @@ async def start_cue(
     theme, why_not = theme_for(cue, loaded.themes)
     if why_not is not None:
         raise MusicCueError(why_not)
+    job_input: dict[str, Any] = {
+        "cue_id": cue_id,
+        "plan_id": plan.id,
+        "plan_version": plan.version,
+        "bible": loaded.bible.content,
+        "names": loaded.names,
+        "shot_characters": loaded.shot_characters,
+        "theme": theme,
+        "wordings": loaded.wordings,
+        "handles_s": loaded.handles_s,
+        "pushback_allowed": revision_allowed(loaded),
+        "avoid": avoid_list(loaded.bible.content),
+        "saved_inputs": job_inputs(loaded, cue, theme),
+    }
+    if music_bible.explainer_music(project):
+        # Only a continuous explainer's job has the key, so a story's job input is unchanged
+        # (EXM-004).
+        job_input["explainer"] = True
     job, _created = await store.create_job(
         session,
         project_id=project.id,
         type=JOB_TYPE,
         provider="llm",
-        input={
-            "cue_id": cue_id,
-            "plan_id": plan.id,
-            "plan_version": plan.version,
-            "bible": loaded.bible.content,
-            "names": loaded.names,
-            "shot_characters": loaded.shot_characters,
-            "theme": theme,
-            "wordings": loaded.wordings,
-            "handles_s": loaded.handles_s,
-            "pushback_allowed": revision_allowed(loaded),
-            "avoid": avoid_list(loaded.bible.content),
-            "saved_inputs": job_inputs(loaded, cue, theme),
-        },
+        input=job_input,
         dedupe_key="cue_id",
     )
     return job
@@ -709,17 +714,20 @@ async def start_audit(session: AsyncSession, project: Project) -> Job:
     if any(not view.done or not (view.row and view.row.items) for view in wanted):
         raise MusicCueError("Detail every cue first: the audit reads all prompts together.")
     assert loaded.bible is not None and current.detailed_rows
+    job_input: dict[str, Any] = {
+        "plan_id": plan.id,
+        "row_ids": [row.id for row in current.detailed_rows],
+        "bible": loaded.bible.content,
+        "avoid": avoid_list(loaded.bible.content),
+    }
+    if music_bible.explainer_music(project):
+        job_input["explainer"] = True
     job, _created = await store.create_job(
         session,
         project_id=project.id,
         type=AUDIT_JOB_TYPE,
         provider="llm",
-        input={
-            "plan_id": plan.id,
-            "row_ids": [row.id for row in current.detailed_rows],
-            "bible": loaded.bible.content,
-            "avoid": avoid_list(loaded.bible.content),
-        },
+        input=job_input,
     )
     return job
 

@@ -201,7 +201,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXM-004 — The explainer music plan and cue detail
 
-**Status:** Not started
+**Status:** Code done, live run pending
 
 **Objective.** Plan an explainer's music as a voice-first underscore: score and silence only, changes at sections, posts and drops, every cue following the Bible's palette.
 
@@ -239,9 +239,24 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Explainer plan, critic and revise prompts, and answer checks
-- [ ] Explainer cue detail and prompt wording (palette, no hits, text source)
-- [ ] Docs, standard checks
+- [x] Explainer plan, critic and revise prompts, and answer checks
+- [x] Explainer cue detail and prompt wording (palette, no hits, text source)
+- [x] Docs, standard checks
+
+**Completion notes.** Code done 2026-11-27, **live run pending** (the running containers still serve the old code until `docker compose up --build -d`, and the first real plan and cue details are paid model calls the owner starts). No migration. Nothing here calls a model.
+
+- **Planning decided.**
+  - *Post:* a field of a score cue. The model writes `posts` as a list of `unit:` refs; each names the listed gap right after that unit (`music_timeline.Index.gaps_after`). Code checks the gap exists, lies inside the cue and is named once, and stores `{after, start_s, end_s, length_s}`. Code sets `mix.swell_in_gaps` from it, so EXM-005 can rise only at these gaps. Whether a gap is long enough is judged by the `restraint` critic, not by code (most gaps are under 1 s, see EXM-003).
+  - *Longest cue:* calm neighbouring sections may share one cue; code refuses an explainer score cue longer than `EXPLAINER_MAX_CUE_S` (120 s).
+  - *Critic rounds:* the existing `music_plan_critic_rounds`. No new setting.
+  - *EXM-001 fallbacks:* none, so normal cues.
+  - *Drops and joins:* a drop is a short `silence` cue. "`through_silence` only between sections" and "`hard_cut` only at a drop" are prompt and critic rules, not code checks.
+- **Flag.** `music_bible.explainer_music(project)`. The jobs `write_music_plan`, `write_music_cue`, `audit_music_cues` and `rewrite_music_prompt` get `explainer: true` in their input only for such a project, so a story's job input and requests are unchanged. The builders and checks take `explainer=False`.
+- **Plan.** `music_plan_writer`: `EXPLAINER_KINDS`, `EXPLAINER_LENSES` (`section_fit`, `restraint`, `palette`, `joins`; `lenses(explainer)`), the explainer plan, critic and reviser prompts, and `check_plan(..., explainer=True)` (only `score` and `silence`, no `theme_id`, no `shot:` or `event:` ref, the 120 s limit, `posts`). `GET /music-plan` has `explainer`; a cue has optional `posts`; the editor offers only score and silence for an explainer, hides themes and keeps a cue's posts (with a button to clear them).
+- **Cue detail.** `music_cue_writer`: `span_context(..., explainer=True)` (voice only, with `soundbites`), `_EXPLAINER_SPAN_PROMPT` (no hit requests), `check_detail(..., explainer=True)` (hit requests refused, `under_voice` defaults to `low`, `swell_in_gaps` from `posts`, a free edge may not move a post out of the cue), `_EXPLAINER_WORDING_PROMPT` and `_ACE_PALETTE_RULE` (every wording keeps the Bible's instruments, tempo range and key), `_EXPLAINER_AUDIT_PROMPT` (palette drift, no themes), and the rewrite of a rejected take. The cue source is always text.
+- **Palette warnings.** `palette_of(bible)`; a wording whose `keyscale` is not named in `musical_feel.mode_leaning`, or whose `bpm` is outside the range read from `tempo` (when two numbers can be read), gets a warning on its wording (never a refusal).
+- **Checked.** A script with stand-in data (not kept) against `HEAD` (a copy of the tree at `HEAD`): a story's plan, critic (all four lenses), revise, detail (with its context), wording, audit and feedback request bodies, and its `check_plan`, `check_detail`, `check_wordings`, `check_audit` and `check_feedback` results, are byte-for-byte the same. For an explainer: a plan with a bed, point or hit cue, a `shot:` or `event:` ref, a theme, a score cue over 120 s, or a post that is not a listed gap, lies outside its cue, is given twice or is on a silence cue is refused; a detail with hit requests is refused; `swell_in_gaps` follows `posts`; palette warnings fire for a wrong key or tempo. `ruff check`, `ruff format`, `eslint` and `tsc` pass. `schema.d.ts` was edited by hand (`CueIn.posts`, `CueOut.posts`, `PostOut`, `MusicPlanState.explainer`) and is not regenerated from the running API.
+- **Not checked.** `mypy` is not installed in the project's environment, and the job modules cannot be imported outside the containers (no database driver), so the changes to the four jobs and to `music_cues`, `music_takes` and `music_plan` were checked by reading and by `ruff` only. The first real run on project 94 is for the owner after a rebuild: run the plan and read two plans (changes at sections, a post or drop where it helps, no `bed`/`hit`), then the cue details (every prompt follows one palette), and judge them right for an explainer.
 
 ### EXM-005 — The mix for a talking voice
 
@@ -399,7 +414,7 @@ Make a new continuous explainer (for example a short version of project 94's scr
 | EXM-001 | Passed | Owner trial: two section underscores with one palette, their join, and the two sound effects. Marked complete by the owner 2026-11-27. |
 | EXM-002 | Code done, live run pending | Explainer Bible: palette in `sound_world`/`musical_feel`, arc with role and energy, no themes, themes step off. No migration. |
 | EXM-003 | Code done, live run pending | Explainer music timeline (voice only, `soundbites`), voice-only plan inputs (`basis: "voice"`), placement on the voice (`voice_sha256`, no shot cuts), step needs per project. No migration. |
-| EXM-004 | Not started | |
+| EXM-004 | Code done, live run pending | Explainer plan (score and silence only, `posts`, 120 s cue limit, four explainer critic lenses), cue detail without hits (`swell_in_gaps` from posts), palette in every wording, explainer audit and rewrite. Flag `explainer: true` in the four job inputs. No migration. |
 | EXM-005 | Not started | |
 | EXM-006 | Not started | |
 | EXM-007 | Not started | |

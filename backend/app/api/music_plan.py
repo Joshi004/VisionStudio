@@ -144,6 +144,15 @@ class ReroutedOut(BaseModel):
     reason: str
 
 
+class PostOut(BaseModel):
+    """A planned rise of an explainer's music in the pause after one spoken line."""
+
+    after: str
+    start_s: float
+    end_s: float
+    length_s: float
+
+
 class CueOut(BaseModel):
     id: str
     kind: CueKind
@@ -164,6 +173,8 @@ class CueOut(BaseModel):
     # Set when a point sound given to H3 was made by Stable Audio 3 instead.
     rerouted: ReroutedOut | None
     reason: str
+    # An explainer's score cue: its posts. Null for a story's cue.
+    posts: list[PostOut] | None = None
 
 
 class BoundaryOut(BaseModel):
@@ -279,6 +290,8 @@ class MusicPlanState(BaseModel):
     timeline: TimelineOut | None
     # The themes of the newest Music Bible.
     themes: list[ThemeRef]
+    # A continuous explainer: only score and silence cues, and a score cue may have posts.
+    explainer: bool
 
 
 class MusicPlanRun(BaseModel):
@@ -332,6 +345,8 @@ class CueIn(BaseModel):
     start_style: str | None = Field(default=None, max_length=50)
     end_style: str | None = Field(default=None, max_length=50)
     sound_request: SoundRequestIn | None = None
+    # An explainer's score cue: the `unit:` refs whose following pause is a post.
+    posts: list[str] | None = Field(default=None, max_length=100)
 
 
 class BoundaryIn(BaseModel):
@@ -433,6 +448,7 @@ async def _state(session: AsyncSession, project: Project) -> MusicPlanState:
             TimelineOut.model_validate(state.timeline) if state.timeline is not None else None
         ),
         themes=[ThemeRef(**item) for item in state.themes],
+        explainer=state.explainer,
     )
 
 

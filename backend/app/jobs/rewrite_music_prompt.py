@@ -91,6 +91,16 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     return _Task(dict(job_input))
 
 
+def _explainer(task: _Task) -> bool:
+    """Whether the rejected take belongs to a continuous explainer (EXM-004)."""
+    return task.values.get("explainer") is True
+
+
+def _palette(task: _Task) -> dict[str, str] | None:
+    """The tempo and key an explainer's new wording is checked against, or None."""
+    return music_cue_writer.palette_of(task.values["bible"]) if _explainer(task) else None
+
+
 def _reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
         if result.finish_reason == "length":
@@ -101,6 +111,7 @@ def _reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
                 task.item,
                 avoid=[str(word) for word in task.values["avoid"]],
                 rejected_fields=task.values["rejected_fields"],
+                palette=_palette(task),
             )
         except ValueError as exc:
             return str(exc), None
@@ -147,6 +158,7 @@ class RewriteMusicPromptHandler(JobHandler):
             facts=[str(fact) for fact in values["facts"]],
             note=values["note"],
             model=target.model,
+            explainer=_explainer(task),
         )
         job_input.update(
             server_url=docker_mapped(target.base_url),

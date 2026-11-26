@@ -38,6 +38,8 @@ type MusicPlanEditorProps = {
   initial: NonNullable<MusicPlanState["latest"]>["content"];
   timeline: MusicPlanTimeline;
   themes: MusicPlanState["themes"];
+  /** A continuous explainer: only score and silence cues, no themes, and a score cue may have posts. */
+  explainer: boolean;
   saving: boolean;
   error: unknown;
   onSave: (content: MusicPlanInput) => void;
@@ -55,6 +57,10 @@ function toOptions(labels: Record<string, string>) {
 }
 
 const KIND_OPTIONS = toOptions(KIND_LABELS);
+const EXPLAINER_KINDS = ["score", "silence"];
+const EXPLAINER_KIND_OPTIONS = KIND_OPTIONS.filter((option) =>
+  EXPLAINER_KINDS.includes(option.value),
+);
 const RELATION_OPTIONS = toOptions(RELATION_LABELS);
 const JOIN_OPTIONS = toOptions(JOIN_LABELS);
 const START_STYLE_OPTIONS = toOptions(START_STYLE_LABELS);
@@ -91,6 +97,7 @@ export function MusicPlanEditor({
   initial,
   timeline,
   themes,
+  explainer,
   saving,
   error,
   onSave,
@@ -114,6 +121,8 @@ export function MusicPlanEditor({
       start_style: cue.start_style,
       end_style: cue.end_style,
       sound_request: cue.sound_request && { ...cue.sound_request },
+      // An explainer's posts are sent as the lines they follow; the server finds their pauses.
+      posts: cue.posts ? cue.posts.map((post) => post.after) : null,
     })),
   );
   const [boundaries, setBoundaries] = useState<Record<string, BoundaryDraft>>(() =>
@@ -127,6 +136,7 @@ export function MusicPlanEditor({
   const [counter, setCounter] = useState(1);
 
   const anchorOptions = useMemo(() => buildAnchorOptions(timeline), [timeline]);
+  const kindOptions = explainer ? EXPLAINER_KIND_OPTIONS : KIND_OPTIONS;
   const themeOptions = themes.map((theme) => ({ value: theme.id, label: theme.name }));
   const soundEvents = timeline.events.filter((event) => event.type === "sound_event");
 
@@ -163,6 +173,7 @@ export function MusicPlanEditor({
       sound_request: kind === "point" ? cue.sound_request : null,
       theme_id: kind === "score" ? cue.theme_id : null,
       emotion: kind === "score" ? cue.emotion : null,
+      posts: kind === "score" ? cue.posts : null,
       start_style: LANE_KINDS.includes(kind) ? (cue.start_style ?? "fade_in") : null,
       end_style: LANE_KINDS.includes(kind) ? (cue.end_style ?? "fade_out") : null,
     });
@@ -188,6 +199,7 @@ export function MusicPlanEditor({
         start_style: "fade_in",
         end_style: "fade_out",
         sound_request: null,
+        posts: null,
       },
     ]);
     setCounter(counter + 1);
@@ -237,7 +249,7 @@ export function MusicPlanEditor({
               <Select
                 label="Kind"
                 allowDeselect={false}
-                data={KIND_OPTIONS}
+                data={kindOptions}
                 value={cue.kind}
                 onChange={(value) => value !== null && changeKind(cue, value)}
               />
@@ -260,7 +272,7 @@ export function MusicPlanEditor({
                   onChange={(value) => changeCue(cue.id, { maker: value })}
                 />
               )}
-              {cue.kind === "score" && (
+              {cue.kind === "score" && !explainer && (
                 <Select
                   label="Theme"
                   clearable
@@ -343,6 +355,22 @@ export function MusicPlanEditor({
                   onChange={(value) => changeCue(cue.id, { end_style: value })}
                 />
               </SimpleGrid>
+            )}
+
+            {explainer && cue.kind === "score" && cue.posts && cue.posts.length > 0 && (
+              <Group justify="space-between" align="center">
+                <Text size="sm">
+                  Rises in the pause after:{" "}
+                  {cue.posts.map((post) => refLabel(timeline, post)).join(", ")}
+                </Text>
+                <Button
+                  variant="default"
+                  size="xs"
+                  onClick={() => changeCue(cue.id, { posts: null })}
+                >
+                  Clear posts
+                </Button>
+              </Group>
             )}
 
             {cue.kind === "point" && cue.maker === "h3" && (
@@ -448,7 +476,7 @@ function soundShot(timeline: MusicPlanTimeline, eventRef: string): string {
 
 function buildAnchorOptions(timeline: MusicPlanTimeline) {
   const time = (start: number) => formatSeconds(start);
-  return [
+  const groups = [
     {
       group: "Scenes",
       items: timeline.scenes.map((item) => ({
@@ -478,6 +506,8 @@ function buildAnchorOptions(timeline: MusicPlanTimeline) {
       })),
     },
   ];
+  // An explainer's timeline has no shots and no events: leave their groups out.
+  return groups.filter((group) => group.items.length > 0);
 }
 
 type AnchorFieldProps = {

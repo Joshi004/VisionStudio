@@ -50,6 +50,10 @@ const LENS_LABELS: Record<string, string> = {
   variety_restraint: "Variety and restraint",
   theme_use: "Use of the themes",
   joins: "Joins",
+  // The lenses of a continuous explainer's critics ("joins" is shared).
+  section_fit: "Fit to the sections",
+  restraint: "Restraint",
+  palette: "Palette",
   cue_detail: "Objections of the cues",
 };
 
@@ -192,6 +196,7 @@ export function MusicPlanPanel({ projectId }: MusicPlanPanelProps) {
             initial={latest.content}
             timeline={data.timeline}
             themes={data.themes}
+            explainer={data.explainer}
             saving={save.isPending}
             error={save.error}
             onSave={(content) => save.mutate(content, { onSuccess: () => setEditing(false) })}
@@ -422,5 +427,10 @@ function anchorLines(cue: MusicPlanCue, timeline: MusicPlanOut["timeline"]): str
   if (cue.start_style)
     parts.push(`Start: ${START_STYLE_LABELS[cue.start_style] ?? cue.start_style}.`);
   if (cue.end_style) parts.push(`End: ${END_STYLE_LABELS[cue.end_style] ?? cue.end_style}.`);
+  for (const post of cue.posts ?? []) {
+    parts.push(
+      `Rises in the pause after ${refLabel(timeline, post.after)} (${post.length_s.toFixed(1)} s).`,
+    );
+  }
   return parts.join(" ");
 }

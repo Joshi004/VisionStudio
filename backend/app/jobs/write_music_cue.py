@@ -75,6 +75,8 @@ class _Task:
     pushback_allowed: bool
     avoid: list[str]
     saved_inputs: dict[str, Any]
+    # A continuous explainer (EXM-004): the explainer prompts and checks, and the palette.
+    explainer: bool = False
 
 
 def _is_count(value: object, low: int) -> bool:
@@ -122,6 +124,7 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
         pushback_allowed=allowed,
         avoid=[str(item) for item in avoid],
         saved_inputs=saved_inputs,
+        explainer=job_input.get("explainer") is True,
     )
 
 
@@ -130,7 +133,10 @@ def _cut_off(result: llm.ChatResult) -> bool:
 
 
 def _detail_reader(
-    cue: dict[str, Any], plan: dict[str, Any], index: music_timeline.Index
+    cue: dict[str, Any],
+    plan: dict[str, Any],
+    index: music_timeline.Index,
+    explainer: bool = False,
 ) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, Any]:
         if _cut_off(result):
@@ -138,7 +144,7 @@ def _detail_reader(
         try:
             answer = music_cue_writer.parse_answer(result.content)
             detail, pushback = music_cue_writer.check_detail(
-                answer, cue=cue, plan=plan, index=index
+                answer, cue=cue, plan=plan, index=index, explainer=explainer
             )
             return None, {"detail": detail, "pushback": pushback}
         except ValueError as exc:
@@ -154,7 +160,11 @@ def _wordings_reader(item: dict[str, Any], task: _Task) -> llm_call.ReadAnswer:
         try:
             answer = music_cue_writer.parse_answer(result.content)
             return None, music_cue_writer.check_wordings(
-                answer, item, count=task.wordings, avoid=task.avoid
+                answer,
+                item,
+                count=task.wordings,
+                avoid=task.avoid,
+                palette=music_cue_writer.palette_of(task.bible) if task.explainer else None,
             )
         except ValueError as exc:
             return str(exc), None
@@ -238,12 +248,14 @@ class WriteMusicCueHandler(JobHandler):
 
         # Level 2: the detail of the cue.
         context = music_cue_writer.span_context(
-            timeline, plan, cue, task.shot_characters, task.names
+            timeline, plan, cue, task.shot_characters, task.names, explainer=task.explainer
         )
         outcome = await ask(
             "detail",
-            music_cue_writer.build_detail_request(task.bible, context, model=target.model),
-            _detail_reader(cue, plan, music_timeline.index_of(timeline)),
+            music_cue_writer.build_detail_request(
+                task.bible, context, model=target.model, explainer=task.explainer
+            ),
+            _detail_reader(cue, plan, music_timeline.index_of(timeline), task.explainer),
         )
         if outcome.value is None:
             await self._fail(
@@ -349,6 +361,7 @@ class WriteMusicCueHandler(JobHandler):
                 joins=[] if is_hit else context["joins"],
                 count=task.wordings,
                 model=model,
+                explainer=task.explainer,
             )
             outcome = await ask(f"wordings_{item['id']}", body, _wordings_reader(item, task))
             if outcome.value is None:

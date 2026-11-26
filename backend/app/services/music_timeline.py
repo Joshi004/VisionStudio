@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from app.services import scene_timeline
@@ -381,6 +381,9 @@ class Index:
     spans: dict[str, tuple[float, float]]
     # For each sound event, the references of the shots that show it.
     sound_event_shots: dict[str, frozenset[str]]
+    # The listed gap that follows each speech unit, by the unit's reference: `(start_s, end_s)`.
+    # An explainer's plan names a post (a planned rise of the music) by the unit before its gap.
+    gaps_after: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
 def index_of(timeline: dict[str, Any]) -> Index:
@@ -394,7 +397,15 @@ def index_of(timeline: dict[str, Any]) -> Index:
         for entry in timeline["events"]
         if entry["type"] == "sound_event"
     }
-    return Index(total_s=float(timeline["total_s"]), spans=spans, sound_event_shots=sound_events)
+    gaps_after = {
+        gap["after"]: (float(gap["start_s"]), float(gap["end_s"])) for gap in timeline["gaps"]
+    }
+    return Index(
+        total_s=float(timeline["total_s"]),
+        spans=spans,
+        sound_event_shots=sound_events,
+        gaps_after=gaps_after,
+    )
 
 
 def resolve(index: Index, ref: str, edge: str, relation: str) -> float | None:

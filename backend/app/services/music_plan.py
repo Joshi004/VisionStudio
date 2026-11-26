@@ -302,13 +302,18 @@ async def critic_rounds(session: AsyncSession) -> int:
 async def _job_input(session: AsyncSession, loaded: _Loaded) -> dict[str, Any]:
     """What a job is sent: a copy of everything it needs, taken when the button was pressed."""
     assert loaded.bible is not None and loaded.timeline is not None
-    return {
+    job_input: dict[str, Any] = {
         "bible": loaded.bible.content,
         "timeline": loaded.timeline,
         "theme_ids": sorted(loaded.theme_ids),
         "critic_rounds": await critic_rounds(session),
         "saved_inputs": _inputs(loaded),
     }
+    if loaded.explainer:
+        # Only a continuous explainer's job has the key, so a story's job input is unchanged
+        # (EXM-004).
+        job_input["explainer"] = True
+    return job_input
 
 
 # --- Starting runs -------------------------------------------------------------------------
@@ -506,6 +511,7 @@ async def save_manual(
             content,
             index=music_timeline.index_of(loaded.timeline),
             theme_ids=loaded.theme_ids,
+            explainer=loaded.explainer,
         )
     except ValueError as exc:
         raise MusicPlanError(str(exc)) from exc
@@ -648,6 +654,8 @@ class MusicPlanState:
     timeline: dict[str, Any] | None
     # The themes of the newest Music Bible, to offer in the editor.
     themes: list[dict[str, str]]
+    # A continuous explainer (EXM-004): score and silence cues only, with posts.
+    explainer: bool = False
 
 
 @memoized_state
@@ -675,4 +683,5 @@ async def state(session: AsyncSession, project: Project) -> MusicPlanState:
         critic_rounds=await critic_rounds(session),
         timeline=loaded.timeline,
         themes=themes,
+        explainer=loaded.explainer,
     )

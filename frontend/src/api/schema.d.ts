@@ -8344,6 +8344,8 @@ export interface components {
             /** End Style */
             end_style?: string | null;
             sound_request?: components["schemas"]["SoundRequestIn"] | null;
+            /** Posts */
+            posts?: string[] | null;
         };
         /** CueOut */
         CueOut: {
@@ -8377,6 +8379,8 @@ export interface components {
             rerouted: components["schemas"]["ReroutedOut"] | null;
             /** Reason */
             reason: string;
+            /** Posts */
+            posts?: components["schemas"]["PostOut"][] | null;
         };
         /** CurrentLookIn */
         CurrentLookIn: {
@@ -12665,6 +12669,8 @@ export interface components {
             timeline: components["schemas"]["TimelineOut"] | null;
             /** Themes */
             themes: components["schemas"]["ThemeRef"][];
+            /** Explainer */
+            explainer: boolean;
         };
         /** MusicPlanVersionOut */
         MusicPlanVersionOut: {
@@ -14004,6 +14010,20 @@ export interface components {
             job_ids: number[];
             /** Skipped */
             skipped: components["schemas"]["app__api__environment_views__SkippedOut"][];
+        };
+        /**
+         * PostOut
+         * @description A planned rise of an explainer's music in the pause after one spoken line.
+         */
+        PostOut: {
+            /** After */
+            after: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Length S */
+            length_s: number;
         };
         /** PlanSilenceOut */
         PlanSilenceOut: {
