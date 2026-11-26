@@ -17,7 +17,7 @@ Use the Opus → Sonnet workflow of `Evidence_layer_implementation_phases.md` ("
 
 ### Why some phases can run in parallel
 
-- **One migration.** OVL-001 creates everything overlays store (§4.7). Later phases add none, so phases that run at the same time never fight over Alembic revision numbers.
+- **One migration.** OVL-001 creates everything overlays store (§4.7). Later phases add none, so phases that run at the same time never fight over Alembic revision numbers. The one exception is OVL-007, which added migration `0103` after the owner chose to store a split stretch's evidence clips under their own purpose (see its completion notes); it ran alone, so nothing fought over a number.
 - **The placement is pure.** OVL-003 needs only the timeline and the take's words, so it can be built beside OVL-002.
 - **Evidence is its own track.** OVL-006 touches the evidence rounds and the shot plan's evidence check, not the graphics code.
 
@@ -174,7 +174,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 | OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Completed |
 | OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Completed |
 | OVL-006 | Evidence added later becomes a card | Code | — | Completed |
-| OVL-007 | Split screen for a graphic and evidence | Code | OVL-005, OVL-006 | Not Started |
+| OVL-007 | Split screen for a graphic and evidence | Code | OVL-005, OVL-006 | Completed |
 | OVL-008 | Project 94 end to end | Owner | OVL-005, OVL-007 | Not Started |
 | OVL-009 | Keep unchanged shots when a scene is planned again | Code, later | — | Deferred |
 
@@ -182,9 +182,9 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 - **Graphics:** OVL-001 and OVL-003 → OVL-004 → OVL-005.
 - **Planner:** OVL-002 (done). It had to be done before OVL-005 is used on a real project.
-- **Evidence:** OVL-006 (done).
+- **Evidence:** OVL-006 (done), then OVL-007 (done).
 
-**Progress snapshot:** 6 completed (OVL-001, OVL-002, OVL-003, OVL-004, OVL-005, OVL-006).
+**Progress snapshot:** 7 completed (OVL-001, OVL-002, OVL-003, OVL-004, OVL-005, OVL-006, OVL-007).
 
 ---
 
@@ -468,7 +468,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 ### OVL-007 — Split screen for a graphic and evidence
 
-**Status:** Not Started
+**Status:** Completed (2026-11-27; the owner still has to rebuild the real app so migration `0103` and the new code run there)
 
 **Objective.** An overlay that meets an evidence shot or a card shares the screen with it (OV-7, §4.5).
 
@@ -493,14 +493,24 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Split stretches
-- [ ] Graphic at panel size
-- [ ] Evidence side
-- [ ] Render
-- [ ] Checks above
-- [ ] Standard checks
+- [x] Split stretches
+- [x] Graphic at panel size
+- [x] Evidence side
+- [x] Render
+- [x] Checks above
+- [x] Standard checks
 
 **Completion notes.**
+
+Decisions (owner, 2026-11-27): the evidence clips of a stretch get their own purpose `split` (migration `0103`), not card rows; portrait is 50/50, graphic on top (`evidence_layout.PORTRAIT_GRAPHIC_SHARE`).
+
+- **`split_stretches.py` (new, pure).** `find(scene_id, overlays, evidence_shots, cards, bites)` joins overlays that strictly overlap an evidence shot or a card into a `Stretch` (union of overlays and evidence; touching only is no meeting). Each side is cut into `Segment`s: a member is drawn from its own start (the stretch's start for the first) to the next member's start (the stretch's end for the last). A stretch is refused, and the overlay stays full screen with a board note, when a graphic segment needs more than the 720-frame limit (`too_long`) or a sound bite shot is in the way (`soundbite`).
+- **The overlay's own span is not changed.** `Overlay.start_s` and `end_s` stay as placed, so its brief (which records them) is not out of date; the stretch spans are carried on `SceneEntry.stretches` and `refused_stretches`. Evidence shots and cards that a stretch absorbs are removed from `SceneEntry.splits` and `cards`.
+- **Graphic at panel size.** `graphics_resolve.resolve` takes the caption zone of the panel; `shot_graphics._prepare_overlay` resolves a split overlay at the panel's width and height for its segment (`shift_s` from the overlay's start to the segment's start). A changed size is a changed hash, so the graphic is drawn again from the same brief (no model call); when the overlay stops being split it is drawn again at full size the same way. `ShotGraphicOverlayOut.split` tells the panel.
+- **Evidence side.** `evidence_clips` has `PURPOSE_SPLIT`, `split_state` and `queue_split_clip`: one `split` clip per evidence segment, made by the existing `render_evidence_clip` job in split mode (`inputs.layout = "split"`, `inputs.panel`, `segment_id`, `stretch_id`), a full-frame opaque video with the evidence in its half. Currency is by comparing look keys; dedupe key `split_clip_ref`. The pipeline gets `split:{ref}` targets, labelled "evidence beside a graphic".
+- **Render.** Optional timeline key `split_evidence` (version stays 6); overlay entries carry the panel's `x`, `y` and `"split": true`. Stage 1 stacks `[*callouts, *cards, *split evidence, *graphic overlays]`, so the graphic panel covers the empty half of the evidence clip. Stretch spans are added to `graphic_spans`, so a callout that starts in one is dropped. A full render refuses while a split clip is missing (`split_without_video` in a scene render); a clip whose quote is below the floor gives `split_small_text`. Story and scene renders list a missing or changed split clip as out of date.
+- **Checks run.** (1) Sample cases on `split_stretches.find`: inside an evidence shot, over its start, over a card, two evidence shots in a row, two overlays joined through one shot, no meeting, touching only, 31 s refused `too_long`, a sound bite in the way refused `soundbite`. (2) Migration `0103` up, down (with a `split` row, which the downgrade deletes) and up again on a copy of the real database taken at `0101` (it also ran `0102`); `integrity_check` and `foreign_key_check` ok; `alembic check` shows only the older `FLOAT`/`REAL` differences, none on `evidence_clip`. (3) Identity check on that copy: `shot_plans.state`, `shot_graphics.state`, `scene_renders.state` and `story_renders.state` of all 18 projects, dumped as sorted JSON at the previous commit and with this code, with the new fields left out. 14 projects are identical. Four (83, 84, 93, 94) have an overlay that meets evidence: there the only differences are the absorbed cards or evidence shots, the stretch start used as the overlay's drawn start, and the extra out-of-date reason for the split clip of project 94 ("The evidence clip of shot shot_4 of scene 1 is not ready now."). The `generate_shot` job count (370) and the total job count did not change, and no model call was made. (This run caught a missing `stretch` argument on `_shot_entry`, which is fixed.) (4) The plan entries (`_overlay_entries`, `_split_entries`, `_parse_split_evidence`) were built for a project-94-shaped scene in landscape (panels 960x1080, evidence left) and portrait (panels 1080x960, graphic on top) with no warning. (5) `ruff check`, `ruff format --check`, `tsc -b` and `eslint` on the panel pass; `gen:api` was run on a throwaway data folder (warning codes and `split`).
+- **Not checked.** (1) No real split clip was made (H3-free but needs the owner's go-ahead and a rebuilt app), so the quote's height against the 38 px floor and the `split_small_text` sentence were not seen on project 94's real screenshot, and no real render ran: stage 1 with the panel positions was checked through the plan entries and the parser, not through ffmpeg. (2) No real graphic was redrawn at panel size (it needs a brief and the engines). (3) The graphics panel text was linted and type-checked, not opened in a browser. (4) The pieces after a joined stretch (two overlays through one shot) ran in the sample cases only; no real project has one. (5) `mypy` is not installed in the backend environment, so it was not run. (6) Cards in a stretch use the same `split` clip path as shots, so a card that is absorbed is drawn as a clip in its half rather than by the card's own layout; this was not seen on a real card.
 
 ### OVL-008 — Project 94 end to end
 
@@ -538,7 +548,7 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 |----|----------|------------------------|
 | Q-O1 | Should the planner still make its own graphic shots where an overlay will cover them? | Yes; they are made and hidden (§4.4). |
 | Q-O2 | Should B-roll sound be lowered further under an overlay? | No: it plays as without the overlay. |
-| Q-O3 | Portrait proportions of a split stretch? | 50/50, graphic on top. |
+| Q-O3 | Portrait proportions of a split stretch? | Answered (2026-11-27): 50/50, graphic on top. |
 | Q-O4 | Should the owner be able to choose a side panel instead of full screen for one overlay? | No (owner's choice, 2026-11-26). |
 
 ### 8.2 Risks
@@ -562,3 +572,4 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 | 2026-11-27 | OVL-004 | Completed: briefs and graphics for overlays (`target = 'overlay'` rows, `start_overlay` in both services, `overlays` on both states and APIs, pipeline and staleness targets, panel cards), `clip_frames` and the stricter `too_long` check. |
 | 2026-11-27 | OVL-005 | Completed: optional `graphic_overlays` key in the frozen timeline (version stays 6), overlays laid full screen over the shots by `render_story` (on top of callouts and cards), refusals and warnings (`overlay_without_video`, `overlay_over_evidence`), out-of-date reasons for story and scene renders, overlays kept out of the music and timing sources. |
 | 2026-11-27 | OVL-006 | Completed: evidence per claim (`covered`, `waiting`, `live` on the evidence state; delta rounds that carry only waiting claims; `shown_view` across reviewed rounds), a plan goes out of date for evidence only when its own evidence shot loses what it shows, `shot_plans` no longer waits on the evidence step as a whole, API counts and panel texts. |
+| 2026-11-27 | OVL-007 | Completed: split stretches (pure `split_stretches.py`, carried on `SceneEntry`), graphic drawn at the panel's size from the same brief, `split` evidence clips (migration `0103`, `split_clip_ref`), optional `split_evidence` timeline key and panel position on overlay entries, callouts dropped in a stretch, warnings `split_without_video` and `split_small_text`, out-of-date reasons for renders, 50/50 portrait. |

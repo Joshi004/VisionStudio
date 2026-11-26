@@ -7,7 +7,9 @@ owner asks for a short video of an accepted piece, and watches how it will look.
 length of the shot, with the same job and the same layout. EVD-011 makes the **card clips**
 (`purpose = 'card'`): `card_state` and `queue_card_clip`, for the cards that `evidence_cards` places
 over presenter and B-roll shots, drawn by the same job as a transparent ProRes clip at the card's
-own size.
+own size. OVL-007 makes the **split clips** (`purpose = 'split'`): `split_state` and
+`queue_split_clip`, one for each piece of evidence drawn beside a graphic overlay, a full-frame clip
+with the evidence in its half of the frame.
 
 - `queue_preview` makes the `evidence_clip` row and the `render_evidence_clip` job for one accepted
   piece. A second press while one is waiting or running returns the same job.
@@ -47,6 +49,7 @@ from app.services import (
     evidence_claims,
     evidence_clip_layout,
     evidence_import,
+    evidence_layout,
     evidence_review,
     evidence_rounds,
     evidence_source_lines,
@@ -56,6 +59,7 @@ from app.services import (
     scene_timeline,
     shot_plans,
     soundbite_render,
+    split_stretches,
 )
 
 JOB_TYPE: Final = "render_evidence_clip"
@@ -74,6 +78,11 @@ PURPOSE_CARD: Final = "card"
 # The layout of an evidence shot drawn together with a callout (EVD-016); the others are full.
 LAYOUT_SPLIT: Final = "split"
 CARD_DEDUPE_KEY: Final = "card_clip_ref"
+# The clip of the evidence beside a graphic overlay (OVL-007): a full-frame clip with the evidence
+# drawn in its half of the frame, like a split evidence shot. Its job's input is
+# `{evidence_clip_id, split_clip_ref}`, and two presses on one segment make one job.
+PURPOSE_SPLIT: Final = "split"
+SPLIT_DEDUPE_KEY: Final = "split_clip_ref"
 # The clip of a sound bite shot (SB-009): the owner's cut of the downloaded video, at the output
 # size, with its own sound, the lower third and the source credit. Its job's input is
 # `{evidence_clip_id, soundbite_clip_ref}`, and two presses on one shot make one job. The review's
@@ -267,19 +276,29 @@ def preview_frames() -> int:
 
 
 async def current_look(
-    session: AsyncSession, project: Project, frames: int | None = None, *, split: bool = False
+    session: AsyncSession,
+    project: Project,
+    frames: int | None = None,
+    *,
+    split: bool = False,
+    panel: tuple[int, int, int, int] | None = None,
 ) -> dict[str, Any]:
     """What a clip made now would be made with: a preview's length, or the `frames` of an evidence
     shot. A stored clip that differs is out of date. `split` is a shot drawn split with a callout
-    (EVD-016): the look then names the layout and the panel the picture is drawn in.
+    (EVD-016): the look then names the layout and the panel the picture is drawn in. `panel` is
+    that panel when it is not the callout's one (the evidence beside a graphic, OVL-007).
     """
     accent, source = await accent_for(session, project)
     layout: dict[str, Any] = (
         {
             "layout": LAYOUT_SPLIT,
-            "panel": list(evidence_clip_layout.split_panel(project.out_width, project.out_height)),
+            "panel": list(
+                panel
+                if panel is not None
+                else evidence_clip_layout.split_panel(project.out_width, project.out_height)
+            ),
         }
-        if split
+        if split or panel is not None
         else {}
     )
     return {
@@ -907,25 +926,32 @@ class CardClipsState:
     entries: list[SceneCardClips]
 
 
-async def _newest_card_clips(
-    session: AsyncSession, project: Project
+async def _newest_clips_by(
+    session: AsyncSession, project: Project, purpose: str, key: str
 ) -> dict[tuple[str, str], tuple[EvidenceClip, Job | None]]:
-    """The newest clip of each card of the project, by `(scene_id, card_id)`."""
+    """The newest clip of this purpose for each `(scene_id, inputs[key])` of the project."""
     statement = (
         select(EvidenceClip, Job)
         .outerjoin(Job, EvidenceClip.render_job_id == Job.id)
-        .where(EvidenceClip.project_id == project.id, EvidenceClip.purpose == PURPOSE_CARD)
+        .where(EvidenceClip.project_id == project.id, EvidenceClip.purpose == purpose)
         .order_by(EvidenceClip.id.desc())
         .execution_options(populate_existing=True)
     )
     found: dict[tuple[str, str], tuple[EvidenceClip, Job | None]] = {}
     for clip, job in (await session.execute(statement)).all():
         inputs = clip.inputs if isinstance(clip.inputs, dict) else {}
-        card_id = inputs.get("card_id")
-        if clip.scene_id is None or not isinstance(card_id, str):
+        ref = inputs.get(key)
+        if clip.scene_id is None or not isinstance(ref, str):
             continue
-        found.setdefault((clip.scene_id, card_id), (clip, job))
+        found.setdefault((clip.scene_id, ref), (clip, job))
     return found
+
+
+async def _newest_card_clips(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], tuple[EvidenceClip, Job | None]]:
+    """The newest clip of each card of the project, by `(scene_id, card_id)`."""
+    return await _newest_clips_by(session, project, PURPOSE_CARD, "card_id")
 
 
 def _card_blocked(entry: shot_plans.SceneEntry, item: EvidenceItem | None) -> str | None:
@@ -1056,6 +1082,185 @@ async def queue_card_clip(
     session.add(clip)
     await session.flush()
     job.input = {CLIP_KEY: clip.id, CARD_DEDUPE_KEY: found.ref}
+    clip.render_job_id = job.id
+    await session.commit()
+    return job
+
+
+# --- The clips of the evidence beside a graphic overlay (OVL-007) ----------------------------
+
+UNKNOWN_SPLIT_MESSAGE: Final = "There is no such evidence beside a graphic in the newest shot plan."
+SPLIT_ALREADY_MADE_MESSAGE: Final = "The clip of this evidence is already made."
+
+
+def split_ref(scene_id: str, segment_id: str) -> str:
+    return f"{scene_id}/{segment_id}"
+
+
+async def split_look(session: AsyncSession, project: Project, frames: int) -> dict[str, Any]:
+    """What the clip of evidence beside a graphic made now would be made with: the frame, the
+    frames and the panel of the evidence of a stretch (`evidence_layout.graphic_split_panels`)."""
+    panel = evidence_layout.graphic_split_panels(project.out_width, project.out_height).evidence
+    return await current_look(session, project, frames, panel=panel)
+
+
+@dataclass(frozen=True)
+class SplitClipEntry:
+    """One piece of evidence drawn beside a graphic overlay, and where its clip stands."""
+
+    scene_id: str
+    plan_id: int
+    stretch: split_stretches.Stretch
+    segment: split_stretches.Segment
+    item: EvidenceItem | None
+    # The evidence panel on the output frame, `(x, y, width, height)`.
+    panel: tuple[int, int, int, int]
+    frames: int
+    status: ShotClipStatus
+    clip: EvidenceClip | None
+    job: Job | None
+    last_error: str | None
+    blocked_reason: str | None
+
+    @property
+    def done(self) -> bool:
+        return self.status == "ready"
+
+    @property
+    def segment_id(self) -> str:
+        return self.stretch.segment_id(self.segment)
+
+    @property
+    def ref(self) -> str:
+        return split_ref(self.scene_id, self.segment_id)
+
+
+@dataclass(frozen=True)
+class SceneSplitClips:
+    """The evidence beside graphics in one scene of the newest plans."""
+
+    item: dict[str, Any]
+    entries: list[SplitClipEntry]
+
+
+@dataclass(frozen=True)
+class SplitClipsState:
+    """What the `evidence_clips` step reads for split stretches. `wanted` is False without
+    evidence."""
+
+    wanted: bool
+    entries: list[SceneSplitClips]
+
+
+@memoized_state
+async def split_state(session: AsyncSession, project: Project) -> SplitClipsState:
+    """The evidence beside graphic overlays in the newest plans, scene by scene, with where each
+    clip stands. Worked out on every read; nothing here is stored but the clips."""
+    if not evidence_claims.wanted(project):
+        return SplitClipsState(wanted=False, entries=[])
+    plans = await shot_plans.state(session, project)
+    if not any(entry.stretches for entry in plans.entries):
+        return SplitClipsState(wanted=True, entries=[])
+    pieces = await _newest_pieces(session, project)
+    newest = await _newest_clips_by(session, project, PURPOSE_SPLIT, "segment_id")
+    panel = evidence_layout.graphic_split_panels(project.out_width, project.out_height).evidence
+    looks: dict[int, dict[str, Any]] = {}
+
+    scenes: list[SceneSplitClips] = []
+    for plan in plans.entries:
+        found: list[SplitClipEntry] = []
+        for stretch in plan.stretches:
+            for segment in stretch.evidence:
+                frames = card_frames(segment.draw_start_s, segment.draw_end_s)
+                if frames not in looks:
+                    looks[frames] = await split_look(session, project, frames)
+                item_key = segment.item_key or ""
+                clip, job = newest.get((plan.item["id"], stretch.segment_id(segment)), (None, None))
+                status, error = _clip_status(clip, job, item_key, looks[frames])
+                item = pieces.get(item_key)
+                found.append(
+                    SplitClipEntry(
+                        scene_id=plan.item["id"],
+                        plan_id=plan.row.id if plan.row is not None else 0,
+                        stretch=stretch,
+                        segment=segment,
+                        item=item,
+                        panel=panel,
+                        frames=frames,
+                        status=status,
+                        clip=clip,
+                        job=job,
+                        last_error=error,
+                        blocked_reason=_card_blocked(plan, item),
+                    )
+                )
+        if found:
+            scenes.append(SceneSplitClips(item=plan.item, entries=found))
+    return SplitClipsState(wanted=True, entries=scenes)
+
+
+async def queue_split_clip(
+    session: AsyncSession, project: Project, scene_id: str, segment_id: str
+) -> Job:
+    """Queues the clip of one piece of evidence beside a graphic, at its exact length, and commits.
+    A clip that is already waiting or running gives its job. Raises EvidenceClipError (with the
+    reason) when the clip cannot be made now or is already made."""
+    state = await split_state(session, project)
+    found = next(
+        (
+            entry
+            for scene in state.entries
+            for entry in scene.entries
+            if entry.scene_id == scene_id and entry.segment_id == segment_id
+        ),
+        None,
+    )
+    if found is None:
+        raise EvidenceClipError(UNKNOWN_SPLIT_MESSAGE)
+    if found.status == "working" and found.job is not None:
+        return found.job
+    if found.status == "ready":
+        raise EvidenceClipError(SPLIT_ALREADY_MADE_MESSAGE)
+    if found.blocked_reason is not None:
+        raise EvidenceClipError(found.blocked_reason)
+    assert found.item is not None  # the refusal made sure
+
+    look = await split_look(session, project, found.frames)
+    job, created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="local",
+        input={SPLIT_DEDUPE_KEY: found.ref},
+        commit=False,
+        dedupe_key=SPLIT_DEDUPE_KEY,
+    )
+    if not created:
+        return job
+    segment = found.segment
+    clip = EvidenceClip(
+        project_id=project.id,
+        purpose=PURPOSE_SPLIT,
+        item_id=found.item.id,
+        scene_id=scene_id,
+        shot_id=segment.source_id if segment.kind == split_stretches.KIND_SHOT else None,
+        shot_plan_id=found.plan_id or None,
+        attempt=(found.clip.attempt + 1) if found.clip is not None else 1,
+        inputs={
+            "items": [segment.item_key],
+            "item_ids": [found.item.id],
+            "item_key": segment.item_key,
+            "claim_id": segment.claim_id,
+            "segment_id": segment_id,
+            "stretch_id": found.stretch.stretch_id,
+            "orientation": project.orientation,
+            "length_s": round(found.frames / FPS, 3),
+            **look,
+        },
+    )
+    session.add(clip)
+    await session.flush()
+    job.input = {CLIP_KEY: clip.id, SPLIT_DEDUPE_KEY: found.ref}
     clip.render_job_id = job.id
     await session.commit()
     return job

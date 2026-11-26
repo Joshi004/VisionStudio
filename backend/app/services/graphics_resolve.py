@@ -303,6 +303,7 @@ def resolve(
     *,
     frames: int | None = None,
     theme: dict[str, Any] | None = None,
+    caption: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """The resolved brief (§4.4) of a checked brief and a timing. Raises ValueError when a beat's
     phrase is not found in the timing's words (it was checked against the line, so only a timing
@@ -311,6 +312,10 @@ def resolve(
     A graphic shot of an explainer (EXG-005) gives the two keywords: `frames`, the exact length
     of the shot's clip (the lab works it out from the timing), and `theme`, the video's theme
     (the shot's brief has none). Without them this is the lab's resolve.
+
+    A graphic drawn in a panel of the frame (OVL-007) gives `caption`, the part of the captions'
+    band that falls in the panel, in the panel's own pixels; without it the band is the one of a
+    whole frame this size.
     """
     frames = frames if frames is not None else frames_of(timing, fps)
     words = timing["words"]
@@ -363,6 +368,6 @@ def resolve(
         "theme": colours,
         "fonts": dict(fonts),
         "safe_area": safe_area(width, height),
-        "caption_zone": caption_zone(width, height),
+        "caption_zone": caption if caption is not None else caption_zone(width, height),
         "notes": notes,
     }

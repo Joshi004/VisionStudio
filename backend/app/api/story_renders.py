@@ -70,6 +70,8 @@ WarningCode = Literal[
     "soundbite_music_drops",
     "overlay_without_video",
     "overlay_over_evidence",
+    "split_without_video",
+    "split_small_text",
 ]
 
 

@@ -165,6 +165,9 @@ class ShotGraphicOverlayOut(ShotGraphicShotOut):
     suggestion_id: str
     # The shots it is laid over.
     shot_ids: list[str]
+    # Drawn beside evidence in a panel of the frame (OVL-007), `start_s` and `end_s` being the
+    # stretch's span for this graphic.
+    split: bool
 
 
 class ShotGraphicSceneOut(BaseModel):
@@ -307,6 +310,7 @@ def _overlay_out(entry: shot_graphics.ShotEntry, project: Project) -> ShotGraphi
         **dict(_shot_out(entry, project)),
         suggestion_id=entry.overlay.suggestion_id,
         shot_ids=list(entry.overlay.shot_ids),
+        split=entry.stretch is not None,
     )
 
 

@@ -301,7 +301,7 @@ def split_panel(width: int, height: int) -> tuple[int, int, int, int]:
     return evidence_layout.panels(width, height).evidence
 
 
-def _panel_caption(
+def panel_caption(
     frame: tuple[int, int], panel: tuple[int, int, int, int]
 ) -> dict[str, int] | None:
     """The part of the frame's caption zone that falls in the panel, in the panel's own pixels, or
@@ -342,7 +342,7 @@ def plan(
     size and the picture is drawn only inside the panel, above the captions that fall in it.
     Pure."""
     if panel is not None and frame is not None:
-        safe, caption = card_safe(width, height), _panel_caption(frame, panel)
+        safe, caption = card_safe(width, height), panel_caption(frame, panel)
     elif card:
         safe, caption = card_safe(width, height), None
     else:

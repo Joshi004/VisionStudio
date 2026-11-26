@@ -65,6 +65,7 @@ from app.services import (
     shot_planning_writer,
     shot_staging,
     speech_synthesis,
+    split_stretches,
     story_bible,
     take_timings,
     user_feedback,
@@ -169,6 +170,11 @@ class SceneEntry:
     # current and the scene has suggestions.
     overlays: tuple[graphic_overlays.Overlay, ...] = ()
     unplaced_overlays: tuple[graphic_overlays.Unplaced, ...] = ()
+    # Where an overlay and evidence share the screen (OVL-007): the split stretches of this scene
+    # and the overlays that meet evidence but are drawn full screen over it. The cards a stretch
+    # takes in are no longer in `cards`, and its evidence shots are not in `splits`.
+    stretches: tuple[split_stretches.Stretch, ...] = ()
+    refused_stretches: tuple[split_stretches.Refused, ...] = ()
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -1266,6 +1272,53 @@ def _evidence_overlays(
     return placement.cards, placement.unplaced, lines
 
 
+def _split_stretches(
+    scene_id: str,
+    row: ShotPlan | None,
+    timeline: scene_timeline.SceneTimeline | None,
+    overlays: tuple[graphic_overlays.Overlay, ...],
+    cards: tuple[evidence_cards.Card, ...],
+) -> split_stretches.Found:
+    """The places where an overlay and evidence share the screen (OVL-007): an overlay that meets
+    a full-screen evidence shot or a card. Nothing without overlays or without evidence."""
+    nothing = split_stretches.Found(stretches=(), refused=())
+    if not overlays or row is None or timeline is None:
+        return nothing
+    spans = {span.shot_id: span for span in timeline.shots}
+    evidence: list[evidence_cards.Slot] = []
+    bites: list[evidence_cards.Slot] = []
+    for shot in row.content["shots"]:
+        span = spans.get(str(shot["id"]))
+        if span is None:
+            continue
+        kind = shot.get("type")
+        about = shot.get("evidence")
+        if kind == scene_timeline.EVIDENCE_SHOT_TYPE and isinstance(about, dict):
+            if isinstance(about.get("item_key"), str):
+                evidence.append(
+                    evidence_cards.Slot(
+                        shot_id=str(shot["id"]),
+                        type=evidence_cards.EVIDENCE,
+                        start_s=span.start_s,
+                        end_s=span.end_s,
+                        claim_id=about.get("claim_id"),
+                        item_key=about["item_key"],
+                    )
+                )
+        elif kind == scene_timeline.SOUNDBITE_SHOT_TYPE:
+            bites.append(
+                evidence_cards.Slot(
+                    shot_id=str(shot["id"]),
+                    type=evidence_cards.SOUNDBITE,
+                    start_s=span.start_s,
+                    end_s=span.end_s,
+                )
+            )
+    if not evidence and not cards:
+        return nothing
+    return split_stretches.find(scene_id, overlays, evidence, cards, bites)
+
+
 def _graphic_overlays(
     loaded: _Loaded,
     item: dict[str, Any],
@@ -1791,6 +1844,14 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             if status == "planned"
             else ((), ())
         )
+        # Where an overlay meets evidence they share the screen (OVL-007): the cards a stretch
+        # takes in are drawn in it, and an evidence shot in it has no callout beside it.
+        found = _split_stretches(str(item["id"]), row, timeline, overlays, cards)
+        if found.stretches:
+            absorbed = {card_id for stretch in found.stretches for card_id in stretch.card_ids}
+            stretched = {shot_id for stretch in found.stretches for shot_id in stretch.shot_ids}
+            cards = tuple(card for card in cards if card.card_id not in absorbed)
+            splits = {key: value for key, value in splits.items() if key not in stretched}
         entries.append(
             SceneEntry(
                 item=item,
@@ -1811,6 +1872,8 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                 splits=splits,
                 overlays=overlays,
                 unplaced_overlays=unplaced_overlays,
+                stretches=found.stretches,
+                refused_stretches=found.refused,
             )
         )
     policy = loaded.policy

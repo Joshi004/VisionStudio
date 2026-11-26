@@ -145,6 +145,8 @@ class _Context:
     sources: list[story_render_plan.SceneSource]
     # The graphic overlays now (OVL-005), by `(scene id, overlay id)`.
     overlays: dict[tuple[str, str], shot_graphics.ShotEntry]
+    # The evidence beside the graphic overlays now (OVL-007), by `(scene id, segment id)`.
+    splits: dict[tuple[str, str], evidence_clips.SplitClipEntry]
 
 
 async def _context(session: AsyncSession, project: Project, *, place: bool) -> _Context:
@@ -180,6 +182,7 @@ async def _context(session: AsyncSession, project: Project, *, place: bool) -> _
         soundbites=await story_renders.soundbite_clips_now(session, project),
         sources=sources,
         overlays=await story_renders.overlay_videos(session, project),
+        splits=await story_renders.split_clips_now(session, project),
     )
 
 
@@ -417,6 +420,7 @@ def _scene_reasons(
             reasons.append(f"{unit_label} was made again since this video was made.")
 
     reasons.extend(story_renders.overlay_reasons(recorded, context.overlays, str(entry.item["id"])))
+    reasons.extend(story_renders.split_reasons(recorded, context.splits, str(entry.item["id"])))
     reasons.extend(_music_reasons(recorded, context))
     reasons.extend(story_renders.caption_reasons(recorded, context.project))
     reasons.extend(

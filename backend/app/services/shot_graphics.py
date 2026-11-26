@@ -58,6 +58,8 @@ from app.db.models import Job, Project, ShotGraphic, ShotGraphicBrief, ShotGraph
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    evidence_clip_layout,
+    evidence_layout,
     graphic_overlays,
     graphic_theme,
     graphics_lab,
@@ -66,8 +68,10 @@ from app.services import (
     scene_timeline,
     shot_graphic_briefs,
     shot_plans,
+    split_stretches,
     take_timings,
 )
+from app.services.projects import LANDSCAPE, PORTRAIT
 from app.services.storage import media_url
 from app.services.take_map import TakeMapError
 
@@ -146,6 +150,7 @@ def resolve_for_shot(
     shift_s: float,
     width: int,
     height: int,
+    caption: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """The resolved brief of one graphic shot (§3.5). Pure.
 
@@ -154,7 +159,8 @@ def resolve_for_shot(
     estimated). `shift_s` moves them onto the clip's own clock: the clip starts at the shot's
     start, except for the first shot of a scene, which also holds the lead-in. `theme` is the
     video's theme (`graphic_theme` content, whose accent is already checked). The length is the
-    clip's: `span.clip_frames`, the shot's frames plus one spare frame. Raises ShotGraphicsError.
+    clip's: `span.clip_frames`, the shot's frames plus one spare frame. `caption` is the band of the
+    captions in the picture when it is a panel of the frame (OVL-007). Raises ShotGraphicsError.
     """
     frames = span.clip_frames
     if frames is None:
@@ -186,6 +192,7 @@ def resolve_for_shot(
             graphics_lab.FONTS,
             frames=frames,
             theme=theme,
+            caption=caption,
         )
     except (ValueError, KeyError) as exc:
         raise ShotGraphicsError(f"The graphic cannot be worked out from this brief: {exc}") from exc
@@ -286,6 +293,9 @@ class ShotEntry:
     # words, `start_s` and `end_s` its place on the scene's clock) and `overlay` is the overlay.
     target: str = shot_graphic_briefs.TARGET_SHOT
     overlay: graphic_overlays.Overlay | None = None
+    # The split stretch an overlay is drawn in beside evidence (OVL-007), or None when it is full
+    # screen. Its graphic is then drawn in a panel of the frame, for the stretch's segment.
+    stretch: split_stretches.Stretch | None = None
 
 
 @dataclass(frozen=True)
@@ -477,6 +487,18 @@ def _prepared(
     )
 
 
+def graphic_panel(project: Project) -> tuple[int, int, int, int]:
+    """Where the graphic of a split stretch sits on the output frame, `(x, y, width, height)`
+    (OVL-007). Landscape: the right half; portrait: the top half."""
+    return evidence_layout.graphic_split_panels(project.out_width, project.out_height).callout
+
+
+def panel_orientation(width: int, height: int) -> str:
+    """`landscape` or `portrait`, by the shape of a picture this size, the way the writers' size
+    line reads it."""
+    return LANDSCAPE if width >= height else PORTRAIT
+
+
 def _prepare_overlay(
     project: Project,
     plan: shot_plans.SceneEntry,
@@ -484,11 +506,16 @@ def _prepare_overlay(
     brief: ShotGraphicBrief,
     theme: Any,
     clock: take_timings.TakeClock | None,
+    stretch: split_stretches.Stretch | None = None,
 ) -> tuple[_Prepared | None, str | None]:
     """The resolved brief of an overlay and what the jobs need, or why it cannot be worked out.
     It is drawn for the overlay's own span at the output size (OVL-004): the words the brief
     recorded are timed from the overlay's start, so they need no shift, and the clip lasts
     `graphic_overlays.clip_frames`.
+
+    An overlay in a split stretch (OVL-007) is drawn for its segment of the stretch, which may
+    start before its own start, at the size of the graphic's panel. The words keep their own
+    times, so they are shifted by how much earlier the clip starts.
     """
     if plan.timeline is None or plan.timeline.take_map is None:
         return None, NO_TIMELINE_MESSAGE
@@ -496,15 +523,28 @@ def _prepare_overlay(
     if recorded is None:
         return None, "This graphic's brief did not record its words. Write it again."
     words, context = recorded
+    start_s, end_s = overlay.start_s, overlay.end_s
+    width, height = project.out_width, project.out_height
+    caption: dict[str, int] | None = None
+    shift_s = 0.0
+    segment = stretch.graphic_of(overlay.overlay_id) if stretch is not None else None
+    if segment is not None:
+        start_s, end_s = segment.draw_start_s, segment.draw_end_s
+        shift_s = round(overlay.start_s - start_s, 3)
+        panel = graphic_panel(project)
+        width, height = panel[2], panel[3]
+        caption = evidence_clip_layout.panel_caption(
+            (project.out_width, project.out_height), panel
+        ) or {"top": height, "bottom": height}
     try:
-        voice_offset_s = plan.timeline.take_map.to_take(overlay.start_s)
+        voice_offset_s = plan.timeline.take_map.to_take(start_s)
     except TakeMapError as exc:
         return None, str(exc)
     span = scene_timeline.ShotSpan(
         shot_id=overlay.overlay_id,
-        start_s=overlay.start_s,
-        end_s=overlay.end_s,
-        clip_frames=graphic_overlays.clip_frames(overlay.start_s, overlay.end_s),
+        start_s=start_s,
+        end_s=end_s,
+        clip_frames=graphic_overlays.clip_frames(start_s, end_s),
     )
     try:
         resolved = resolve_for_shot(
@@ -512,9 +552,10 @@ def _prepare_overlay(
             words=words,
             theme=theme.content["theme"],
             span=span,
-            shift_s=0.0,
-            width=project.out_width,
-            height=project.out_height,
+            shift_s=shift_s,
+            width=width,
+            height=height,
+            caption=caption,
         )
     except ShotGraphicsError as exc:
         return None, str(exc)
@@ -679,11 +720,12 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
         for brief_overlay in scene.overlays:
             overlay = brief_overlay.overlay
             brief = brief_overlay.row
+            stretch = _stretch_of(plan, overlay)
             prepared = None
             problem = None
             if brief is not None and theme is not None and plan is not None:
                 prepared, problem = _prepare_overlay(
-                    project, plan, overlay, brief, theme, clocks.get(scene_id)
+                    project, plan, overlay, brief, theme, clocks.get(scene_id), stretch
                 )
             sha = prepared.sha256 if prepared is not None else None
             engines = [
@@ -705,7 +747,7 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
             )
             overlays.append(
                 _shot_entry(
-                    _overlay_stand_in(overlay),
+                    _overlay_stand_in(overlay, stretch),
                     brief,
                     brief_overlay.status,
                     theme_state,
@@ -715,6 +757,7 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
                     theme,
                     choice,
                     overlay=overlay,
+                    stretch=stretch,
                 )
             )
         scenes.append(
@@ -734,15 +777,35 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
     )
 
 
-def _overlay_stand_in(overlay: graphic_overlays.Overlay) -> dict[str, Any]:
+def _stretch_of(
+    plan: shot_plans.SceneEntry | None, overlay: graphic_overlays.Overlay
+) -> split_stretches.Stretch | None:
+    """The split stretch an overlay is drawn in (OVL-007), or None."""
+    if plan is None:
+        return None
+    return next(
+        (
+            stretch
+            for stretch in plan.stretches
+            if stretch.graphic_of(overlay.overlay_id) is not None
+        ),
+        None,
+    )
+
+
+def _overlay_stand_in(
+    overlay: graphic_overlays.Overlay, stretch: split_stretches.Stretch | None = None
+) -> dict[str, Any]:
     """The `shot` of the entry of an overlay: the fields the panels and the jobs read from a shot,
-    with the overlay's own values (times are the scene's, not the take's)."""
+    with the overlay's own values (times are the scene's, not the take's). An overlay in a split
+    stretch has the times it is drawn for."""
+    segment = stretch.graphic_of(overlay.overlay_id) if stretch is not None else None
     return {
         "id": overlay.overlay_id,
         "description": shot_graphic_briefs.OVERLAY_DESCRIPTION,
         "spoken_text": overlay.text,
-        "start_s": overlay.start_s,
-        "end_s": overlay.end_s,
+        "start_s": segment.draw_start_s if segment is not None else overlay.start_s,
+        "end_s": segment.draw_end_s if segment is not None else overlay.end_s,
     }
 
 
@@ -757,6 +820,7 @@ def _shot_entry(
     theme: Any,
     choice: str | None,
     overlay: graphic_overlays.Overlay | None = None,
+    stretch: split_stretches.Stretch | None = None,
 ) -> ShotEntry:
     target = (
         shot_graphic_briefs.TARGET_OVERLAY
@@ -811,6 +875,7 @@ def _shot_entry(
         theme=theme,
         target=target,
         overlay=overlay,
+        stretch=stretch,
     )
 
 
@@ -933,7 +998,11 @@ async def _write(
         "line": shot.material["line"],
         "context": shot.material["context"],
         "mood": shot.material["mood"],
-        "orientation": project.orientation,
+        "orientation": (
+            panel_orientation(shot.resolved["width"], shot.resolved["height"])
+            if shot.stretch is not None
+            else project.orientation
+        ),
         "brief": shot.brief.content,
         "resolved": shot.resolved,
     }

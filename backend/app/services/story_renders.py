@@ -423,6 +423,19 @@ async def evidence_clips_now(
     }
 
 
+async def split_clips_now(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], evidence_clips.SplitClipEntry]:
+    """Every piece of evidence drawn beside a graphic overlay in the newest plans (OVL-007), by
+    `(scene id, segment id)`, with where its clip stands. Empty without any."""
+    state = await evidence_clips.split_state(session, project)
+    return {
+        (scene.item["id"], entry.segment_id): entry
+        for scene in state.entries
+        for entry in scene.entries
+    }
+
+
 async def soundbite_clips_now(
     session: AsyncSession, project: Project
 ) -> dict[tuple[str, str], evidence_clips.SoundbiteClipEntry]:
@@ -503,6 +516,51 @@ def _card_clip_source(
     )
 
 
+def _split_clip_source(
+    entry: evidence_clips.SplitClipEntry,
+) -> story_render_plan.SplitClipSource | None:
+    """The clip of evidence beside a graphic: its newest clip, once it is ready and is the current
+    one (OVL-007)."""
+    clip = entry.clip if entry.done else None
+    if clip is None or clip.media_path is None:
+        return None
+    small = next(
+        (
+            str(warning.get("message"))
+            for warning in (clip.warnings if isinstance(clip.warnings, list) else [])
+            if isinstance(warning, dict) and warning.get("code") == "small_text"
+        ),
+        None,
+    )
+    return story_render_plan.SplitClipSource(
+        clip_id=clip.id,
+        path=clip.media_path,
+        frame_count=clip.frame_count,
+        file_exists=file_exists(clip.media_path),
+        small_text=small,
+    )
+
+
+def _split_sources(
+    scene_id: str, splits: dict[tuple[str, str], evidence_clips.SplitClipEntry]
+) -> list[story_render_plan.SplitSource]:
+    """The evidence beside graphic overlays in a scene, for the render plan (OVL-007), in the order
+    it starts."""
+    sources = [
+        story_render_plan.SplitSource(
+            segment_id=entry.segment_id,
+            claim_id=entry.segment.claim_id,
+            item_key=entry.segment.item_key or "",
+            start_s=entry.segment.draw_start_s,
+            end_s=entry.segment.draw_end_s,
+            clip=_split_clip_source(entry),
+        )
+        for (scene, _segment_id), entry in splits.items()
+        if scene == scene_id
+    ]
+    return sorted(sources, key=lambda source: (source.start_s, source.segment_id))
+
+
 def _evidence_overlays(
     scene: evidence_clips.SceneCardClips | None,
 ) -> tuple[list[story_render_plan.CardSource], list[story_render_plan.SourceLineSource]]:
@@ -553,21 +611,46 @@ def _graphic_source(used: shot_graphics.UsedVideo | None) -> story_render_plan.G
 
 
 def _overlay_sources(
-    scene_id: str, overlays: dict[tuple[str, str], shot_graphics.ShotEntry]
+    scene_id: str,
+    overlays: dict[tuple[str, str], shot_graphics.ShotEntry],
+    panel: tuple[int, int, int, int],
 ) -> list[story_render_plan.OverlaySource]:
     """The graphic overlays of a scene for the render plan (OVL-005), in the order they start."""
     sources = [
-        story_render_plan.OverlaySource(
-            overlay_id=entry.overlay.overlay_id,
-            text=entry.overlay.text,
-            start_s=entry.overlay.start_s,
-            end_s=entry.overlay.end_s,
-            graphic=_graphic_source(entry.used),
-        )
-        for (scene, _overlay_id), entry in overlays.items()
-        if scene == scene_id and entry.overlay is not None
+        _overlay_source(entry, panel)
+        for (scene, _id), entry in overlays.items()
+        if scene == scene_id
     ]
     return sorted(sources, key=lambda source: source.start_s)
+
+
+def _overlay_source(
+    entry: shot_graphics.ShotEntry, panel: tuple[int, int, int, int]
+) -> story_render_plan.OverlaySource:
+    """One overlay for the render plan. An overlay in a split stretch (OVL-007) is laid in the
+    graphic's panel `(x, y, width, height)` for the span it is drawn for; any other is full screen
+    for its own span."""
+    overlay = entry.overlay
+    assert overlay is not None
+    segment = entry.stretch.graphic_of(overlay.overlay_id) if entry.stretch is not None else None
+    if segment is None:
+        return story_render_plan.OverlaySource(
+            overlay_id=overlay.overlay_id,
+            text=overlay.text,
+            start_s=overlay.start_s,
+            end_s=overlay.end_s,
+            graphic=_graphic_source(entry.used),
+        )
+    return story_render_plan.OverlaySource(
+        overlay_id=overlay.overlay_id,
+        text=overlay.text,
+        start_s=segment.draw_start_s,
+        end_s=segment.draw_end_s,
+        graphic=_graphic_source(entry.used),
+        split=True,
+        x=panel[0],
+        y=panel[1],
+    )
 
 
 async def scene_sources(
@@ -589,6 +672,8 @@ async def scene_sources(
     continuous = word_timings.times_takes(project)
     graphics = await graphic_videos(session, project)
     overlays = await overlay_videos(session, project) if with_overlays else {}
+    splits = await split_clips_now(session, project) if with_overlays else {}
+    panel = shot_graphics.graphic_panel(project)
     evidence = await evidence_clips_now(session, project)
     bite_state = await evidence_clips.soundbite_state(session, project)
     bite_clips = {
@@ -747,7 +832,8 @@ async def scene_sources(
                 voice=voice,
                 cards=cards,
                 source_lines=source_lines,
-                overlays=_overlay_sources(scene_id, overlays) if blocked is None else [],
+                overlays=_overlay_sources(scene_id, overlays, panel) if blocked is None else [],
+                splits=_split_sources(scene_id, splits) if blocked is None else [],
             )
         )
     return scenes
@@ -1001,6 +1087,7 @@ def _render_reasons(
     evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry] | None = None,
     soundbites: dict[tuple[str, str], evidence_clips.SoundbiteClipEntry] | None = None,
     overlays: dict[tuple[str, str], shot_graphics.ShotEntry] | None = None,
+    splits: dict[tuple[str, str], evidence_clips.SplitClipEntry] | None = None,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
@@ -1008,7 +1095,7 @@ def _render_reasons(
     `graphics` is the video each graphic shot uses now (`graphic_videos`), and `evidence` the
     clip of each evidence shot now (`evidence_clips_now`), and `soundbites` the clip of each sound
     bite shot now (`soundbite_clips_now`), and `overlays` the graphic overlays now
-    (`overlay_videos`, OVL-005).
+    (`overlay_videos`, OVL-005), and `splits` the evidence beside them (`split_clips_now`, OVL-007).
     """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
@@ -1084,6 +1171,7 @@ def _render_reasons(
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{label} was made again since this video was made.")
     reasons.extend(overlay_reasons(recorded, overlays or {}))
+    reasons.extend(split_reasons(recorded, splits or {}))
     reasons.extend(music_reasons(recorded, *music))
     reasons.extend(caption_reasons(recorded, music[0]))
     reasons.extend(callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
@@ -1167,6 +1255,41 @@ def overlay_reasons(
         if scene_id is not None and key[0] != scene_id:
             continue
         reasons.append(f"A graphic over '{now.overlay.text}' was added since this video was made.")
+    return reasons
+
+
+def split_reasons(
+    recorded: dict[str, Any],
+    splits: dict[tuple[str, str], evidence_clips.SplitClipEntry],
+    scene_id: str | None = None,
+) -> list[str]:
+    """Why the evidence a render drew beside a graphic overlay (OVL-007) is not what there is now:
+    a piece was removed, has no clip now or was drawn again, or one with a clip was added. A render
+    is compared with the pieces of its own scene only when `scene_id` is given. A piece with no
+    clip yet does not count as added: a render cannot have it."""
+    entries = recorded.get("split_evidence")
+    then = [entry for entry in entries or [] if isinstance(entry, dict)]
+    if scene_id is not None:
+        then = [entry for entry in then if entry.get("scene_id") == scene_id]
+    reasons: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in then:
+        key = (str(entry.get("scene_id")), str(entry.get("segment_id")))
+        seen.add(key)
+        label = f"The evidence beside a graphic in scene {entry.get('scene_index')}"
+        now = splits.get(key)
+        if now is None:
+            reasons.append(f"{label} was removed since this video was made.")
+        elif not now.done or now.clip is None:
+            reasons.append(f"{label} has no current clip now.")
+        elif now.clip.id != entry.get("clip_id"):
+            reasons.append(f"{label} was drawn again since this video was made.")
+    for key, now in splits.items():
+        if key in seen or not now.done:
+            continue
+        if scene_id is not None and key[0] != scene_id:
+            continue
+        reasons.append("Evidence beside a graphic was added since this video was made.")
     return reasons
 
 
@@ -1344,6 +1467,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     evidence = await evidence_clips_now(session, project)
     soundbites = await soundbite_clips_now(session, project)
     overlays = await overlay_videos(session, project)
+    splits = await split_clips_now(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -1377,6 +1501,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             evidence,
             soundbites,
             overlays,
+            splits,
         )
         entries.append(
             RenderEntry(

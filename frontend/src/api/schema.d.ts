@@ -14862,7 +14862,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "callout_fallback" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown" | "card_without_clip" | "evidence_split_empty" | "soundbite_captions_dropped" | "soundbite_music_drops" | "overlay_without_video" | "overlay_over_evidence";
+            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "callout_fallback" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown" | "card_without_clip" | "evidence_split_empty" | "soundbite_captions_dropped" | "soundbite_music_drops" | "overlay_without_video" | "overlay_over_evidence" | "split_without_video" | "split_small_text";
             /** Scene Id */
             scene_id?: string | null;
             /** Shot Id */
@@ -16784,6 +16784,8 @@ export interface components {
             suggestion_id: string;
             /** Shot Ids */
             shot_ids: string[];
+            /** Split */
+            split: boolean;
         };
         /** ShotGraphicSceneOut */
         ShotGraphicSceneOut: {

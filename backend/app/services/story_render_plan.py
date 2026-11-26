@@ -69,6 +69,12 @@ optional key `graphic_overlays`: each entry is a full-frame video laid at (0, 0)
 it spans, on top of callouts and evidence cards. It changes no shot and no second of the story, so
 the version stays 6. A callout that starts in one is left out, as under a graphic shot.
 
+**Evidence beside a graphic** (OVL-007). Where an overlay and evidence share the screen, the
+overlay entry has `split` true and the `(x, y)` of its panel (its video is drawn at the panel's
+size), and the optional key `split_evidence` holds the evidence side: each entry is a full-frame
+opaque video (the evidence drawn in its half, the other half empty) laid at (0, 0) under the
+overlays. The version stays 6.
+
 `master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
@@ -205,8 +211,12 @@ CARD_WITHOUT_CLIP: Final = "card_without_clip"
 # A graphic overlay (OVL-005) with no video is left out of a scene render, with this warning code.
 OVERLAY_WITHOUT_VIDEO: Final = "overlay_without_video"
 # A graphic overlay covers an evidence card or a full-screen evidence shot: the graphic is on top
-# until the split screen (OVL-007).
+# (an overlay that is drawn beside the evidence, OVL-007, does not).
 OVERLAY_OVER_EVIDENCE: Final = "overlay_over_evidence"
+# The evidence drawn beside a graphic (OVL-007) with no clip is left out of a scene render, with
+# this warning code; and the one whose quote is too small to read at its half of the frame.
+SPLIT_WITHOUT_VIDEO: Final = "split_without_video"
+SPLIT_SMALL_TEXT: Final = "split_small_text"
 
 # A music sound cut by the edge of a scene render fades over this long (a starting value, not yet
 # tuned by ear).
@@ -319,6 +329,37 @@ class OverlaySource:
     start_s: float
     end_s: float
     graphic: GraphicSource | None
+    # Drawn beside evidence in a panel of the frame (OVL-007): `start_s` and `end_s` are then the
+    # stretch's span for this graphic, and `(x, y)` is its panel on the frame.
+    split: bool = False
+    x: int = 0
+    y: int = 0
+
+
+@dataclass(frozen=True)
+class SplitClipSource:
+    """The clip of evidence beside a graphic (OVL-007): the newest ready clip made for it, a
+    full-frame opaque video with the evidence in its half. `small_text` is the sentence of its
+    `small_text` warning, when it has one."""
+
+    clip_id: int
+    path: str
+    frame_count: int | None
+    file_exists: bool
+    small_text: str | None = None
+
+
+@dataclass(frozen=True)
+class SplitSource:
+    """A piece of evidence beside a graphic overlay (OVL-007): `start_s` and `end_s` sit on the
+    scene's timeline, and `clip` is None while it has no clip."""
+
+    segment_id: str
+    claim_id: str | None
+    item_key: str
+    start_s: float
+    end_s: float
+    clip: SplitClipSource | None
 
 
 @dataclass(frozen=True)
@@ -456,6 +497,8 @@ class SceneSource:
     source_lines: list[SourceLineSource] = field(default_factory=list)
     # The graphic overlays over its shots (OVL-005). Empty without suggestions.
     overlays: list[OverlaySource] = field(default_factory=list)
+    # The evidence drawn beside those overlays (OVL-007). Empty without a split stretch.
+    splits: list[SplitSource] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1364,6 +1407,88 @@ def _overlay_entries(
                     "attempt": graphic.attempt,
                     "path": graphic.path,
                     "clip_frames": graphic.frame_count,
+                    "x": overlay.x,
+                    "y": overlay.y,
+                    # Only an overlay drawn beside evidence has this key (OVL-007).
+                    **({"split": True} if overlay.split else {}),
+                }
+            )
+    return entries, missing
+
+
+def _split_entries(
+    scenes: list[SceneSource],
+    fps: int,
+    total_frames: int,
+    *,
+    placeholders: bool,
+    warnings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The evidence beside graphic overlays as timeline entries (OVL-007), and the pieces that
+    have no usable clip. Like a card, a piece only needs a frame range of the story and a clip
+    with the frames that range needs (one short is allowed). In a scene render a piece without a
+    clip is left out with a warning; in a full render it is returned as missing, and the plan
+    refuses. A clip whose quote is too small to read gives a warning.
+    """
+    entries: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for scene in scenes:
+        if scene.story_start_s is None:
+            continue
+        for piece in scene.splits:
+            start_ms = _ms(scene.story_start_s + piece.start_s)
+            end_ms = _ms(scene.story_start_s + piece.end_s)
+            start_frame = frame_at(start_ms, fps)
+            frames = min(frame_at(end_ms, fps), total_frames) - start_frame
+            if frames < 1:
+                continue
+            label = f"beside a graphic in scene {scene.index} ({piece.segment_id})"
+            clip = piece.clip
+            needed = source_frames_needed(frames, fps)
+            if (
+                clip is None
+                or not clip.file_exists
+                or clip.frame_count is None
+                or clip.frame_count < needed - 1
+            ):
+                if not placeholders:
+                    missing.append(label)
+                    continue
+                warnings.append(
+                    {
+                        "code": SPLIT_WITHOUT_VIDEO,
+                        "scene_id": scene.scene_id,
+                        "shot_id": None,
+                        "message": f"The evidence {label} is left out: it has no clip yet.",
+                    }
+                )
+                continue
+            if clip.small_text is not None:
+                warnings.append(
+                    {
+                        "code": SPLIT_SMALL_TEXT,
+                        "scene_id": scene.scene_id,
+                        "shot_id": None,
+                        "message": f"The evidence {label} is hard to read at half the screen. "
+                        f"{clip.small_text}",
+                    }
+                )
+            entries.append(
+                {
+                    "id": f"{scene.scene_id}/{piece.segment_id}",
+                    "scene_id": scene.scene_id,
+                    "scene_index": scene.index,
+                    "segment_id": piece.segment_id,
+                    "claim_id": piece.claim_id,
+                    "item_key": piece.item_key,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "start_frame": start_frame,
+                    "frames": frames,
+                    "source_frames": needed,
+                    "clip_id": clip.clip_id,
+                    "path": clip.path,
+                    "clip_frames": clip.frame_count,
                     "x": 0,
                     "y": 0,
                 }
@@ -1377,7 +1502,7 @@ def _overlay_evidence_warnings(
     shots: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """One warning for each overlay that covers an evidence card or a full-screen evidence shot:
-    the graphic is on top until the split screen (OVL-007).
+    the graphic is on top. An overlay drawn beside the evidence (`split`, OVL-007) covers none.
     """
     covered = [(card["start_ms"], card["end_ms"]) for card in cards]
     covered.extend(
@@ -1387,6 +1512,8 @@ def _overlay_evidence_warnings(
     )
     warnings: list[dict[str, Any]] = []
     for overlay in overlays:
+        if overlay.get("split"):
+            continue
         if any(low < overlay["end_ms"] and overlay["start_ms"] < high for low, high in covered):
             warnings.append(
                 {
@@ -1988,6 +2115,16 @@ def _build(
             "Make them in the Graphics step."
         )
     graphic_spans.extend((entry["start_ms"], entry["end_ms"]) for entry in overlay_entries)
+    # The evidence beside a graphic (OVL-007): a split stretch has no room for a callout either.
+    split_entries, splits_missing = _split_entries(
+        scenes, fps, cursor, placeholders=placeholders, warnings=warnings
+    )
+    if splits_missing:
+        raise RenderPlanError(
+            f"This evidence beside a graphic has no clip yet: {_named(splits_missing)}. Draw it "
+            "in the Evidence clips step."
+        )
+    graphic_spans.extend((entry["start_ms"], entry["end_ms"]) for entry in split_entries)
     warnings.extend(_overlay_evidence_warnings(overlay_entries, card_entries, shots))
     source_line_entries = _source_line_entries(scenes)
 
@@ -2063,6 +2200,8 @@ def _build(
         **({"source_lines": source_line_entries} if source_line_entries else {}),
         # Only a render with graphic overlays has this key (OVL-005).
         **({"graphic_overlays": overlay_entries} if overlay_entries else {}),
+        # Only a render with evidence beside a graphic has this key (OVL-007).
+        **({"split_evidence": split_entries} if split_entries else {}),
         "master": master(mix),
         "constants": {**constants(mix), **(bite_constants() if bite_windows_story else {})},
         "warnings": warnings,
@@ -2185,6 +2324,10 @@ def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> Non
         overlay["start_frame"] -= first_frame
         overlay["start_ms"] = earlier(overlay["start_ms"])
         overlay["end_ms"] = earlier(overlay["end_ms"])
+    for piece in timeline.get("split_evidence", []):
+        piece["start_frame"] -= first_frame
+        piece["start_ms"] = earlier(piece["start_ms"])
+        piece["end_ms"] = earlier(piece["end_ms"])
     for line in timeline.get("source_lines", []):
         line["start_ms"] = earlier(line["start_ms"])
         line["end_ms"] = earlier(line["end_ms"])

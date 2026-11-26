@@ -32,6 +32,9 @@ Rect = tuple[int, int, int, int]
 
 # The share of a portrait frame's height the callout panel takes; the evidence panel has the rest.
 PORTRAIT_CALLOUT_SHARE: Final = 0.30
+# The share a portrait frame's height the graphic takes when it shares the screen with evidence
+# (OVL-007); the evidence panel has the rest.
+PORTRAIT_GRAPHIC_SHARE: Final = 0.50
 
 # The zone of a callout in its panel, as shares of the frame: `(centre x, width, top, bottom)`.
 # Portrait fills the width of the panel above the line between the panels; landscape is the size and
@@ -99,6 +102,21 @@ def panels(width: int, height: int) -> Panels:
         callout=(half, 0, width - half, height),
         edge=EDGE_RIGHT,
     )
+
+
+def graphic_split_panels(width: int, height: int) -> Panels:
+    """The panels of a stretch where a graphic overlay and evidence share the screen (OVL-007).
+    `evidence` is the evidence panel and `callout` is the graphic's panel. Landscape is the same as
+    `panels` (evidence left, graphic right, half each); portrait puts the graphic on top and the
+    evidence below, half each. Pure."""
+    if is_portrait(width, height):
+        top = _even(PORTRAIT_GRAPHIC_SHARE * height)
+        return Panels(
+            evidence=(0, top, width, height - top),
+            callout=(0, 0, width, top),
+            edge=EDGE_TOP,
+        )
+    return panels(width, height)
 
 
 def callout_zone(width: int, height: int) -> tuple[float, float, float, float]:

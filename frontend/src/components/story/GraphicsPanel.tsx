@@ -223,6 +223,7 @@ function SceneGraphics({ scene, busy, shotHandlers, overlayHandlers }: SceneGrap
           key={`overlay-${overlay.id}`}
           shot={overlay}
           isOverlay
+          split={overlay.split}
           busy={busy}
           {...overlayHandlers}
         />
@@ -263,6 +264,8 @@ type ShotGraphicsProps = {
   shot: ShotGraphic;
   /** The graphic is an overlay: it has its own heading and no planner's description. */
   isOverlay?: boolean;
+  /** The overlay is drawn beside evidence, in half of the frame (OVL-007). */
+  split?: boolean;
   busy: boolean;
   onMake: (shot: ShotGraphic) => void;
   onAskAgain: (shot: ShotGraphic, engine: ShotGraphicEngine["key"]) => void;
@@ -273,6 +276,7 @@ type ShotGraphicsProps = {
 function ShotGraphics({
   shot,
   isOverlay = false,
+  split = false,
   busy,
   onMake,
   onAskAgain,
@@ -327,6 +331,12 @@ function ShotGraphics({
             <Text size="sm" fw={600} style={{ wordBreak: "break-word" }}>
               {shot.spoken_text}
             </Text>
+            {split && (
+              <Text size="xs" c="dimmed">
+                Shown beside the evidence, in half of the screen. The times above are the whole
+                stretch it is drawn for.
+              </Text>
+            )}
             {!isOverlay && (
               <Text size="xs" c="dimmed">
                 Planner's description: {shot.description}

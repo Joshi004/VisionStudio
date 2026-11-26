@@ -3685,7 +3685,10 @@ class EvidenceClip(Base):
     `purpose` is `preview` (from the review screen, with no scene or shot), `shot` (the clip of
     an evidence shot at its exact length) or `card` (EVD-011, revision 0099: a transparent clip
     laid over a presenter or B-roll shot; `shot_id` is the first shot it covers) or `soundbite`
-    (SB-001, revision 0100: the trimmed, gain-matched clip of a sound bite and its overlay).
+    (SB-001, revision 0100: the trimmed, gain-matched clip of a sound bite and its overlay) or
+    `split` (OVL-007, revision 0103: the evidence side of a stretch where a graphic overlay and
+    evidence share the screen, drawn in its half of the frame; `shot_id` is the evidence shot it
+    shows, NULL for a card's piece).
     `inputs.items` is the ordered list of the pieces the
     clip shows; `item_id` is set when it shows exactly one. The row is made when its render is
     queued, so the video columns are NULL until the render has written them, like `ShotGraphic`.
@@ -3694,7 +3697,8 @@ class EvidenceClip(Base):
     __tablename__ = "evidence_clip"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('preview', 'shot', 'card', 'soundbite')", name="purpose_valid"
+            "purpose IN ('preview', 'shot', 'card', 'soundbite', 'split')",
+            name="purpose_valid",
         ),
         Index("idx_evidence_clip_project_scene", "project_id", "scene_id"),
         Index("idx_evidence_clip_item", "item_id"),

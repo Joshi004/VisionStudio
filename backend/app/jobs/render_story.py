@@ -309,6 +309,22 @@ class GraphicOverlay:
 
 
 @dataclass(frozen=True)
+class SplitEvidence:
+    """The evidence beside a graphic overlay (OVL-007): its clip (H.264, no alpha, the whole frame
+    with the evidence in its half), the story frame it starts at and where it sits (0, 0). It is
+    laid under the graphic overlays, which cover its empty half.
+    """
+
+    segment_id: str
+    path: str
+    start_frame: int
+    frames: int
+    clip_frames: int
+    x: int
+    y: int
+
+
+@dataclass(frozen=True)
 class Timeline:
     fps: int
     width: int
@@ -344,6 +360,8 @@ class Timeline:
     source_lines: tuple[caption_ass.SourceLineEvent, ...] = ()
     # The graphic overlays (OVL-005); a timeline without any has none.
     graphic_overlays: tuple[GraphicOverlay, ...] = ()
+    # The evidence drawn beside those overlays (OVL-007); a timeline without any has none.
+    split_evidence: tuple[SplitEvidence, ...] = ()
     # The sound bite values (SB-009). A timeline without a bite does not record them, and one
     # that is older than the phase has none either: they read as the plan's own values.
     bite_max_boost_db: float = story_render_plan.BITE_MAX_BOOST_DB
@@ -639,6 +657,39 @@ def _parse_graphic_overlays(raw: dict[str, Any], total_frames: int) -> tuple[Gra
             raise RenderFailed(_CHANGED_MESSAGE)
         overlays.append(GraphicOverlay(overlay_id, text, path, start, frames, clip_frames, x, y))
     return tuple(overlays)
+
+
+def _parse_split_evidence(raw: dict[str, Any], total_frames: int) -> tuple[SplitEvidence, ...]:
+    """The evidence beside graphic overlays in the timeline: none when the key is missing."""
+    entries = raw.get("split_evidence", [])
+    if not isinstance(entries, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    found: list[SplitEvidence] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        segment_id, path = entry.get("segment_id"), entry.get("path")
+        numbers = [
+            _whole(entry.get(key))
+            for key in ("start_frame", "frames", "source_frames", "clip_frames", "x", "y")
+        ]
+        if (
+            not isinstance(segment_id, str)
+            or not isinstance(path, str)
+            or any(value is None for value in numbers)
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        start, frames, source_frames, clip_frames, x, y = (value or 0 for value in numbers)
+        # One source frame short is allowed, as for a shot (the render repeats the last frame).
+        if (
+            start < 0
+            or frames < 1
+            or clip_frames < source_frames - 1
+            or start + frames > total_frames
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        found.append(SplitEvidence(segment_id, path, start, frames, clip_frames, x, y))
+    return tuple(found)
 
 
 def _parse_source_lines(raw: dict[str, Any]) -> tuple[caption_ass.SourceLineEvent, ...]:
@@ -945,6 +996,7 @@ def parse_timeline(recorded: object) -> Timeline:
         callout_style=callout_style,
         cards=_parse_cards(raw, total),
         graphic_overlays=_parse_graphic_overlays(raw, total),
+        split_evidence=_parse_split_evidence(raw, total),
         source_lines=_parse_source_lines(raw),
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
@@ -1053,6 +1105,19 @@ class RenderStoryHandler(JobHandler):
             shot_overlays = [
                 [*callouts_on, *cards_on]
                 for callouts_on, cards_on in zip(shot_overlays, on_cards, strict=True)
+            ]
+
+        # The evidence beside a graphic (OVL-007): a full-frame video whose other half the graphic
+        # overlays below cover.
+        if timeline.split_evidence:
+            split_files = [
+                (piece, await probe_split_evidence(storage, piece))
+                for piece in timeline.split_evidence
+            ]
+            on_splits = card_overlays(split_files, [shot.frames for shot in timeline.shots])
+            shot_overlays = [
+                [*already_on, *splits_on]
+                for already_on, splits_on in zip(shot_overlays, on_splits, strict=True)
             ]
 
         # Graphic overlays (OVL-005): full-screen videos laid last, so they are on top of the
@@ -1535,8 +1600,24 @@ async def probe_graphic_overlay(storage: Storage, overlay: GraphicOverlay) -> Pa
     return path
 
 
+async def probe_split_evidence(storage: Storage, piece: SplitEvidence) -> Path:
+    """The clip of evidence beside a graphic (OVL-007); refuses one that cannot be read or is too
+    short."""
+    try:
+        path = storage.get_path(piece.path)
+    except StorageError as exc:
+        raise RenderFailed("A file of this render could not be found on disk.") from exc
+    probe = await ffmpeg.probe_video(path)
+    if probe is None or probe.frame_count is None or probe.frame_count < piece.clip_frames:
+        raise RenderFailed(
+            "The evidence beside a graphic could not be read. Draw the evidence clips again."
+        )
+    return path
+
+
 def card_overlays(
-    cards: Sequence[tuple[EvidenceCard | GraphicOverlay, Path]], shot_frames: Sequence[int]
+    cards: Sequence[tuple[EvidenceCard | GraphicOverlay | SplitEvidence, Path]],
+    shot_frames: Sequence[int],
 ) -> list[list[render_commands.Overlay]]:
     """The overlays of each shot for the evidence cards (and for the graphic overlays, OVL-005),
     as `DrawnCallouts.overlays_by_shot` does for callouts: a card that runs across a cut is split

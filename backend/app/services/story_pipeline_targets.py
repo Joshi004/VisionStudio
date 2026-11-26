@@ -2004,13 +2004,21 @@ async def _start_shot_plans(
 
 def _overlay_notes(plans: shot_plans.ShotPlansState) -> list[str]:
     """One note for each suggestion that got no graphic (OVL-003): "Scene 2: 'the words' gets no
-    graphic: <reason>". Not a failure of a step, so it is a note. Pure.
+    graphic: <reason>", and one for each graphic that meets evidence but cannot be drawn beside it
+    (OVL-007). Not a failure of a step, so it is a note. Pure.
     """
-    return [
+    notes = [
         f"{_scene_label(entry.item)}: '{missing.text}' gets no graphic: {missing.message}"
         for entry in plans.entries
         for missing in entry.unplaced_overlays
     ]
+    notes.extend(
+        f"{_scene_label(entry.item)}: '{refused.text}' is not shown beside the evidence: "
+        f"{refused.message}"
+        for entry in plans.entries
+        for refused in entry.refused_stretches
+    )
+    return notes
 
 
 async def _evaluate_graphic_briefs(
@@ -2153,6 +2161,8 @@ async def _start_graphics(
 CARD_REF: Final = "card"
 # The same for the clip of a sound bite shot (SB-009).
 SOUNDBITE_REF: Final = "soundbite"
+# The clip of the evidence beside a graphic overlay (OVL-007).
+SPLIT_REF: Final = "split"
 
 
 def _evidence_notes(plans: shot_plans.ShotPlansState) -> list[str]:
@@ -2250,6 +2260,24 @@ async def _evaluate_evidence_clips(
                     group=scene_id,
                 )
             )
+    # The evidence drawn beside a graphic overlay (OVL-007) has a clip each, like a card.
+    for split_scene in (await evidence_clips.split_state(session, project)).entries:
+        scene_id = split_scene.item["id"]
+        for split in split_scene.entries:
+            active = split.status == "working"
+            targets.append(
+                Target(
+                    f"split:{split.ref}",
+                    f"{_scene_label(split_scene.item)}, evidence beside a graphic",
+                    split.done,
+                    active=active,
+                    block=None if split.done or active else split.blocked_reason,
+                    last_error=None if split.done else split.last_error,
+                    ref=(scene_id, split.segment_id, SPLIT_REF),
+                    stale=split.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
     # The clip of each sound bite shot (SB-009): the video's own sound and picture.
     for bite_scene in (await evidence_clips.soundbite_state(session, project)).entries:
         scene_id = bite_scene.item["id"]
@@ -2281,6 +2309,10 @@ async def _start_evidence_clips(
     async def make(target: Target) -> tuple[int, ...]:
         if target.ref[-1] == CARD_REF:
             job = await evidence_clips.queue_card_clip(
+                session, project, target.ref[0], target.ref[1]
+            )
+        elif target.ref[-1] == SPLIT_REF:
+            job = await evidence_clips.queue_split_clip(
                 session, project, target.ref[0], target.ref[1]
             )
         elif target.ref[-1] == SOUNDBITE_REF:
