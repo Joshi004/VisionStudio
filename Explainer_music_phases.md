@@ -260,7 +260,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXM-005 — The mix for a talking voice
 
-**Status:** Not started
+**Status:** Code done, live run pending
 
 **Objective.** Mix an explainer's music so the voice is always clear and the music only rises where the plan put a post.
 
@@ -290,8 +290,23 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Explainer mix settings and their use in the render plan
-- [ ] Docs (settings in `DATABASE_STRUCTURE.md`), standard checks
+- [x] Explainer mix settings and their use in the render plan
+- [x] Docs (settings in `DATABASE_STRUCTURE.md`), standard checks
+
+**Completion notes.** Code done 2026-11-27, **live run pending** (the running containers still serve the old code until `docker compose up --build -d`). No migration. Nothing here calls a model.
+
+- **Planning decided.**
+  - *Post:* a partial rise. The duck stays on through the gap and the music rises by `explainer_music_post_rise_db` (+8 dB) only inside the pause of each post, so in a gap under 1 s the music goes from -22 dB to about -14 dB, not back to full level. A rise is only made where the music is still lowered: a gap of 4 s or more is already released by the hold gap, so a post there adds nothing and no rise is written.
+  - *Duck:* one setting for every explainer cue, `explainer_music_duck_db` (-22 dB). `under_voice` and `swell_in_gaps` are not read for a continuous explainer (EXM-004 defaults every cue to `low`).
+  - *Gaps and ramps:* constants recorded on the timeline: hold gap `EXPLAINER_MUSIC_HOLD_GAP_S` 4.0 s, post ramp `EXPLAINER_POST_RAMP_S` 0.15 s (half the pause when shorter). The `MUSIC_GAP_RELEASE_S` of a story is not used.
+  - *EQ dip:* left for after the first listen.
+- **Render plan.** `story_render_plan`: `MixSettings.explainer_duck_db` and `explainer_post_rise_db`, `MusicSource.posts` (by cue id, `(start_s, end_s)`), `explainer_constants(mix)` (merged into `constants` only for a continuous explainer with music), `_post_rises(...)` and `_music_timeline(..., explainer=continuous)`. A rise is the post's span minus the render's own speech spans (so never over a word), inset by its ramp.
+- **Source of the posts.** `render_music.cue_posts` reads `cues[].posts` from the plan named by the placement's `inputs.plan`; used in `gate`, `scene_gate` and the preview (`music_preview._source_with_take`). A story's plan has none.
+- **Render job.** `render_commands.Rise` and `LaneSound.rises` (a `gain_bump_filter` after the duck); `render_story._parse_rises` (a missing key means none). The timeline stays version 6.
+- **Out of date.** `story_renders.mix_settings` reads the two new settings; they are in `_MIX_CONSTANTS`, and `mix_constant_reasons` compares only keys a render recorded, so a story render never sees them.
+- **Settings.** `explainer_music_duck_db` (-22, -40 to -1) and `explainer_music_post_rise_db` (8, 1 to 18) in group `Music`. The Settings page lists them without a frontend change. `DATABASE_STRUCTURE.md`: two rows and a paragraph in the render timeline section.
+- **Checked.** A script with stand-in data (not kept) against a copy of `HEAD`: a story's music timeline, recorded constants and music lane FFmpeg arguments are byte-for-byte the same. For an explainer: the duck is -22 dB and held through gaps under 4 s (a 6 s gap is released); a post in a 0.4 s gap gives a rise inset by 0.15 s; a post over speech is cut to the silence; a post in a released gap, and a post with no silence, give no rise; no rise window overlaps speech; the lane arguments hold the rise filter. `_parse_rises` refuses a bad entry; `mix_constant_reasons` flags a changed explainer setting on an explainer render and ignores it on a story render. `ruff check` and `ruff format` pass.
+- **Not checked.** `mypy` is not installed in the project's environment, and `render_story` cannot be imported outside the containers (no database driver), so `_parse_rises` was run by itself and the rest of that file by reading and `ruff`. `build_plan` was not run on a whole stand-in story. The owner's listen is open: after a rebuild, render project 94 and judge the voice clear throughout, no pumping between sentences and the posts audible, then tune the two settings by ear.
 
 ### EXM-006 — The project's sound effects: switch and generation
 
@@ -415,7 +430,7 @@ Make a new continuous explainer (for example a short version of project 94's scr
 | EXM-002 | Code done, live run pending | Explainer Bible: palette in `sound_world`/`musical_feel`, arc with role and energy, no themes, themes step off. No migration. |
 | EXM-003 | Code done, live run pending | Explainer music timeline (voice only, `soundbites`), voice-only plan inputs (`basis: "voice"`), placement on the voice (`voice_sha256`, no shot cuts), step needs per project. No migration. |
 | EXM-004 | Code done, live run pending | Explainer plan (score and silence only, `posts`, 120 s cue limit, four explainer critic lenses), cue detail without hits (`swell_in_gaps` from posts), palette in every wording, explainer audit and rewrite. Flag `explainer: true` in the four job inputs. No migration. |
-| EXM-005 | Not started | |
+| EXM-005 | Code done, live run pending | Explainer mix: one duck setting (-22 dB) held through gaps under 4 s, a partial rise (+8 dB, setting) inside each planned post, optional `rises` key per sound in the render timeline (version stays 6). Settings `explainer_music_duck_db`, `explainer_music_post_rise_db`. No migration. |
 | EXM-006 | Not started | |
 | EXM-007 | Not started | |
 | EXM-008 | Not started | Owner end-to-end check. |

@@ -40,6 +40,15 @@ the sound's own seconds (its time 0 is the first sample it plays):
 - *The video model's sound under a bed* (MD-17): the shot audio is lowered by a setting wherever a
   bed plays, never during a line of dialogue. The setting is 0 (off) until the owner tunes it.
 
+**Music in a continuous explainer** (EXM-005). The music sits under a talking voice, so for a
+continuous explainer `_music_timeline` ignores a cue's `under_voice` and `swell_in_gaps`: every
+score sound is lowered by `MixSettings.explainer_duck_db` and holds that level through every gap
+shorter than `EXPLAINER_MUSIC_HOLD_GAP_S`, so it never rises between ordinary sentences. A cue's
+posts (the gaps the music plan chose, `MusicSource.posts`) are the only place it comes up: a sound
+gets a `rises` entry, the pause of each post (cut by the render's own speech spans, so never over a
+word) raised by `MixSettings.explainer_post_rise_db`. A story's own keys and values do not change.
+The values are recorded in `constants` of such a render.
+
 **Captions** (timeline version 3, EXPLAINER-008). For an explainer, `captions` holds the style and
 the caption groups made by `caption_plan.build_captions` from each speech's word timing (narration
 and dialogue alike), on the story's timeline, and `burned` (CAP-001): whether the render draws
@@ -120,6 +129,12 @@ MUSIC_DUCK_RAMP_S: Final = 0.4
 MUSIC_GAP_RELEASE_S: Final = 1.0
 # ... and this long for music that must hold steady.
 MUSIC_GAP_HOLD_S: Final = 4.0
+# --- The music under a continuous explainer's voice (EXM-005). Starting values, to be tuned. ---
+# A gap between two spoken stretches shorter than this keeps the music lowered: it never rises
+# between ordinary sentences.
+EXPLAINER_MUSIC_HOLD_GAP_S: Final = 4.0
+# The ramps of a planned post's rise, shortened to half the pause when the pause is shorter.
+EXPLAINER_POST_RAMP_S: Final = 0.15
 # A short dip around a sound the scene depends on: from DIP_BEFORE_S before to DIP_AFTER_S after.
 DIP_DB: Final = -6.0
 DIP_BEFORE_S: Final = 0.15
@@ -509,6 +524,10 @@ class MixSettings:
     true_peak_db: int = -1
     duck_low_db: int = -18
     duck_medium_db: int = -10
+    # A continuous explainer's music (EXM-005): its one duck depth, and how far the music rises
+    # inside a planned post.
+    explainer_duck_db: int = -22
+    explainer_post_rise_db: int = 8
     # 0 leaves the shot audio alone under a bed.
     bed_shot_duck_db: int = 0
 
@@ -528,6 +547,9 @@ class MusicSource:
     cue_mix: dict[str, tuple[str, bool]]
     # Whether beds and point sounds are in the render (the project's ambience switch).
     ambience: bool = True
+    # By cue id: the pauses the music plan chose for the music to rise in, `(start_s, end_s)` on
+    # the story's timeline. Only a continuous explainer's cues have any (EXM-005).
+    posts: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     # Set only for a provisional placement (SCN-011), made before every clip existed: what it was
     # made from (`music_placement.provisional_inputs`). It is written into `timeline.music` so
     # a scene render can tell later whether it is out of date.
@@ -707,6 +729,17 @@ def constants(mix: MixSettings | None = None) -> dict[str, float]:
     }
 
 
+def explainer_constants(mix: MixSettings) -> dict[str, float]:
+    """The values of a continuous explainer's music mix (EXM-005), recorded only on the timeline
+    of such a render, so a story's recorded constants do not change."""
+    return {
+        "explainer_music_duck_db": float(mix.explainer_duck_db),
+        "explainer_music_post_rise_db": float(mix.explainer_post_rise_db),
+        "explainer_music_hold_gap_s": EXPLAINER_MUSIC_HOLD_GAP_S,
+        "explainer_music_post_ramp_s": EXPLAINER_POST_RAMP_S,
+    }
+
+
 def bite_constants() -> dict[str, float]:
     """The values of the sound bite in the mix (SB-009), recorded on a timeline that has one. A
     timeline without a bite does not have them, so it does not change; the render reads a missing
@@ -871,6 +904,44 @@ def _windows_of(
     return slice_windows(list(windows), start_s, end_s, ramp_s)
 
 
+def _post_rises(
+    posts: Sequence[tuple[float, float]],
+    speech_spans: Sequence[tuple[float, float]],
+    ducked: Sequence[tuple[float, float]],
+    start_s: float,
+    end_s: float,
+    rise_db: float,
+) -> list[dict[str, Any]]:
+    """The rises of one explainer sound (EXM-005), in the sound's own seconds: one for the pause of
+    each post that lies inside the sound. The pause is the post's span with every spoken stretch
+    taken out, and only the part where the music is still lowered (`ducked`), so a rise never
+    lifts the music above its own level. Each is drawn in by a ramp (the filter's ramps lie
+    outside its window): `EXPLAINER_POST_RAMP_S`, or half the pause when it is shorter.
+    """
+    rises: list[dict[str, Any]] = []
+    for post_start, post_end in posts:
+        lowered = subtract_spans([(post_start, post_end)], speech_spans)
+        for pause_start, pause_end in subtract_spans(lowered, subtract_spans(lowered, ducked)):
+            pause_start, pause_end = max(pause_start, start_s), min(pause_end, end_s)
+            length = pause_end - pause_start
+            if length <= 0:
+                continue
+            ramp = min(EXPLAINER_POST_RAMP_S, length / 2)
+            rises.append(
+                {
+                    "windows": [
+                        [
+                            round(pause_start + ramp - start_s, 3),
+                            round(pause_end - ramp - start_s, 3),
+                        ]
+                    ],
+                    "db": rise_db,
+                    "ramp_s": round(ramp, 3),
+                }
+            )
+    return rises
+
+
 def _music_timeline(
     music: MusicSource,
     mix: MixSettings,
@@ -878,6 +949,7 @@ def _music_timeline(
     dialogue_spans: Sequence[tuple[float, float]],
     total_samples: int,
     bite_windows: Sequence[tuple[float, float, bool]] = (),
+    explainer: bool = False,
 ) -> tuple[dict[str, Any], list[tuple[float, float]]]:
     """The `music` part of the timeline, and the spans of the story (seconds) in which a bed
     plays. Raises RenderPlanError for a placement this version cannot read.
@@ -885,6 +957,10 @@ def _music_timeline(
     `bite_windows` are the sound bite clips, `(start_s, end_s, music_drop)` on the story: the score
     and the beds are lowered much deeper under each one, or switched off with `music_drop`
     (SB-009). A sound that no bite touches, and a render with no bite, have no `bite_ducks`.
+
+    With `explainer` (a continuous explainer, EXM-005) every score sound ducks to
+    `mix.explainer_duck_db` through every gap shorter than `EXPLAINER_MUSIC_HOLD_GAP_S`, and a
+    sound whose cue has posts gets `rises` inside the pause of each post. A story is unchanged.
     """
     content = music.content
     rate = content.get("sample_rate")
@@ -928,6 +1004,8 @@ def _music_timeline(
         False: merge_spans(speech_spans, MUSIC_GAP_HOLD_S),
     }
 
+    explainer_hold = merge_spans(speech_spans, EXPLAINER_MUSIC_HOLD_GAP_S) if explainer else []
+
     sounds: list[dict[str, Any]] = []
     bed_spans: list[tuple[float, float]] = []
     for placed in kept:
@@ -944,11 +1022,29 @@ def _music_timeline(
         duck_db: float | None = None
         dip: list[list[float]] = []
         bumps: list[list[float]] = []
+        rises: list[dict[str, Any]] = []
         if musical:
-            under, may_swell = music.cue_mix.get(str(placed["cue_id"]), (UNDER_VOICE_LOW, False))
-            duck = _windows_of(holds[may_swell], start_s, end_s, MUSIC_DUCK_RAMP_S)
-            if duck:
-                duck_db = float(mix.duck_low_db if under == UNDER_VOICE_LOW else mix.duck_medium_db)
+            if explainer:
+                duck = _windows_of(explainer_hold, start_s, end_s, MUSIC_DUCK_RAMP_S)
+                if duck:
+                    duck_db = float(mix.explainer_duck_db)
+                rises = _post_rises(
+                    music.posts.get(str(placed["cue_id"]), []),
+                    speech_spans,
+                    explainer_hold,
+                    start_s,
+                    end_s,
+                    float(mix.explainer_post_rise_db),
+                )
+            else:
+                under, may_swell = music.cue_mix.get(
+                    str(placed["cue_id"]), (UNDER_VOICE_LOW, False)
+                )
+                duck = _windows_of(holds[may_swell], start_s, end_s, MUSIC_DUCK_RAMP_S)
+                if duck:
+                    duck_db = float(
+                        mix.duck_low_db if under == UNDER_VOICE_LOW else mix.duck_medium_db
+                    )
             dip = _windows_of(dips, start_s, end_s, DIP_RAMP_S)
         if lane == LANE_BED:
             bumps = _windows_of(
@@ -988,6 +1084,7 @@ def _music_timeline(
                 "dips": dip,
                 "bumps": bumps,
                 **({"bite_ducks": bite_ducks} if bite_ducks else {}),
+                **({"rises": rises} if rises else {}),
             }
         )
 
@@ -2069,6 +2166,7 @@ def _build(
             dialogue_spans,
             render_commands.sample_count(cursor, fps),
             bite_windows_story,
+            explainer=continuous,
         )
         drops = sum(1 for _start, _end, dropped in bite_windows_story if dropped)
         if not placeholders and drops * 600 > BITE_MAX_DROPS_PER_10_MIN * cursor / fps:
@@ -2203,7 +2301,11 @@ def _build(
         # Only a render with evidence beside a graphic has this key (OVL-007).
         **({"split_evidence": split_entries} if split_entries else {}),
         "master": master(mix),
-        "constants": {**constants(mix), **(bite_constants() if bite_windows_story else {})},
+        "constants": {
+            **constants(mix),
+            **(bite_constants() if bite_windows_story else {}),
+            **(explainer_constants(mix) if continuous and music_entry is not None else {}),
+        },
         "warnings": warnings,
     }
     return RenderPlan(timeline=timeline, warnings=warnings)

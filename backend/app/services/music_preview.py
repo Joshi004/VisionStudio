@@ -182,12 +182,14 @@ async def _source_with_take(
             music_placement.reuse_choices(first, newest.content if newest is not None else None),
         )
     mixes = await render_music.cue_mix(session, gathered.inputs)
+    posts = await render_music.cue_posts(session, gathered.inputs)
     source = story_render_plan.MusicSource(
         placement_id=newest.id if newest is not None else 0,
         placement_version=newest.version if newest is not None else 0,
         content=final.content,
         cue_mix=mixes,
         ambience=project.ambience_enabled,
+        posts=posts,
     )
     return gathered.sources, source
 

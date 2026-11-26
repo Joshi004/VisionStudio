@@ -265,6 +265,8 @@ class MusicSound:
     bumps: tuple[tuple[float, float], ...]
     # Only a sound that a sound bite touches has them (SB-009).
     bite_ducks: tuple[render_commands.BiteDuck, ...] = ()
+    # Only a continuous explainer's sound whose cue has a post has them (EXM-005).
+    rises: tuple[render_commands.Rise, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -466,6 +468,7 @@ def _parse_sound(entry: object) -> MusicSound:
         raise RenderFailed(_CHANGED_MESSAGE)
     fade_in, fade_out = _fade(entry.get("fade_in")), _fade(entry.get("fade_out"))
     bite_ducks = _parse_bite_ducks(entry.get("bite_ducks"))
+    rises = _parse_rises(entry.get("rises"))
     return MusicSound(
         item_id=item_id,
         cue_id=cue_id,
@@ -484,7 +487,26 @@ def _parse_sound(entry: object) -> MusicSound:
         dips=dips,
         bumps=bumps,
         bite_ducks=bite_ducks,
+        rises=rises,
     )
+
+
+def _parse_rises(raw: object) -> tuple[render_commands.Rise, ...]:
+    """The rises of a continuous explainer's music sound, or none when the key is missing."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    rises: list[render_commands.Rise] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        windows = _windows(entry.get("windows"))
+        gain, ramp = _number(entry.get("db")), _number(entry.get("ramp_s"))
+        if windows is None or gain is None or gain <= 0 or ramp is None or ramp <= 0:
+            raise RenderFailed(_CHANGED_MESSAGE)
+        rises.append(render_commands.Rise(windows, gain, ramp))
+    return tuple(rises)
 
 
 def _parse_bite_ducks(raw: object) -> tuple[render_commands.BiteDuck, ...]:
@@ -1936,6 +1958,7 @@ def _lane_sound(
         bump_db=timeline.swell_db,
         bump_ramp_s=timeline.swell_ramp_s,
         bite_ducks=sound.bite_ducks,
+        rises=sound.rises,
     )
 
 

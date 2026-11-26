@@ -20,7 +20,7 @@ from typing import Any, Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import MusicCue, MusicPlacement, Project
+from app.db.models import MusicCue, MusicPlacement, MusicPlan, Project
 from app.services import music_placement, story_render_plan
 
 _WAY_OUT: Final = "Finish the music, or switch music off in the project's settings."
@@ -61,8 +61,36 @@ async def cue_mix(session: AsyncSession, inputs: Any) -> dict[str, tuple[str, bo
     return mixes
 
 
+async def cue_posts(session: AsyncSession, inputs: Any) -> dict[str, list[tuple[float, float]]]:
+    """The posts of a continuous explainer's cues (EXM-005), `(start_s, end_s)` by cue id: the
+    pauses its music plan chose for the music to rise in, read from the plan the placement was made
+    from (`inputs.plan`). A story's plan has no posts, so it gets none.
+    """
+    plan_ref = inputs.get("plan") if isinstance(inputs, dict) else None
+    plan_id = plan_ref.get("id") if isinstance(plan_ref, dict) else None
+    plan = await session.get(MusicPlan, plan_id) if isinstance(plan_id, int) else None
+    content = plan.content if plan is not None else None
+    cues = content.get("cues") if isinstance(content, dict) else None
+    posts: dict[str, list[tuple[float, float]]] = {}
+    for cue in cues or []:
+        if not isinstance(cue, dict) or not cue.get("posts"):
+            continue
+        spans = [
+            (float(post["start_s"]), float(post["end_s"]))
+            for post in cue["posts"]
+            if isinstance(post, dict)
+        ]
+        if spans:
+            posts[str(cue["id"])] = spans
+    return posts
+
+
 def source_of(
-    row: MusicPlacement, mixes: dict[str, tuple[str, bool]], *, ambience: bool
+    row: MusicPlacement,
+    mixes: dict[str, tuple[str, bool]],
+    *,
+    ambience: bool,
+    posts: dict[str, list[tuple[float, float]]] | None = None,
 ) -> story_render_plan.MusicSource:
     """The placement row as a render's music source."""
     return story_render_plan.MusicSource(
@@ -71,6 +99,7 @@ def source_of(
         content=row.content,
         cue_mix=mixes,
         ambience=ambience,
+        posts=posts or {},
     )
 
 
@@ -92,7 +121,10 @@ async def gate(session: AsyncSession, project: Project) -> MusicGate:
             "or switch music off in the project's settings.",
         )
     mixes = await cue_mix(session, state.latest.inputs)
-    return MusicGate(source_of(state.latest, mixes, ambience=project.ambience_enabled), None)
+    posts = await cue_posts(session, state.latest.inputs)
+    return MusicGate(
+        source_of(state.latest, mixes, ambience=project.ambience_enabled, posts=posts), None
+    )
 
 
 @dataclass(frozen=True)
@@ -143,12 +175,14 @@ async def scene_gate(session: AsyncSession, project: Project, *, place: bool) ->
     except music_placement.MusicPlacementError as exc:
         return SceneMusicGate(None, str(exc), False, None, False, final)
     mixes = await cue_mix(session, made.inputs)
+    posts = await cue_posts(session, made.inputs)
     source = story_render_plan.MusicSource(
         placement_id=0,
         placement_version=0,
         content=made.content,
         cue_mix=mixes,
         ambience=project.ambience_enabled,
+        posts=posts,
         provisional=made.inputs,
     )
     return SceneMusicGate(source, None, True, made.inputs, False, final)

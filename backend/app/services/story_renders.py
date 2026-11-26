@@ -851,6 +851,12 @@ async def mix_settings(session: AsyncSession) -> story_render_plan.MixSettings:
         bed_shot_duck_db=await settings_service.get_int(
             session, settings_service.MUSIC_BED_SHOT_DUCK_KEY
         ),
+        explainer_duck_db=await settings_service.get_int(
+            session, settings_service.EXPLAINER_MUSIC_DUCK_KEY
+        ),
+        explainer_post_rise_db=await settings_service.get_int(
+            session, settings_service.EXPLAINER_POST_RISE_KEY
+        ),
     )
 
 
@@ -1021,6 +1027,9 @@ _MIX_CONSTANTS: Final = (
     "music_duck_low_db",
     "music_duck_medium_db",
     "bed_shot_duck_db",
+    # Recorded only on a continuous explainer's render (EXM-005).
+    "explainer_music_duck_db",
+    "explainer_music_post_rise_db",
 )
 _MASTER_CONSTANTS: Final = ("master_lufs", "master_true_peak_db")
 
@@ -1066,7 +1075,7 @@ def mix_constant_reasons(
     """
     # A video made before the final loudness (timeline version 1) has no recorded settings.
     constants = recorded.get("constants") if isinstance(recorded.get("constants"), dict) else {}
-    now = story_render_plan.constants(mix)
+    now = {**story_render_plan.constants(mix), **story_render_plan.explainer_constants(mix)}
     keys = (*_MIX_CONSTANTS, *_MASTER_CONSTANTS) if with_music else _MASTER_CONSTANTS
     if any(key in constants and constants[key] != now[key] for key in keys):
         return ["A mix or loudness setting has changed since this video was made."]

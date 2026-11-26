@@ -155,6 +155,9 @@ MUSIC_CROSSFADE_KEY = "music_crossfade_ms"
 MUSIC_DUCK_LOW_KEY = "music_duck_low_db"
 MUSIC_DUCK_MEDIUM_KEY = "music_duck_medium_db"
 MUSIC_BED_SHOT_DUCK_KEY = "music_bed_shot_duck_db"
+# How the music sits under a continuous explainer's voice (EXM-005).
+EXPLAINER_MUSIC_DUCK_KEY = "explainer_music_duck_db"
+EXPLAINER_POST_RISE_KEY = "explainer_music_post_rise_db"
 # The loudness every finished story video is brought to (MUSIC-012, MD-19).
 RENDER_LOUDNESS_KEY = "render_loudness_lufs"
 RENDER_TRUE_PEAK_KEY = "render_true_peak_db"
@@ -1006,6 +1009,35 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=-10,
         min_value=-40,
         max_value=-1,
+    ),
+    SettingSpec(
+        key=EXPLAINER_MUSIC_DUCK_KEY,
+        group=GROUP_MUSIC,
+        label="Explainer: music level under the voice (dB)",
+        help=(
+            "For a continuous explainer, how far the music is lowered while the presenter "
+            "speaks. It stays lowered between ordinary sentences and only rises at the planned "
+            "posts. A negative number of decibels: -22 is much quieter, -10 only a little. It "
+            "applies the next time the video is rendered."
+        ),
+        value_type="integer",
+        default=-22,
+        min_value=-40,
+        max_value=-1,
+    ),
+    SettingSpec(
+        key=EXPLAINER_POST_RISE_KEY,
+        group=GROUP_MUSIC,
+        label="Explainer: how far the music rises at a planned post (dB)",
+        help=(
+            "For a continuous explainer, how much louder the music gets inside the pause of a "
+            "planned post, on top of its lowered level. It comes back down before the voice "
+            "does. It applies the next time the video is rendered."
+        ),
+        value_type="integer",
+        default=8,
+        min_value=1,
+        max_value=18,
     ),
     SettingSpec(
         key=MUSIC_BED_SHOT_DUCK_KEY,

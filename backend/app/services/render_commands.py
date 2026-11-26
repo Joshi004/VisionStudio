@@ -663,6 +663,17 @@ class BiteDuck:
 
 
 @dataclass(frozen=True)
+class Rise:
+    """How far the music is raised inside one planned post of a continuous explainer (EXM-005): by
+    `gain_db` (above 0) inside each window, with linear ramps of `ramp_s` outside it. A window is
+    in the sound's own seconds."""
+
+    windows: tuple[tuple[float, float], ...]
+    gain_db: float
+    ramp_s: float
+
+
+@dataclass(frozen=True)
 class LaneSound:
     """One placed sound of a music lane: where it starts on the story's timeline, the part of
     the file it plays, its fades and its own ducks, dips and swells. Every window is in the
@@ -690,6 +701,8 @@ class LaneSound:
     bump_ramp_s: float = 0.0
     # Only a sound that a sound bite touches has these (SB-009).
     bite_ducks: tuple[BiteDuck, ...] = ()
+    # Only a continuous explainer's sound whose cue has a post has these (EXM-005).
+    rises: tuple[Rise, ...] = ()
 
 
 def _lane_chain(sound: LaneSound, total_samples: int) -> list[str]:
@@ -719,6 +732,11 @@ def _lane_chain(sound: LaneSound, total_samples: int) -> list[str]:
         steps.append(duck_volume_filter(sound.dip_windows, sound.dip_db, sound.dip_ramp_s))
     if sound.bump_windows and sound.bump_db > 0:
         steps.append(gain_bump_filter(sound.bump_windows, sound.bump_db, sound.bump_ramp_s))
+    steps += [
+        gain_bump_filter(rise.windows, rise.gain_db, rise.ramp_s)
+        for rise in sound.rises
+        if rise.windows and rise.gain_db > 0
+    ]
     steps += [
         duck_volume_filter(bite.windows, bite.depth_db, bite.attack_s, bite.release_s)
         for bite in sound.bite_ducks
