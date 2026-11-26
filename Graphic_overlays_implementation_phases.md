@@ -169,7 +169,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 | Id | Title | Kind | Hard dependencies | Status |
 |----|-------|------|-------------------|--------|
 | OVL-001 | Storage for overlay graphics | Code | — | Completed |
-| OVL-002 | Suggestions leave the shot planner | Code | — | Not Started |
+| OVL-002 | Suggestions leave the shot planner | Code | — | Completed |
 | OVL-003 | Placing the overlays | Code | — | Not Started |
 | OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Not Started |
 | OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Not Started |
@@ -181,10 +181,10 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 **Tracks that can run at the same time:**
 
 - **Graphics:** OVL-001 and OVL-003 → OVL-004 → OVL-005.
-- **Planner:** OVL-002, now. It must be done before OVL-005 is used on a real project.
+- **Planner:** OVL-002 (done). It had to be done before OVL-005 is used on a real project.
 - **Evidence:** OVL-006, now.
 
-**Progress snapshot:** 1 completed (OVL-001).
+**Progress snapshot:** 2 completed (OVL-001, OVL-002).
 
 ---
 
@@ -234,7 +234,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 ### OVL-002 — Suggestions leave the shot planner
 
-**Status:** Not Started
+**Status:** Completed (2026-11-27; the owner still has to rebuild the real app so the new code runs there)
 
 **Objective.** A suggestion no longer changes, or makes out of date, any shot plan (OV-1).
 
@@ -245,7 +245,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - `_suggestion_reasons` is removed, so no plan is out of date because of suggestions, including plans made before this phase (project 94's scene 1).
 - `content.graphic_suggestions` of old plans is no longer shown in `ShotPlansPanel.tsx`; old rows are not changed.
 - `GraphicSuggestions.tsx` says what a suggestion now does: "The graphic is drawn over the shots under these words. The shots are not planned again."
-- **Planning decides:** whether `SUGGESTION_ON_SOUNDBITE_TEXT` moves to OVL-003's reasons.
+- **Planning decides:** whether `SUGGESTION_ON_SOUNDBITE_TEXT` moves to OVL-003's reasons. Decided: it moves to `graphic_suggestions.SOUNDBITE_REASON`, with the placing code beside it.
 
 **Out of scope.** Drawing the overlays (OVL-003 to OVL-005). Until OVL-005, suggestions have no effect on the video.
 
@@ -259,13 +259,23 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Planner request without suggestions
-- [ ] No plan out of date because of suggestions
-- [ ] Panels and texts
-- [ ] Identity check on a snapshot
-- [ ] Standard checks
+- [x] Planner request without suggestions
+- [x] No plan out of date because of suggestions
+- [x] Panels and texts
+- [x] Identity check on a snapshot
+- [x] Standard checks
+- [ ] Owner: real app rebuilt so the new code runs there
 
-**Completion notes.**
+**Completion notes.** Done 2026-11-27. No migration, no change to `DATABASE_STRUCTURE.md` (the removed JSON keys were never documented there).
+
+- **`cut_planning_writer.py`**: removed `SUGGESTION_ON_SOUNDBITE_TEXT`, `SUGGESTIONS_KEY`, `_SUGGESTIONS_ANSWER_FORM`, `_SUGGESTION_RULES`, `_SUGGESTIONS_BODY`, `suggestions_of` and `suggestion_results`. The `suggestions` parameter is gone from `_answer_form`, `_body`, `_evidence_body`, `_soundbite_body` and `instructions` (now `instructions(graphics, evidence, soundbites)`). `take_block` no longer writes `graphic_suggestion` on a word, and `check_answer` no longer writes `content.graphic_suggestions`. The slot of the text that held the suggestion rules is now `extra_rules` (the evidence rules, then the sound bite rules), so the text is unchanged.
+- **`shot_plans.py`**: removed `_scene_suggestions`, `take["suggestions"]`, `inputs.graphic_suggestions_sha256` and `_suggestion_reasons` (and its call in `_out_of_date_reasons`). `_Loaded.suggestions` stays: OVL-003 reads it.
+- **`graphic_suggestions.py`**: new pure `scene_suggestions(story, scene_item, take_words, entries, soundbite_words)` (the body of the old `_scene_suggestions`, with the sound bite's word positions passed in) and `SOUNDBITE_REASON`. OVL-003 calls them with `_soundbite_words` from `shot_plans`. The module docstring now says a suggestion is drawn over the shots, not planned.
+- **`jobs/plan_shots.py`**: `_is_suggestions` removed. A job queued earlier that still carries `take.suggestions` still reads, because nothing looks at the key.
+- **API**: `GraphicSuggestionResultOut` and `ShotPlanContentOut.graphic_suggestions` removed; `schema.d.ts` regenerated (21 lines removed, nothing else changed). Old plan rows are untouched: their `content.graphic_suggestions` and `inputs.graphic_suggestions_sha256` are ignored when read.
+- **Frontend**: `ShotPlansPanel.tsx` no longer shows "Graphics you suggested"; `GraphicSuggestions.tsx` says "The graphic is drawn over the shots under these words. The shots are not planned again."
+- **Checked** (2026-11-27, on a copy of the real database taken with SQLite's backup API from the running container and upgraded to `0102`; no model call, no job queued; the live data was only read; the copies were removed afterwards). 18 projects with graphics on, 41 scenes whose request could be built (11 with suggestions): (1) the 8 system messages of `instructions` for graphics, evidence and sound bites on or off are identical before and after; (2) the planner's request of the 30 scenes without suggestions is byte-identical before and after (SHA-256 of the whole request, fixed model name); (3) for the 11 scenes with suggestions, the request after equals the request before with `take["suggestions"]` removed, and so differs from before only by the removed parts; (4) the plan's recorded inputs are the old ones without `graphic_suggestions_sha256` in all 41; (5) the only change in any scene's plan status is that the reason "The graphic suggestions for this scene changed since these shots were planned." is gone (project 82, four scenes, which are out of date for other reasons too); (6) project 94: with the old code, adding a suggestion made scene `opening_puzzle` out of date and changed the board's steps; with the new code the board's steps and every scene's plan are identical before and after adding one (only the board's `revision` counter, which counts database activity, differs). `ruff check`, `ruff format --check`, `eslint` and `tsc -b` pass.
+- **Not checked.** (1) A real planning call (none was made: it is paid). (2) The project 94 snapshot did not have scene 1 as described in §2: its plans in the copy were already current, so the check above uses `opening_puzzle`. (3) The browser panels were not opened, only linted and type-checked. (4) Until OVL-005, suggestions have no effect on the video, as the phase says.
 
 ### OVL-003 — Placing the overlays
 
@@ -502,3 +512,4 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 |------|-------|--------|
 | 2026-11-26 | — | Document written. |
 | 2026-11-26 | OVL-001 | Completed: migration `0102` (`target` column on the three graphics tables), models, readers limited to shot rows, `DATABASE_STRUCTURE.md`. |
+| 2026-11-27 | OVL-002 | Completed: suggestions removed from the planner's request, answer, stored content and out-of-date check; `scene_suggestions` moved to `graphic_suggestions.py`; API field removed; panels and texts updated. |

@@ -228,7 +228,8 @@ class _Loaded:
     continuous: bool
     clocks: dict[str, take_timings.TakeClock]
     # The words of the story the owner suggests a graphic for (`project.graphic_suggestions`).
-    # Empty unless the project has graphics on.
+    # Empty unless the project has graphics on. A plan never depends on them (OVL-002): they are
+    # placed as overlays on read (`graphic_suggestions.scene_suggestions`, OVL-003).
     suggestions: list[dict[str, Any]]
     # The claims the owner chose to show evidence for (EVD-009), in story order. Empty unless the
     # project has evidence on and its newest round is reviewed.
@@ -429,45 +430,6 @@ def _soundbite_words(
     return {
         position for quote in _scene_soundbites(loaded, item, words) for position in quote["words"]
     }
-
-
-def _scene_suggestions(
-    loaded: _Loaded, item: dict[str, Any], words: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """The graphic suggestions that cover words of this scene's take: `[{id, text, words}]`,
-    the positions (from 0) counted in `words`. Empty when there are none. They are placed with
-    the scene's position in the story, so they are left out when the story is no longer the one
-    the scenes were found in (the plan is out of date then, and says so).
-
-    A sound bite wins over a suggestion (SB-008): its words are taken out of the suggestion. One
-    left with no words stays in the list, with a `reason` that code wrote, and is not asked for.
-    """
-    story = loaded.story
-    if not loaded.suggestions or story is None:
-        return []
-    start, end = item["start"], item["end"]
-    if story[start:end] != item["text"]:
-        return []
-    marked = graphic_suggestions.take_suggestions(item["text"], start, words, loaded.suggestions)
-    quoted = _soundbite_words(loaded, item, words)
-    if not quoted:
-        return marked
-    result: list[dict[str, Any]] = []
-    for suggestion in marked:
-        kept = [position for position in suggestion["words"] if position not in quoted]
-        if len(kept) == len(suggestion["words"]):
-            result.append(suggestion)
-        elif kept:
-            result.append({**suggestion, "words": kept})
-        else:
-            result.append(
-                {
-                    **suggestion,
-                    "words": [],
-                    "reason": cut_planning_writer.SUGGESTION_ON_SOUNDBITE_TEXT,
-                }
-            )
-    return result
 
 
 def _unit_problems(scene: speech_synthesis.SceneAudio) -> list[str]:
@@ -703,10 +665,6 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         assert clock.timing is not None and clock.audio.duration_s is not None
         units, infos = _take_units(scene, clock)
         take = _take_input(clock)
-        marked = _scene_suggestions(loaded, item, take["words"])
-        if marked:
-            # Only a scene with marked words has the key, so every other job is as it was.
-            take["suggestions"] = marked
         proved = _scene_evidence(loaded, item, take["words"])
         if proved:
             # Likewise only a scene with evidence to show has this key (EVD-009).
@@ -750,9 +708,6 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
                 }
             )
 
-    suggestions_hash = graphic_suggestions.fingerprint(
-        take["suggestions"] if take is not None and "suggestions" in take else []
-    )
     evidence_hash = graphic_suggestions.fingerprint(
         take["evidence"] if take is not None and "evidence" in take else []
     )
@@ -769,9 +724,6 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         # Only a scene with a sound bite to place has this one (SB-008); see `_soundbite_reasons`.
         # The clip's length is not in it: a new cut changes the timeline, never the plan.
         **({"soundbites_sha256": soundbites_hash} if soundbites_hash else {}),
-        # Only a scene with marked words has this key. A plan without it is current when the
-        # scene has none (see `_suggestion_reasons`).
-        **({"graphic_suggestions_sha256": suggestions_hash} if suggestions_hash else {}),
         "artifacts": [
             {"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version},
             {
@@ -1143,21 +1095,6 @@ def _take_reasons(row: ShotPlan, clock: take_timings.TakeClock | None) -> list[s
     return []
 
 
-def _suggestion_reasons(
-    row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
-) -> list[str]:
-    """Why a cut plan no longer fits the graphic suggestions of its scene. A plan made before
-    suggestions existed records none, which is the same as a scene with none. A take that is not
-    ready has no words to place them on, so it gives no reason here.
-    """
-    if not isinstance(row.inputs, dict) or clock is None or not clock.words:
-        return []
-    now = graphic_suggestions.fingerprint(_scene_suggestions(loaded, item, clock.words))
-    if row.inputs.get("graphic_suggestions_sha256") == now:
-        return []
-    return ["The graphic suggestions for this scene changed since these shots were planned."]
-
-
 def _evidence_reasons(
     row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
 ) -> list[str]:
@@ -1402,7 +1339,6 @@ def _out_of_date_reasons(
         # The shots start on the words of the take, so a take made or timed again is a change.
         clock = loaded.clocks.get(scene.scene.item["id"])
         reasons.extend(_take_reasons(row, clock))
-        reasons.extend(_suggestion_reasons(row, loaded, scene.scene.item, clock))
         reasons.extend(_evidence_reasons(row, loaded, scene.scene.item, clock))
         reasons.extend(_soundbite_reasons(row, loaded, scene.scene.item, clock))
     else:

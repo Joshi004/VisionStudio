@@ -92,10 +92,9 @@ ON_GRAPHIC_TEXT: Final = "A graphic shot covers its words, so its source is a li
 # is the clip's, so no shortest or longest shot applies to it.
 SOUNDBITE: Final = scene_timeline.SOUNDBITE_SHOT_TYPE
 # Set by code, never by the planner: a claim with evidence to show whose words overlap a sound
-# bite gets no evidence shot, and the reason a suggested graphic over the quote is not followed.
+# bite gets no evidence shot.
 ON_SOUNDBITE: Final = "on_soundbite"
 ON_SOUNDBITE_TEXT: Final = "A sound bite covers its words, so its clip plays there."
-SUGGESTION_ON_SOUNDBITE_TEXT: Final = "These words are a sound bite: the clip plays there."
 SOUNDBITE_NOT_IN_TAKE_TEXT: Final = (
     "The quote is not one run of words in this scene's voice take, so the narrator reads it."
 )
@@ -125,8 +124,6 @@ TAIL_S: Final = 0.3
 MAX_SHOT_S: Final = H3_MAX_FRAMES / H3_FPS
 
 CUT_PLAN_KEY: Final = "cut_plan"
-# The plan content's list of the owner's suggested graphics and what became of each.
-SUGGESTIONS_KEY: Final = "graphic_suggestions"
 # The plan content's list of the claims with evidence to show and what became of each (EVD-009).
 EVIDENCE_KEY: Final = "evidence"
 # The plan content's list of the sound bites of the scene and what became of each (SB-008).
@@ -182,14 +179,6 @@ _GRAPHICS_ANSWER_FORM: Final = json.dumps(
     }
 )
 
-# The same form for a scene with suggested graphics: it also lists the suggestions not followed.
-_SUGGESTIONS_ANSWER_FORM: Final = json.dumps(
-    {
-        **json.loads(_GRAPHICS_ANSWER_FORM),
-        "declined_suggestions": [{"id": "g1", "reason": "Why no graphic fits those words."}],
-    }
-)
-
 _GRAPHIC_TYPE_TEXT: Final = (
     ', or "graphic" for a chart, diagram or text card drawn by code, timed to the words: for '
     "numbers, comparisons, changes over time, the steps of a process, a short list, or one key "
@@ -209,20 +198,8 @@ _GRAPHIC_RULES: Final = (
 )
 _GRAPHIC_LENGTH_TEXT: Final = ' A graphic shot lasts at least "shortest_graphic_seconds".'
 
-# The owner's suggestions (they are a hint, never an order). Only a scene with marked words gets
-# this rule and the answer form that goes with it, so every other request is as it was.
+# The longest reason the planner may give for a claim it left without an evidence shot.
 REASON_MAX_CHARS: Final = 200
-_SUGGESTION_RULES: Final = (
-    '- Some words of the TAKE have a "graphic_suggestion", an id such as "g1". The owner would '
-    'like a "graphic" shot over the words that share an id. It is a wish, not an order: plan a '
-    "graphic shot that covers those words, starting on or just before the first of them, unless "
-    "a rule above makes that impossible (the shortest and the longest shot, a scene that would "
-    "have only graphic shots) or the words hold nothing a chart, diagram or text card could "
-    "show.\n"
-    '- List each suggestion you did not follow in "declined_suggestions": its "id" and a "reason" '
-    f"of one plain sentence of at most {REASON_MAX_CHARS} characters. Leave the list empty when "
-    "you followed them all.\n"
-)
 
 
 # Evidence (EVD-009). Only a scene with claims to show gets any of this, so every other request is
@@ -275,10 +252,8 @@ _SOUNDBITE_RULES: Final = (
 )
 
 
-def _answer_form(graphics: bool, suggestions: bool, evidence: bool, soundbites: bool) -> str:
+def _answer_form(graphics: bool, evidence: bool, soundbites: bool) -> str:
     form = _GRAPHICS_ANSWER_FORM if graphics else _ANSWER_FORM
-    if graphics and suggestions:
-        form = _SUGGESTIONS_ANSWER_FORM
     if not evidence and not soundbites:
         return form
     parsed = json.loads(form)
@@ -308,18 +283,12 @@ def _answer_form(graphics: bool, suggestions: bool, evidence: bool, soundbites: 
     return json.dumps(parsed)
 
 
-def _body(
-    graphics: bool,
-    suggestions: bool = False,
-    evidence: bool = False,
-    soundbites: bool = False,
-) -> str:
+def _body(graphics: bool, evidence: bool = False, soundbites: bool = False) -> str:
     """The system message. With `graphics` False it is exactly what it was before graphic shots
-    existed; with it True the `graphic` type and its rules are added. With `suggestions` (only
-    with `graphics`) the rule for the owner's suggested graphics and its answer form are added.
-    With `evidence` (a scene with claims to show, EVD-009) the `evidence` type and its rules are
-    added; with it False nothing of that is in the text. With `soundbites` (a scene with a sound
-    bite clip to place, SB-008) the `soundbite` type and its rules are added the same way.
+    existed; with it True the `graphic` type and its rules are added. With `evidence` (a scene
+    with claims to show, EVD-009) the `evidence` type and its rules are added; with it False
+    nothing of that is in the text. With `soundbites` (a scene with a sound bite clip to place,
+    SB-008) the `soundbite` type and its rules are added the same way.
     """
     graphic_type = _GRAPHIC_TYPE_TEXT if graphics else ""
     graphic_broll = _GRAPHIC_BROLL_TEXT if graphics else ""
@@ -328,16 +297,14 @@ def _body(
     )
     graphic_length = _GRAPHIC_LENGTH_TEXT if graphics else ""
     graphic_rules = _GRAPHIC_RULES if graphics else ""
-    answer_form = _answer_form(graphics, suggestions, evidence, soundbites)
-    suggestion_rules = ""
-    if graphics and suggestions:
-        suggestion_rules = _SUGGESTION_RULES
+    answer_form = _answer_form(graphics, evidence, soundbites)
+    extra_rules = ""
     evidence_type = _EVIDENCE_TYPE_TEXT if evidence else ""
     evidence_length = _EVIDENCE_LENGTH_TEXT if evidence else ""
-    # The evidence rules follow the suggestion rules in the same place of the text.
-    suggestion_rules += _EVIDENCE_RULES if evidence else ""
+    # The evidence rules come after the graphic rules, in the same place of the text.
+    extra_rules += _EVIDENCE_RULES if evidence else ""
     # So do the sound bite rules, and its type is listed after the evidence type.
-    suggestion_rules += _SOUNDBITE_RULES if soundbites else ""
+    extra_rules += _SOUNDBITE_RULES if soundbites else ""
     evidence_type += _SOUNDBITE_TYPE_TEXT if soundbites else ""
     evidence_length += _SOUNDBITE_LENGTH_TEXT if soundbites else ""
     return f"""You are the shot planner of a studio that makes explainer videos. One presenter \
@@ -397,7 +364,7 @@ encouraged where it helps the viewer see what is being said.
 - Keep every shot between "shortest_shot_seconds" and "longest_shot_seconds" of the DURATION \
 POLICY, measured from the times in the TAKE. A presenter shot may not be longer either, because \
 the video model takes at most that much speech for one clip.{graphic_length}{evidence_length}
-{graphic_rules}{suggestion_rules}- Do not invent events, characters or places the scene does not \
+{graphic_rules}{extra_rules}- Do not invent events, characters or places the scene does not \
 have.
 
 If the user message also holds STAGING, the scene was staged: plan shots that suit it, and never \
@@ -413,37 +380,32 @@ the type): {answer_form}"""
 
 _BODY: Final = _body(False)
 _GRAPHICS_BODY: Final = _body(True)
-_SUGGESTIONS_BODY: Final = _body(True, True)
 
 
 @functools.cache
-def _evidence_body(graphics: bool, suggestions: bool) -> str:
-    return _body(graphics, graphics and suggestions, True)
+def _evidence_body(graphics: bool) -> str:
+    return _body(graphics, True)
 
 
 @functools.cache
-def _soundbite_body(graphics: bool, suggestions: bool, evidence: bool) -> str:
-    return _body(graphics, graphics and suggestions, evidence, True)
+def _soundbite_body(graphics: bool, evidence: bool) -> str:
+    return _body(graphics, evidence, True)
 
 
 def instructions(
     graphics: bool = False,
-    suggestions: bool = False,
     evidence: bool = False,
     soundbites: bool = False,
 ) -> str:
     """The system message of a continuous explainer's cut planning. `graphics` is the project's
-    setting: with it on, the planner may also plan graphic shots (EXG-003). `suggestions` is
-    whether words of the scene are marked as a suggested graphic; it counts only with graphics.
-    `evidence` is whether the scene has claims with evidence to show (EVD-009). `soundbites` is
-    whether the scene has a sound bite clip to place (SB-008).
+    setting: with it on, the planner may also plan graphic shots (EXG-003). `evidence` is whether
+    the scene has claims with evidence to show (EVD-009). `soundbites` is whether the scene has a
+    sound bite clip to place (SB-008).
     """
     if soundbites:
-        return _soundbite_body(graphics, suggestions, evidence)
+        return _soundbite_body(graphics, evidence)
     if evidence:
-        return _evidence_body(graphics, suggestions)
-    if graphics and suggestions:
-        return _SUGGESTIONS_BODY
+        return _evidence_body(graphics)
     return _GRAPHICS_BODY if graphics else _BODY
 
 
@@ -531,31 +493,19 @@ def soundbites_of(take: dict[str, Any]) -> list[dict[str, Any]]:
     return [bite for bite in take.get("soundbites") or [] if bite["words"]]
 
 
-def suggestions_of(take: dict[str, Any]) -> list[dict[str, Any]]:
-    """The suggested graphics of the take that still have words: a suggestion whose words were
-    all a sound bite's is kept in `take["suggestions"]` (with its reason) but is not asked for."""
-    return [entry for entry in take.get("suggestions") or [] if entry["words"]]
-
-
 def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, Any]:
     """The take as the model reads it: its length and its sentences, each with its unit and the
     unit's kind, and each word with its number, time and the pause before it.
 
     `take` is `{seconds, words: [{text, start, end}], spans: [{unit_id, first_word,
     last_word}]}` (positions from 0, as `services/take_timings` gives them); `units` are the
-    scene's speech units. A take may also hold `suggestions`, `[{id, text, words}]`: the words
-    the owner suggests a graphic for. Each of those words is shown with its `graphic_suggestion`.
-    It may also hold `evidence` (`evidence_claims`): each word of a claim is shown with its
-    `evidence_claim`. And `soundbites` (`soundbites_of`): each word of a quote is shown with its
-    `soundbite_claim`.
+    scene's speech units. A take may also hold `evidence` (`evidence_claims`): each word of a
+    claim is shown with its `evidence_claim`. And `soundbites` (`soundbites_of`): each word of a
+    quote is shown with its `soundbite_claim`. The owner's suggested graphics are never shown
+    (OVL-002): they are drawn over the shots, not planned.
     """
     kinds = {unit["id"]: unit["kind"] for unit in units}
     words = take["words"]
-    suggested = {
-        position: suggestion["id"]
-        for suggestion in take.get("suggestions", [])
-        for position in suggestion["words"]
-    }
     proved = {
         position: claim["id"] for claim in evidence_claims(take) for position in claim["words"]
     }
@@ -571,8 +521,6 @@ def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, A
             "end": round(float(word["end"]), _SHOWN_DECIMALS),
             "pause_before": round(max(0.0, float(word["start"]) - before), _SHOWN_DECIMALS),
         }
-        if position in suggested:
-            entry["graphic_suggestion"] = suggested[position]
         if position in proved:
             entry["evidence_claim"] = proved[position]
         if position in quoted:
@@ -692,9 +640,7 @@ def build_request(
         "messages": [
             {
                 "role": "system",
-                "content": instructions(
-                    graphics, bool(suggestions_of(take)), bool(evidence), bool(bites)
-                ),
+                "content": instructions(graphics, bool(evidence), bool(bites)),
             },
             {"role": "user", "content": "\n\n".join(parts)},
         ],
@@ -987,8 +933,6 @@ def check_answer(
             "tail_s": TAIL_S,
         },
     }
-    if graphics and take.get("suggestions"):
-        content[SUGGESTIONS_KEY] = suggestion_results(answer, take["suggestions"], shots)
     if take.get("evidence"):
         content[EVIDENCE_KEY] = evidence_results(take["evidence"], shots, left_out)
     if take.get("soundbites"):
@@ -1193,49 +1137,6 @@ def evidence_results(
                 "shown": shown.get(claim_id, 0),
                 "left_out": code,
                 "reason": reason,
-            }
-        )
-    return results
-
-
-def suggestion_results(
-    answer: dict[str, Any], suggestions: list[dict[str, Any]], shots: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """What became of each suggested graphic: `[{id, text, followed, reason}]`, in story order.
-
-    Code decides `followed`, never the model: a suggestion is followed when a graphic shot
-    covers at least one of its words. `reason` is the model's reason for a suggestion it did not
-    follow (cut to `REASON_MAX_CHARS`), or None when it followed it or gave none. An unknown id
-    or a reason that is not text in the answer is ignored, as it cannot make the plan wrong.
-    """
-    reasons: dict[str, str] = {}
-    declined = answer.get("declined_suggestions")
-    if isinstance(declined, list):
-        for entry in declined:
-            if not isinstance(entry, dict):
-                continue
-            suggestion_id, reason = entry.get("id"), entry.get("reason")
-            if isinstance(suggestion_id, str) and isinstance(reason, str) and reason.strip():
-                reasons.setdefault(suggestion_id, _short(reason.strip()))
-    graphic_ranges = [
-        (shot["start_word"] - 1, shot["last_word"] - 1) for shot in shots if shot["type"] == GRAPHIC
-    ]
-    results: list[dict[str, Any]] = []
-    for suggestion in suggestions:
-        followed = any(
-            first <= position <= last
-            for position in suggestion["words"]
-            for first, last in graphic_ranges
-        )
-        results.append(
-            {
-                "id": suggestion["id"],
-                "text": suggestion["text"],
-                "followed": followed,
-                # A reason that code set (the words are a sound bite's) comes first.
-                "reason": None
-                if followed
-                else suggestion.get("reason") or reasons.get(suggestion["id"]),
             }
         )
     return results

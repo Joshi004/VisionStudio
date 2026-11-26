@@ -10147,22 +10147,6 @@ export interface components {
             text: string;
         };
         /**
-         * GraphicSuggestionResultOut
-         * @description What became of one graphic the owner suggested: it was followed when a graphic shot covers
-         *     some of its words, and `reason` is the planner's reason when it was not (None when it gave
-         *     none).
-         */
-        GraphicSuggestionResultOut: {
-            /** Id */
-            id: string;
-            /** Text */
-            text: string;
-            /** Followed */
-            followed: boolean;
-            /** Reason */
-            reason?: string | null;
-        };
-        /**
          * GraphicSuggestionsSet
          * @description The whole list of suggestions. Sent again, it replaces the one before.
          */
@@ -16792,11 +16776,6 @@ export interface components {
             scene_id: string;
             /** Shots */
             shots: components["schemas"]["ShotOut"][];
-            /**
-             * Graphic Suggestions
-             * @default []
-             */
-            graphic_suggestions: components["schemas"]["GraphicSuggestionResultOut"][];
             /**
              * Evidence
              * @default []

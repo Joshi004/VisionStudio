@@ -134,7 +134,6 @@ def _is_take(value: Any) -> bool:
             and isinstance(span.get("last_word"), int)
             for span in value["spans"]
         )
-        and _is_suggestions(value.get("suggestions"))
         and _is_evidence(value.get("evidence"))
         and _is_soundbites(value.get("soundbites"))
     )
@@ -163,24 +162,6 @@ def _is_evidence(value: Any) -> bool:
             and bool(entry["pieces"])
             and all(isinstance(key, str) for key in entry["pieces"])
             and entry.get("on_soundbite", True) is True
-            for entry in value
-        )
-    )
-
-
-def _is_suggestions(value: Any) -> bool:
-    """Whether `value` is the take's optional list of suggested graphics, as `shot_plans` writes
-    it: absent, or `[{id, text, words}]` with the positions of the take's words. A suggestion
-    whose words were all a sound bite's has no words and a `reason` (SB-008).
-    """
-    return value is None or (
-        isinstance(value, list)
-        and all(
-            isinstance(entry, dict)
-            and isinstance(entry.get("id"), str)
-            and isinstance(entry.get("text"), str)
-            and _is_positions(entry.get("words"))
-            and isinstance(entry.get("reason", ""), str)
             for entry in value
         )
     )

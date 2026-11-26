@@ -1,7 +1,8 @@
 """Graphic suggestions: words of the story the owner would like to see as a graphic.
 
-Only a continuous explainer with graphics on has them. A suggestion is a hint to the cut
-planner, never an order: the planner may decline it, and gives a reason when it does.
+Only a continuous explainer with graphics on has them. A suggestion is drawn over the shots under
+its words (`Graphic_overlays_implementation_phases.md`); it is never given to the shot planner, so
+adding, changing or removing one changes no shot plan (OVL-002).
 
 A suggestion is `{id, start, end, text}`. `start` and `end` are character positions in the
 project's `script_text` (`start` included, `end` not), and `text` is `script_text[start:end]`.
@@ -11,6 +12,7 @@ that order.
 - `normalise` checks what the owner sent and gives the list that is stored.
 - `reanchor` keeps the list correct when the story text is edited.
 - `take_suggestions` finds which words of a scene's voice take each suggestion covers.
+- `scene_suggestions` does the same for one scene of the story, with a sound bite's words taken out.
 
 Everything here is pure, so nothing is read from or written to the database.
 """
@@ -39,6 +41,8 @@ NOT_FOR_PROJECT_MESSAGE: Final = (
     "Graphic suggestions are only for an explainer with a continuous voice and graphics on."
 )
 NO_STORY_MESSAGE: Final = "Save the story before suggesting graphics."
+# Why a suggestion has no words left: a sound bite plays over all of them (SB-008).
+SOUNDBITE_REASON: Final = "These words are a sound bite: the clip plays there."
 
 
 class GraphicSuggestionError(ValueError):
@@ -180,6 +184,41 @@ def take_suggestions(
         for entry in entries
         if entry["id"] in covered
     ]
+
+
+def scene_suggestions(
+    story: str | None,
+    scene_item: dict[str, Any],
+    take_words: Sequence[dict[str, Any]],
+    entries: Sequence[dict[str, Any]],
+    soundbite_words: set[int],
+) -> list[dict[str, Any]]:
+    """The suggestions that cover words of one scene's take: `[{id, text, words}]`, the positions
+    (from 0) counted in `take_words`. Empty when there are none.
+
+    They are placed with the scene's position in the story, so they are left out when `story` is
+    no longer the one the scene was found in. A sound bite wins over a suggestion (SB-008):
+    `soundbite_words` (the positions in the take that a sound bite replaces) are taken out of
+    each suggestion. One left with no words stays in the list, with a `reason` that code wrote.
+    """
+    if not entries or story is None:
+        return []
+    start, end = scene_item["start"], scene_item["end"]
+    if story[start:end] != scene_item["text"]:
+        return []
+    marked = take_suggestions(scene_item["text"], start, take_words, entries)
+    if not soundbite_words:
+        return marked
+    result: list[dict[str, Any]] = []
+    for suggestion in marked:
+        kept = [position for position in suggestion["words"] if position not in soundbite_words]
+        if len(kept) == len(suggestion["words"]):
+            result.append(suggestion)
+        elif kept:
+            result.append({**suggestion, "words": kept})
+        else:
+            result.append({**suggestion, "words": [], "reason": SOUNDBITE_REASON})
+    return result
 
 
 def fingerprint(suggestions: Sequence[dict[str, Any]]) -> str | None:

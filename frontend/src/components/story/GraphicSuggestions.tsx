@@ -47,9 +47,9 @@ type Props = {
 };
 
 /**
- * Words of the saved story the owner would like to see as a graphic. The shot planner takes
- * them as a hint: it follows one unless a rule or the words make it impossible, and says why
- * when it does not.
+ * Words of the saved story the owner would like to see as a graphic. The graphic is drawn over
+ * the shots under those words; the shot planner never sees them, so the shots are not planned
+ * again.
  */
 export function GraphicSuggestions({ project, hasUnsavedStory }: Props) {
   const story = project.script_text;
@@ -124,9 +124,8 @@ export function GraphicSuggestions({ project, hasUnsavedStory }: Props) {
         <Title order={4}>Suggest graphics</Title>
         <Text size="sm" c="dimmed">
           Select the words that would work well as a graphic (a chart, a diagram or a text card),
-          then click Suggest graphic. The shot planner follows a suggestion unless a rule or the
-          words make it impossible, and gives its reason when it does not. A changed suggestion
-          marks the shot plan of its scene as out of date.
+          then click Suggest graphic. The graphic is drawn over the shots under these words. The
+          shots are not planned again.
         </Text>
         {story === null ? (
           <Alert color="gray">Save the story first, then mark the words here.</Alert>
