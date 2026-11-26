@@ -72,7 +72,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXM-001 — Trial: section underscores and the two sound effects (owner)
 
-**Status:** Not started
+**Status:** Passed (owner, 2026-11-27)
 
 **Why:** the design relies on three things nobody has checked: that ACE-Step 1.5 can make a sparse underscore that sits under a fast voice without fighting it, that two section cues made with the same palette (tempo, key, instruments) crossfade without an audible seam, and that Stable Audio 3 can make a short, subtle whoosh that does not sound cheap.
 
@@ -89,11 +89,11 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 **If the sound effects fail:** EXM-006 and EXM-007 are dropped, and the switch is not added.
 
-**Result (owner fills in):** _To be filled in._
+**Result (owner fills in):** The owner marked the trial complete on 2026-11-27 and moved on to EXM-002. No fallback was chosen: the join, the underscore and the sound effects are taken as passing, so EXM-004 plans normal cues and EXM-006 and EXM-007 stay in scope.
 
 ### EXM-002 — The explainer Music Bible
 
-**Status:** Not started
+**Status:** Code done, live run pending
 
 **Objective.** Give a continuous explainer a Music Bible written for an explainer: one shared palette, an arc by section, and no themes.
 
@@ -127,9 +127,19 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Explainer branch of the directions, choice and Bible prompts, and its answer checks
-- [ ] Themes step skipped for a continuous explainer
-- [ ] Docs (`DATABASE_STRUCTURE.md` for the Bible's content shape), standard checks
+- [x] Explainer branch of the directions, choice and Bible prompts, and its answer checks
+- [x] Themes step skipped for a continuous explainer
+- [x] Docs (`DATABASE_STRUCTURE.md` for the Bible's content shape), standard checks
+
+**Completion notes.** Code done 2026-11-27, **live run pending** (the running containers still serve the old code until `docker compose up --build -d`, and the first real Bible run is a paid model call the owner starts). No migration.
+
+- **Planning decided.** Keep the three calls with explainer wording; the palette reuses `sound_world` (instruments, avoid) and `musical_feel` (a narrow tempo, one key, density), so no later step needs a new field; the section role is a fixed list (`ARC_ROLES`: hook, setup, explain, evidence, tension, reveal, takeaway, outro) with an energy of `low`, `medium` or `high`; no project music text for now; an older story-style Bible of a continuous explainer is reported out of date once.
+- **Flag.** `music_bible.explainer_music(project)`. The job input gets `explainer: true` only for such a project, so a story's job is unchanged.
+- **Prompts and checks.** `music_bible_writer`: `_EXPLAINER_DIRECTIONS_PROMPT`, `_EXPLAINER_CHOICE_PROMPT`, `_explainer_bible_prompt()`; the three builders take `explainer=False`; `check_bible(..., explainer=True)` stores `themes: []` (a non-empty list is refused), sets `ambience_signature` to the fixed `EXPLAINER_AMBIENCE`, and requires `role` and `energy` on every arc entry.
+- **Themes step.** `music_themes.wanted(project)` (music on and not a continuous explainer): the adapter returns one finished target and the board shows the step as off.
+- **API and UI.** `ArcEntry` and `ArcEntryIn` have optional `role` and `energy`; `MusicBibleState.explainer`. The Bible view and editor hide themes and ambience for an explainer and show a role and energy for each section.
+- **Checked.** A script against `HEAD` showed the story's three requests and a story `check_bible` result are byte-for-byte the same; an explainer answer is stored with no themes and the fixed ambience, and an answer with themes, a wrong role or no role is refused. `ruff check`, `ruff format`, `eslint`, `tsc` pass and `schema.d.ts` is regenerated.
+- **To check by the owner.** After a rebuild, run the Music Bible on project 94 (it shows "written for a story" first): a palette, roles and energies, no themes, and the themes step off on the board.
 
 ### EXM-003 — Music follows the voice, not the shots
 
@@ -371,8 +381,8 @@ Make a new continuous explainer (for example a short version of project 94's scr
 
 | Id | Status | Notes |
 |----|--------|-------|
-| EXM-001 | Not started | Owner trial: two section underscores with one palette, their join, and the two sound effects. |
-| EXM-002 | Not started | |
+| EXM-001 | Passed | Owner trial: two section underscores with one palette, their join, and the two sound effects. Marked complete by the owner 2026-11-27. |
+| EXM-002 | Code done, live run pending | Explainer Bible: palette in `sound_world`/`musical_feel`, arc with role and energy, no themes, themes step off. No migration. |
 | EXM-003 | Not started | |
 | EXM-004 | Not started | |
 | EXM-005 | Not started | |

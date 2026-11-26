@@ -6676,6 +6676,10 @@ export interface components {
             scene_id: string;
             /** Music */
             music: string;
+            /** Role */
+            role?: string | null;
+            /** Energy */
+            energy?: string | null;
         };
         /** ArcEntryIn */
         ArcEntryIn: {
@@ -6683,6 +6687,10 @@ export interface components {
             scene_id: string;
             /** Music */
             music: string;
+            /** Role */
+            role?: string | null;
+            /** Energy */
+            energy?: string | null;
         };
         /** AudioInputIn */
         AudioInputIn: {
@@ -12229,6 +12237,8 @@ export interface components {
             music_enabled: boolean;
             /** Max Themes */
             max_themes: number;
+            /** Explainer */
+            explainer: boolean;
             /** Scenes */
             scenes: components["schemas"]["SceneRef"][];
             /** Characters */

@@ -41,12 +41,14 @@ from app.jobs import store
 from app.services import (
     discovery,
     music_bible_writer,
+    projects,
     provenance,
     scene_definitions,
     scene_events,
     story_bible,
     story_length,
 )
+from app.services.project_kinds import KIND_EXPLAINER
 
 JOB_TYPE: Final = "write_music_bible"
 SOURCE_AI: Final = "ai"
@@ -74,10 +76,20 @@ REPLACE_MESSAGE: Final = (
     "from the model, so it has to be confirmed."
 )
 BUSY_MESSAGE: Final = "The Music Bible is being written. Wait for it to finish first."
+STORY_BIBLE_FOR_EXPLAINER_REASON: Final = (
+    "This Music Bible was written for a story. Write it again for an explainer."
+)
 
 
 class MusicBibleError(ValueError):
     """A request that cannot be done. The message is meant to be shown to the user."""
+
+
+def explainer_music(project: Project) -> bool:
+    """Whether the project gets the explainer Music Bible (EXM-002, XM-1): a continuous
+    explainer. A story and a `lines` explainer keep the story Bible.
+    """
+    return project.kind == KIND_EXPLAINER and project.voice_track == projects.VOICE_CONTINUOUS
 
 
 # --- Loading what the Bible is made from ---------------------------------------------------
@@ -97,6 +109,8 @@ class _Loaded:
     definitions: dict[str, scene_definitions.SceneEntry]
     events: dict[str, scene_events.SceneEntry]
     blocked_reason: str | None
+    # A continuous explainer (EXM-002): the Bible has no themes and a palette.
+    explainer: bool
 
     @property
     def scene_ids(self) -> list[str]:
@@ -157,6 +171,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         definitions={entry.item["id"]: entry for entry in definitions_state.entries},
         events={entry.item["id"]: entry for entry in events_state.entries},
         blocked_reason=_blocked_reason(story, bible, events_state),
+        explainer=explainer_music(project),
     )
 
 
@@ -293,7 +308,7 @@ async def _job_input(
     assert loaded.story is not None
     policy = await story_length.read_story_length_policy(session)
     length = story_length.story_length(loaded.story, policy)
-    return {
+    job_input: dict[str, Any] = {
         "mode": mode,
         "context": _build_context(loaded, length.estimated_seconds),
         "scene_ids": loaded.scene_ids,
@@ -301,6 +316,10 @@ async def _job_input(
         "max_themes": await max_themes(session),
         **_inputs(loaded),
     }
+    # Only for a continuous explainer, so a story's job is exactly what it was (E-8).
+    if explainer_music(project):
+        job_input["explainer"] = True
+    return job_input
 
 
 # --- Starting runs -------------------------------------------------------------------------
@@ -489,6 +508,7 @@ async def save_manual(
             scene_ids=loaded.scene_ids,
             refs={kind: set(ids) for kind, ids in _refs(loaded).items()},
             max_themes=await max_themes(session),
+            explainer=loaded.explainer,
         )
     except ValueError as exc:
         raise MusicBibleError(str(exc)) from exc
@@ -521,6 +541,17 @@ def _recorded(
         ):
             return artifact
     return None
+
+
+def _has_explainer_arc(row: MusicBible) -> bool:
+    """Whether every arc entry of the version has a section role, as an explainer Bible does."""
+    content = row.content if isinstance(row.content, dict) else {}
+    arc = content.get("arc")
+    return (
+        isinstance(arc, list)
+        and bool(arc)
+        and all(isinstance(entry, dict) and entry.get("role") for entry in arc)
+    )
 
 
 def _out_of_date_reasons(row: MusicBible, loaded: _Loaded) -> list[str]:
@@ -566,6 +597,9 @@ def _out_of_date_reasons(row: MusicBible, loaded: _Loaded) -> list[str]:
                     f"The {what} of the scene '{titles[scene_id]}' have been written again "
                     "since this Music Bible was made."
                 )
+
+    if loaded.explainer and not _has_explainer_arc(row):
+        reasons.append(STORY_BIBLE_FOR_EXPLAINER_REASON)
     return reasons
 
 
@@ -584,6 +618,8 @@ class MusicBibleState:
     blocked_reason: str | None
     music_enabled: bool
     max_themes: int
+    # True for a continuous explainer: no themes, a palette, and a role for each section.
+    explainer: bool
     # What the editor needs to offer: the scenes in story order, and what a theme may stand for.
     scenes: list[dict[str, str]]
     characters: list[dict[str, str]]
@@ -608,6 +644,7 @@ async def state(session: AsyncSession, project: Project) -> MusicBibleState:
         blocked_reason=loaded.blocked_reason,
         music_enabled=project.music_enabled,
         max_themes=await max_themes(session),
+        explainer=loaded.explainer,
         scenes=[{"id": item["id"], "title": item["title"]} for item in loaded.scene_items],
         characters=[{"id": item["id"], "name": item["name"]} for item in loaded.character_items],
         places=[{"id": item["id"], "name": item["name"]} for item in loaded.place_items],

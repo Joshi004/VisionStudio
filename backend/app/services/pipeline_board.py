@@ -37,7 +37,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
-from app.services import callout_look, callout_plan, evidence_claims, graphic_theme, word_timings
+from app.services import (
+    callout_look,
+    callout_plan,
+    evidence_claims,
+    graphic_theme,
+    music_themes,
+    word_timings,
+)
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
@@ -67,6 +74,10 @@ MUSIC_STEPS: Final = frozenset(
         "music_placement",
     }
 )
+
+# The step that is switched off for a continuous explainer, whose Music Bible has no themes
+# (EXM-002).
+MUSIC_THEMES_STEP: Final = "music_themes"
 
 # The step that is switched off for every project but an explainer (EXPLAINER-007, CAP-001).
 WORD_TIMINGS_STEP: Final = "word_timings"
@@ -322,6 +333,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
     for step in STEPS:  # the order of STEPS puts every step after the steps it needs
         off = (
             (music_off and step.key in MUSIC_STEPS)
+            or (step.key == MUSIC_THEMES_STEP and not music_themes.wanted(project))
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))

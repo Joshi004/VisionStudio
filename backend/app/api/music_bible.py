@@ -95,6 +95,9 @@ class ThemeOut(BaseModel):
 class ArcEntry(BaseModel):
     scene_id: str
     music: str
+    # Only an explainer's Bible has these (EXM-002): the section's job and its energy level.
+    role: str | None = None
+    energy: str | None = None
 
 
 class Restraint(BaseModel):
@@ -163,6 +166,8 @@ class MusicBibleState(BaseModel):
     music_enabled: bool
     # The most themes a Bible may have (the main theme included).
     max_themes: int
+    # True for a continuous explainer: no themes, a palette, and a role for each section.
+    explainer: bool
     # What the editor offers: the scenes in story order, and what a theme may stand for.
     scenes: list[SceneRef]
     characters: list[NameRef]
@@ -214,6 +219,9 @@ class ArcEntryIn(BaseModel):
 
     scene_id: str = Field(max_length=500)
     music: str = Field(max_length=5000)
+    # Only for an explainer's Bible; `check_bible` refuses a missing or unknown value there.
+    role: str | None = Field(default=None, max_length=50)
+    energy: str | None = Field(default=None, max_length=50)
 
 
 class SoundWorldIn(BaseModel):
@@ -345,6 +353,7 @@ async def _state(session: AsyncSession, project: Project) -> MusicBibleState:
         blocked_reason=state.blocked_reason,
         music_enabled=state.music_enabled,
         max_themes=state.max_themes,
+        explainer=state.explainer,
         scenes=[SceneRef(**scene) for scene in state.scenes],
         characters=[NameRef(**item) for item in state.characters],
         places=[NameRef(**item) for item in state.places],

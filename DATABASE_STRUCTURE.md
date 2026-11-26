@@ -3027,6 +3027,20 @@ The rules: exactly one theme has `main: true`, and it comes first; there are at 
 
 **Out of date** is never stored. `GET /api/projects/{id}/music-bible` compares `inputs` with the rows that are newest now (`services/music_bible._out_of_date_reasons`, through `services/provenance`): the story text, the Story Bible, the scene, character and environment lists, and each scene's definition and events. It returns the reasons in plain words. It is not accepted from the staleness screen (a Bible must be written again, not accepted). With `project.music_enabled` off nothing is out of date and the step is skipped.
 
+**The explainer Bible (EXM-002, no migration).** A project with `kind = explainer` and `voice_track = continuous` gets a Bible written for an explainer (`services/music_bible.explainer_music`). Its `job.input` has `explainer: true` (the key is absent for every other project, so their jobs and requests are exactly what they were). The three calls use explainer prompts (`services/music_bible_writer`), and `content` has this shape (`check_bible(..., explainer=True)`; the manual save runs the same check):
+
+```json
+{"concept": "A steady, sparse underscore under one presenter.",
+ "sound_world": {"instruments": ["muted synth pulse", "soft piano"], "avoid": ["vocals", "lead melody in the voice's range"]},
+ "musical_feel": {"tempo": "92 to 100 BPM", "mode_leaning": "D minor throughout", "density": "sparse"},
+ "themes": [],
+ "arc": [{"scene_id": "scene_1", "role": "hook", "energy": "medium", "music": "Tense pulse under the opening question."}],
+ "restraint": {"amount": "Music under almost all of the video.", "silence_rules": ["A short drop just before the key line."]},
+ "ambience_signature": "None: an explainer has no ambience under the voice."}
+```
+
+The palette every later cue must follow is `sound_world` and `musical_feel` (the same instruments, a narrow tempo and one key). `themes` is always `[]` and `ambience_signature` is always the fixed text above (code sets both; a non-empty `themes` is refused). Each `arc` entry also has a `role` (one of `hook`, `setup`, `explain`, `evidence`, `tension`, `reveal`, `takeaway`, `outro`) and an `energy` (`low`, `medium` or `high`). The pipeline step `music_themes` is complete with nothing made for such a project (`music_themes.wanted`), and the board shows it as off. A version of such a project whose arc entries have no `role` (written before EXM-002) is reported out of date with the reason "This Music Bible was written for a story. Write it again for an explainer."
+
 ```sql
 CREATE TABLE music_bible (
     id          INTEGER NOT NULL PRIMARY KEY,

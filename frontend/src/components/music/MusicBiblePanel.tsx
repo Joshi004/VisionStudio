@@ -81,8 +81,9 @@ export function MusicBiblePanel({ projectId, hasStory }: MusicBiblePanelProps) {
             <Stack gap={2}>
               <Title order={4}>Music Bible</Title>
               <Text size="sm" c="dimmed">
-                The story's score, planned once: four directions, the one chosen and why, and the
-                themes, arc and restraint the later music steps follow.
+                {data?.explainer
+                  ? "The video's underscore, planned once: four directions, the one chosen and why, and the shared palette, section arc and restraint the later music steps follow."
+                  : "The story's score, planned once: four directions, the one chosen and why, and the themes, arc and restraint the later music steps follow."}
               </Text>
             </Stack>
             <Group gap="sm" align="flex-end">
@@ -164,8 +165,8 @@ export function MusicBiblePanel({ projectId, hasStory }: MusicBiblePanelProps) {
             <Alert color="yellow" title="Out of date">
               <Stack gap={4}>
                 <Text size="sm">
-                  Something this version was written from has changed. Press Re-run to write a
-                  new one.
+                  Something this version was written from has changed. Press Re-run to write a new
+                  one.
                 </Text>
                 {data.reasons.length > 0 && (
                   <List size="sm">
@@ -198,6 +199,7 @@ export function MusicBiblePanel({ projectId, hasStory }: MusicBiblePanelProps) {
           scenes={data?.scenes ?? []}
           characters={data?.characters ?? []}
           places={data?.places ?? []}
+          explainer={data?.explainer ?? false}
           busy={active || choose.isPending}
           onChoose={(directionId) => startChoose(shown.version, directionId)}
         />
@@ -227,6 +229,8 @@ type MusicBibleViewProps = {
   scenes: MusicBibleState["scenes"];
   characters: MusicBibleState["characters"];
   places: MusicBibleState["places"];
+  /** A continuous explainer: no themes and no ambience, a role and an energy for each section. */
+  explainer: boolean;
   busy: boolean;
   onChoose: (directionId: string) => void;
 };
@@ -241,6 +245,7 @@ function MusicBibleView({
   scenes,
   characters,
   places,
+  explainer,
   busy,
   onChoose,
 }: MusicBibleViewProps) {
@@ -332,32 +337,37 @@ function MusicBibleView({
             <Text size="sm">Density: {content.musical_feel.density}</Text>
           </Section>
 
-          <Section title="Themes">
-            {content.themes.map((theme) => (
-              <Stack key={theme.id} gap={2}>
-                <Group gap="xs">
-                  <Text size="sm" fw={600}>
-                    {theme.name}
+          {!explainer && (
+            <Section title="Themes">
+              {content.themes.map((theme) => (
+                <Stack key={theme.id} gap={2}>
+                  <Group gap="xs">
+                    <Text size="sm" fw={600}>
+                      {theme.name}
+                    </Text>
+                    {theme.main && <Badge size="sm">Main theme</Badge>}
+                  </Group>
+                  <Text size="sm">
+                    Stands for {theme.stands_for.kind}
+                    {theme.stands_for.ref
+                      ? ` ${refName(theme.stands_for.kind, theme.stands_for.ref)}`
+                      : ""}
+                    : {theme.stands_for.description}
                   </Text>
-                  {theme.main && <Badge size="sm">Main theme</Badge>}
-                </Group>
-                <Text size="sm">
-                  Stands for {theme.stands_for.kind}
-                  {theme.stands_for.ref ? ` ${refName(theme.stands_for.kind, theme.stands_for.ref)}` : ""}
-                  : {theme.stands_for.description}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {theme.signature_instrument}
-                  {theme.emotions.length > 0 ? `. Feels: ${theme.emotions.join(", ")}` : ""}
-                </Text>
-              </Stack>
-            ))}
-          </Section>
+                  <Text size="xs" c="dimmed">
+                    {theme.signature_instrument}
+                    {theme.emotions.length > 0 ? `. Feels: ${theme.emotions.join(", ")}` : ""}
+                  </Text>
+                </Stack>
+              ))}
+            </Section>
+          )}
 
-          <Section title="Arc">
+          <Section title={explainer ? "Section arc" : "Arc"}>
             {content.arc.map((entry) => (
               <Text key={entry.scene_id} size="sm">
-                <b>{sceneTitle(entry.scene_id)}:</b> {entry.music}
+                <b>{sceneTitle(entry.scene_id)}:</b>
+                {entry.role ? ` [${entry.role}, ${entry.energy ?? "?"} energy]` : ""} {entry.music}
               </Text>
             ))}
           </Section>
@@ -373,9 +383,11 @@ function MusicBibleView({
             )}
           </Section>
 
-          <Section title="Ambience signature">
-            <Text size="sm">{content.ambience_signature}</Text>
-          </Section>
+          {!explainer && (
+            <Section title="Ambience signature">
+              <Text size="sm">{content.ambience_signature}</Text>
+            </Section>
+          )}
         </Stack>
       </Paper>
     </Stack>

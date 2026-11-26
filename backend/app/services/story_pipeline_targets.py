@@ -1008,8 +1008,9 @@ def _theme_last_error(view: music_themes.ThemeView) -> str | None:
 async def _evaluate_music_themes(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
-    # With music switched off nothing is made (MD-21): one target that is already done.
-    if not project.music_enabled:
+    # With music switched off, or for a continuous explainer (its Music Bible has no themes,
+    # EXM-002), nothing is made (MD-21): one target that is already done.
+    if not music_themes.wanted(project):
         return StepView([Target(PROJECT_KEY, "", True)])
     state = await music_themes.state(session, project)
     if not state.themes:

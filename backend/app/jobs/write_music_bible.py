@@ -68,6 +68,8 @@ class _Task:
     # For `expand` only.
     directions: list[dict[str, Any]] | None
     direction_id: str | None
+    # A continuous explainer (EXM-002): explainer prompts, and a Bible with no themes.
+    explainer: bool = False
 
 
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
@@ -111,6 +113,7 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
         saved_inputs=saved_inputs,
         directions=directions,
         direction_id=direction_id,
+        explainer=job_input.get("explainer") is True,
     )
 
 
@@ -164,6 +167,7 @@ def _bible_reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
                 refs=task.refs,
                 max_themes=task.max_themes,
                 warnings=found,
+                explainer=task.explainer,
             )
         except ValueError as exc:
             return str(exc), None
@@ -241,7 +245,9 @@ class WriteMusicBibleHandler(JobHandler):
         if task.mode == music_bible.MODE_FULL:
             outcome = await ask(
                 "directions",
-                writer.build_directions_request(task.context, model=target.model),
+                writer.build_directions_request(
+                    task.context, model=target.model, explainer=task.explainer
+                ),
                 _directions_reader,
             )
             directions: list[dict[str, Any]] | None = outcome.value
@@ -253,7 +259,9 @@ class WriteMusicBibleHandler(JobHandler):
 
             outcome = await ask(
                 "choice",
-                writer.build_choice_request(task.context, directions, model=target.model),
+                writer.build_choice_request(
+                    task.context, directions, model=target.model, explainer=task.explainer
+                ),
                 lambda warnings: _choice_reader(directions, warnings),
             )
             choice: dict[str, Any] | None = outcome.value
@@ -273,7 +281,11 @@ class WriteMusicBibleHandler(JobHandler):
         outcome = await ask(
             "bible",
             writer.build_bible_request(
-                task.context, direction, max_themes=task.max_themes, model=target.model
+                task.context,
+                direction,
+                max_themes=task.max_themes,
+                model=target.model,
+                explainer=task.explainer,
             ),
             lambda warnings: _bible_reader(task, warnings),
         )

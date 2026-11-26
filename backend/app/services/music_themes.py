@@ -82,6 +82,7 @@ MAX_INNER_SILENCE_S: Final = 3.0
 
 MUSIC_OFF_MESSAGE: Final = music_bible.MUSIC_OFF_MESSAGE
 NO_BIBLE_MESSAGE: Final = "Write the Music Bible first: the themes come from it."
+EXPLAINER_MESSAGE: Final = "An explainer's music has no themes, so there is nothing to record."
 REPLACE_MESSAGE: Final = (
     "You chose the canonical recording of a theme that is out of date. Recording the theme "
     "again makes new candidates, so it has to be confirmed."
@@ -320,9 +321,18 @@ async def _prompt_jobs(session: AsyncSession, project_id: int) -> dict[str, Job]
     return found
 
 
+def wanted(project: Project) -> bool:
+    """Whether the project's themes step has work to do: music is on and the project is not a
+    continuous explainer, whose Music Bible has no themes (EXM-002, XM-4).
+    """
+    return project.music_enabled and not music_bible.explainer_music(project)
+
+
 async def _blocked_reason(session: AsyncSession, project: Project) -> str | None:
     if not project.music_enabled:
         return MUSIC_OFF_MESSAGE
+    if music_bible.explainer_music(project):
+        return EXPLAINER_MESSAGE
     if await music_bible.latest(session, project.id) is None:
         return NO_BIBLE_MESSAGE
     return None
