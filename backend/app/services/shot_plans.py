@@ -255,6 +255,11 @@ class _Loaded:
 EVIDENCE_FIRST_MESSAGE: Final = (
     "Gather the evidence first: the shots are planned with the evidence the owner chose to show."
 )
+# A plan goes out of date for evidence only when what one of its evidence shots shows is no
+# longer shown (OVL-006). New evidence is a card.
+EVIDENCE_SHOT_CHANGED_MESSAGE: Final = (
+    "The evidence that a shot of this scene shows is no longer shown, or has moved."
+)
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -283,11 +288,12 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
     soundbites: list[evidence_review.ShownSoundbite] = []
     evidence_problem: str | None = None
     if evidence_claims.wanted(project):
-        # Shots wait for the evidence step (EV-9): its newest round has to be reviewed.
-        if evidence_rounds.is_done(await evidence_rounds.state(session, project)):
-            evidence = await evidence_review.shown_claims(session, project)
-            soundbites = await evidence_review.shown_soundbites(session, project)
-        else:
+        # The claims a reviewed round covers are shown whether or not others wait (OVL-006). A
+        # scene is only held back from being planned (EV-9) while a claim waits for research; a
+        # scene whose plan exists is not, because its plan never depended on that claim.
+        evidence = await evidence_review.shown_claims(session, project)
+        soundbites = await evidence_review.shown_soundbites(session, project)
+        if not evidence_rounds.is_done(await evidence_rounds.state(session, project)):
             evidence_problem = EVIDENCE_FIRST_MESSAGE
 
     callouts: tuple[dict[str, Any], ...] = ()
@@ -1105,17 +1111,61 @@ def _take_reasons(row: ShotPlan, clock: take_timings.TakeClock | None) -> list[s
 def _evidence_reasons(
     row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
 ) -> list[str]:
-    """Why a cut plan no longer fits the evidence the owner chose to show in its scene (EVD-009):
-    a decision or an import changed which pieces are shown, or where. A plan made before evidence
-    existed records none, which is the same as a scene with none. A take that is not ready has
-    no words to place the claims on, so it gives no reason here.
+    """Why a cut plan no longer fits the evidence its own evidence shots show (EVD-009, OVL-006):
+    a piece one of them shows is no longer shown, its claim is gone, changed or is now a sound
+    bite's, or the claim's words are no longer where the shot is. Evidence that was added (a
+    claim, or a piece after the ones shown) is no reason: it gets a card (`evidence_cards`). A
+    plan with no evidence shot never has a reason here. A take that is not ready has no words to
+    place the claims on, so it gives none either.
     """
-    if not isinstance(row.inputs, dict) or clock is None or not clock.words:
+    if not isinstance(row.inputs, dict) or not isinstance(row.content, dict):
         return []
-    now = graphic_suggestions.fingerprint(_scene_evidence(loaded, item, clock.words))
-    if row.inputs.get("evidence_sha256") == now:
+    if clock is None or not clock.words:
         return []
-    return ["The evidence to show in this scene changed since these shots were planned."]
+    evidence_shots = [
+        shot
+        for shot in row.content.get("shots") or []
+        if isinstance(shot, dict)
+        and shot.get("type") == scene_timeline.EVIDENCE_SHOT_TYPE
+        and isinstance(shot.get("evidence"), dict)
+    ]
+    if not evidence_shots:
+        return []
+    now = {claim["id"]: claim for claim in _scene_evidence(loaded, item, clock.words)}
+    planned_text = {
+        entry["claim_id"]: entry.get("text")
+        for entry in row.content.get(cut_planning_writer.EVIDENCE_KEY) or []
+        if isinstance(entry, dict) and "claim_id" in entry
+    }
+    changed = [EVIDENCE_SHOT_CHANGED_MESSAGE]
+    checked: set[str] = set()
+    for shot in evidence_shots:
+        about = shot["evidence"]
+        claim_id = about.get("claim_id")
+        claim = now.get(claim_id)
+        if (
+            claim is None
+            or claim.get("on_soundbite")
+            or not claim["words"]
+            or about.get("item_key") not in claim["pieces"]
+        ):
+            return changed
+        planned = planned_text.get(claim_id)
+        if planned is not None and planned != claim["text"]:
+            return changed
+        if claim_id in checked:
+            continue
+        checked.add(claim_id)
+        # The claim's first shot still touches the claim's words (words are numbered from 1).
+        first_word, last_word = min(claim["words"]) + 1, max(claim["words"]) + 1
+        starts, ends = shot.get("start_word"), shot.get("last_word")
+        if (
+            isinstance(starts, int)
+            and isinstance(ends, int)
+            and (starts > last_word or ends < first_word - cut_planning_writer.EVIDENCE_LEAD_WORDS)
+        ):
+            return changed
+    return []
 
 
 def _soundbite_reasons(
@@ -1798,11 +1848,7 @@ async def timeline_of(session: AsyncSession, row: ShotPlan) -> scene_timeline.Sc
     # A sound bite shot's length is its clip's, so the plan job's timeline needs the clips (SB-008).
     project = await session.get(Project, row.project_id)
     soundbites: list[evidence_review.ShownSoundbite] = []
-    if (
-        project is not None
-        and evidence_claims.wanted(project)
-        and evidence_rounds.is_done(await evidence_rounds.state(session, project))
-    ):
+    if project is not None and evidence_claims.wanted(project):
         soundbites = await evidence_review.shown_soundbites(session, project)
     return _timeline_of(row, policy, kinds, None, _bite_seconds(soundbites))
 

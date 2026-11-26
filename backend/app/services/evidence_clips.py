@@ -663,18 +663,19 @@ async def _newest_shot_clips(
 
 
 async def _newest_pieces(session: AsyncSession, project: Project) -> dict[str, EvidenceItem]:
-    """The usable pieces of the newest import of the newest round, by `item_key`."""
+    """The usable pieces of the newest import of each round that covers a claim (OVL-006), by
+    `item_key`. A key names its claim, so pieces of different rounds never meet."""
     current = await evidence_rounds.state(session, project)
-    if current.round is None:
-        return {}
-    record = await evidence_import.latest_import(session, current.round.id)
-    if record is None:
-        return {}
-    return {
-        item.item_key: item
-        for item in await evidence_import.items_of(session, record.id)
-        if item.usable
-    }
+    found: dict[str, EvidenceItem] = {}
+    for round_id in sorted({row.id for row in current.covered.values()}):
+        mine = {claim for claim, row in current.covered.items() if row.id == round_id}
+        record = await evidence_import.latest_import(session, round_id)
+        if record is None:
+            continue
+        for item in await evidence_import.items_of(session, record.id):
+            if item.usable and item.claim_id in mine:
+                found[item.item_key] = item
+    return found
 
 
 def _span_frames(entry: shot_plans.SceneEntry, shot_id: str) -> int | None:

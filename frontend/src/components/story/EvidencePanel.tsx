@@ -175,9 +175,9 @@ export function EvidencePanel({ project }: EvidencePanelProps) {
           </Button>
         </Group>
         <Text size="xs" c="dimmed">
-          The brief lists the claims that count now, with the sentences around them. Research
-          happens outside the app: paste the prompt below into Cursor or Claude, in the round's
-          folder.
+          A new round lists only the claims that are new or changed, with the sentences around
+          them; claims already reviewed stay on video. Research happens outside the app: paste the
+          prompt below into Cursor or Claude, in the round's folder.
         </Text>
 
         {isLoading && <Loader size="sm" />}
@@ -198,6 +198,16 @@ export function EvidencePanel({ project }: EvidencePanelProps) {
               <Badge variant="light">
                 {data.claims_count} {data.claims_count === 1 ? "claim counts" : "claims count"}
               </Badge>
+              {data.reviewed_claims > 0 && (
+                <Badge color="green" variant="light">
+                  {data.reviewed_claims} reviewed
+                </Badge>
+              )}
+              {data.waiting_claims > 0 && (
+                <Badge color="orange" variant="light">
+                  {data.waiting_claims} waiting for research
+                </Badge>
+              )}
               {round !== null && (
                 <Badge color={round.status === "reviewed" ? "green" : "orange"} variant="light">
                   Round {round.round_no}: {ROUND_STATUS_LABEL[round.status]}
@@ -205,7 +215,7 @@ export function EvidencePanel({ project }: EvidencePanelProps) {
               )}
               {round?.out_of_date === true && (
                 <Badge color="yellow" variant="light">
-                  Claims changed since this brief
+                  New claims since this brief
                 </Badge>
               )}
             </Group>

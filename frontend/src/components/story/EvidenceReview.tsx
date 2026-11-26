@@ -657,7 +657,8 @@ export function EvidenceReview({ projectId }: EvidenceReviewProps) {
       </Group>
       <Text size="xs" c="dimmed">
         Nothing reaches the video without your acceptance. Decide every claim, then press Review
-        done. Changing a decision afterwards takes the review back until you press it again.
+        done. Changing a decision afterwards takes the review back until you press it again. Claims
+        reviewed in an earlier round are kept as they were and are not listed here.
       </Text>
 
       {isLoading && <Loader size="sm" />}

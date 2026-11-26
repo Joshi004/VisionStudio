@@ -313,7 +313,7 @@ def import_refusal(current: evidence_rounds.EvidenceState) -> str | None:
     row = current.round
     if row is None:
         return NO_ROUND_MESSAGE
-    if not current.current:
+    if not current.live:
         return f"The claims changed since round r{row.round_no}. Write a new round."
     if current.job is not None and current.job.status in ("queued", "running"):
         return BRIEF_RUNNING_MESSAGE

@@ -1,10 +1,17 @@
 """The research rounds of the evidence layer: the brief the app writes for the research agent, and
 where a round stands (EVD-003, `Evidence_layer_implementation_phases.md` §4.3, §4.4).
 
-A **round** is one brief written for the claims as they stood then (`evidence_round`). The app
-writes `evidence/<project_id>/r<round_no>/brief/claims.json` and `README.md` in the files folder,
-and an empty `results/` folder for the agent. Every round carries every current claim and stands
-alone: the newest round is the evidence, and earlier rounds stay as records.
+A **round** is one brief written for the claims that were waiting for research when it was written
+(`evidence_round`). The app writes `evidence/<project_id>/r<round_no>/brief/claims.json` and
+`README.md` in the files folder, and an empty `results/` folder for the agent.
+
+**Evidence is per claim (OVL-006).** A claim is **covered** by the newest *reviewed* round whose
+brief holds it unchanged (`claim_keys`), and its evidence is what that round's review shows
+(`evidence_review.shown_view`). A claim that counts and has no covering round is **waiting**. A new
+round carries only the waiting claims, so adding a claim later researches that claim alone and
+leaves every reviewed claim, and the shots, cards and clips built from it, as they were. (Before
+OVL-006 every round carried every claim and stood alone.) The newest round is the one the owner
+imports and reviews.
 
 **Where a round stands** is worked out on read from the rows that exist (`round_status`):
 
@@ -14,11 +21,12 @@ alone: the newest round is the evidence, and earlier rounds stay as records.
   newest import (EVD-007).
 
 **The `evidence` pipeline step** waits on the owner, not on a job: `awaiting_text` is what the
-owner has to do next, or None. The step is done when the claims that count are empty, or when the
-newest round has exactly the claims that count now and is reviewed. A claim that is not as the
-round brief says (its id, origin, words, sentence, note, kind, or for a sound bite its `want` and
-`speaker`) makes the round out of date; the sentences around it do not, so an edit elsewhere
-in the story forces no new round.
+owner has to do next, or None. The step is done when the claims that count are empty, or when none
+of them is waiting. `current` is whether the newest round holds every waiting claim unchanged (a
+new brief would add nothing); `live` is whether it holds at least one claim that counts unchanged
+(so it can still be imported and reviewed). A claim that is not as the round brief says (its id,
+origin, words, sentence, note, kind, or for a sound bite its `want` and `speaker`) is not held by
+it; the sentences around it do not count, so an edit elsewhere in the story forces no new round.
 
 Claims are read through `evidence_claims.state()`, never straight from a row (EVD-002): a claim
 whose words changed in the story is unusable.
@@ -31,7 +39,7 @@ import json
 import os
 import shutil
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -80,6 +88,9 @@ STATUS_REVIEWED: Final = "reviewed"
 NO_CLAIMS_MESSAGE: Final = "There are no claims to prove, so there is nothing to research."
 CURRENT_MESSAGE: Final = (
     "The newest round already has these claims. Change a claim to write a new brief."
+)
+ALL_REVIEWED_MESSAGE: Final = (
+    "Every claim already has reviewed evidence. Add or change a claim to write a new brief."
 )
 NOT_SEPARATE_MESSAGE: Final = (
     "Evidence needs the files folder on the Mac (VISIO_FILES_DIR in .env), because the research "
@@ -149,31 +160,38 @@ def brief_claims(script: str, claims: Sequence[dict[str, Any]]) -> list[dict[str
     return entries
 
 
-def claim_keys(entries: Sequence[dict[str, Any]]) -> list[tuple[Any, ...]]:
-    """What decides that a round has the claims that count now: not the sentences around a
-    claim. Pure. Anything in `entries` that is not a claim entry gives a key no claim has.
+def claim_key(entry: object) -> tuple[Any, ...]:
+    """What decides that a round holds a claim as it is now: not the sentences around it. A
+    brief with no sound bite does not say `want` and `speaker` (a claim is then evidence, and has
+    no speaker), so a missing one reads as that. Pure. Anything that is not a claim entry gives a
+    key no claim has.
     """
-    keys: list[tuple[Any, ...]] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            keys.append(())
-            continue
-        keys.append(
-            tuple(
-                entry.get(name)
-                for name in (
-                    "id",
-                    "origin",
-                    "text",
-                    "sentence",
-                    "hint",
-                    "kind_hint",
-                    "want",
-                    "speaker",
-                )
-            )
-        )
-    return keys
+    if not isinstance(entry, dict):
+        return ()
+    return (
+        entry.get("id"),
+        entry.get("origin"),
+        entry.get("text"),
+        entry.get("sentence"),
+        entry.get("hint"),
+        entry.get("kind_hint"),
+        entry.get("want") or evidence_claims.WANT_EVIDENCE,
+        entry.get("speaker"),
+    )
+
+
+def claim_keys(entries: Sequence[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    """`claim_key` of each entry. Pure."""
+    return [claim_key(entry) for entry in entries]
+
+
+def keys_by_id(entries: object) -> dict[str, tuple[Any, ...]]:
+    """The `claim_key` of each claim entry that has an id, by id. Pure."""
+    found: dict[str, tuple[Any, ...]] = {}
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+            found[entry["id"]] = claim_key(entry)
+    return found
 
 
 def pending_reasons(claims: Sequence[dict[str, Any]]) -> list[str]:
@@ -507,12 +525,54 @@ class EvidenceState:
     pending: list[str]
     round: EvidenceRound | None
     status: str
-    # The newest round has exactly the claims that count now.
+    # The newest round holds every waiting claim unchanged: a new brief would add nothing.
     current: bool
     job: Job | None
     # Why evidence files cannot be written now, or None.
     folder_problem: str | None
     host_folder: str | None
+    # OVL-006. The claims that count and have a covering round, by claim id: the newest reviewed
+    # round whose brief holds the claim as it is now.
+    covered: dict[str, EvidenceRound] = field(default_factory=dict)
+    # The claims that count and have no covering round yet, in story order: what a new brief
+    # carries, and what the evidence step still waits for.
+    waiting: list[dict[str, Any]] = field(default_factory=list)
+    # The newest round holds at least one claim that counts, unchanged, so it can still be
+    # imported and reviewed.
+    live: bool = False
+
+
+async def all_rounds(session: AsyncSession, project_id: int) -> list[EvidenceRound]:
+    """The project's rounds, newest first."""
+    statement = (
+        select(EvidenceRound)
+        .where(EvidenceRound.project_id == project_id)
+        .order_by(EvidenceRound.round_no.desc())
+    )
+    return list((await session.execute(statement)).scalars().all())
+
+
+async def _coverage(
+    session: AsyncSession,
+    rounds: Sequence[EvidenceRound],
+    wanted: dict[str, tuple[Any, ...]],
+) -> dict[str, EvidenceRound]:
+    """For each claim of `wanted` (id to key), the newest reviewed round whose brief holds it with
+    that key. A round's standing is only worked out when it holds one of the claims."""
+    covered: dict[str, EvidenceRound] = {}
+    for row in rounds:
+        if len(covered) == len(wanted):
+            break
+        held = keys_by_id(row.brief.get("claims") if isinstance(row.brief, dict) else None)
+        mine = [
+            claim_id
+            for claim_id, key in wanted.items()
+            if claim_id not in covered and held.get(claim_id) == key
+        ]
+        if mine and await round_status(session, row) == STATUS_REVIEWED:
+            for claim_id in mine:
+                covered[claim_id] = row
+    return covered
 
 
 @memoized_state
@@ -534,12 +594,20 @@ async def state(session: AsyncSession, project: Project) -> EvidenceState:
         )
     all_claims = (await evidence_claims.state(session, project)).claims
     claims = evidence_claims.counting(all_claims)
-    row = await latest_round(session, project.id)
+    rounds = await all_rounds(session, project.id)
+    row = rounds[0] if rounds else None
     current = False
-    if row is not None and project.script_text is not None and isinstance(row.brief, dict):
-        wanted_keys = claim_keys(brief_claims(project.script_text, claims))
-        stored = row.brief.get("claims")
-        current = isinstance(stored, list) and claim_keys(stored) == wanted_keys
+    live = False
+    covered: dict[str, EvidenceRound] = {}
+    waiting = claims
+    if project.script_text is not None:
+        wanted = keys_by_id(brief_claims(project.script_text, claims))
+        covered = await _coverage(session, rounds, wanted)
+        waiting = [claim for claim in claims if claim["id"] not in covered]
+        if row is not None:
+            held = keys_by_id(row.brief.get("claims") if isinstance(row.brief, dict) else None)
+            live = any(held.get(claim_id) == key for claim_id, key in wanted.items())
+            current = all(held.get(claim["id"]) == wanted.get(claim["id"]) for claim in waiting)
     return EvidenceState(
         wanted=True,
         claims=claims,
@@ -550,6 +618,9 @@ async def state(session: AsyncSession, project: Project) -> EvidenceState:
         job=await store.latest_job(session, project.id, JOB_TYPE),
         folder_problem=folder_problem(),
         host_folder=host_folder_of(project.id, row.round_no) if row is not None else None,
+        covered=covered,
+        waiting=waiting,
+        live=live,
     )
 
 
@@ -563,6 +634,8 @@ def refusal(current: EvidenceState, project: Project) -> str | None:
         return " ".join(current.pending)
     if not current.claims:
         return NO_CLAIMS_MESSAGE
+    if not current.waiting:
+        return ALL_REVIEWED_MESSAGE
     if current.round is not None and current.current:
         return CURRENT_MESSAGE
     return current.folder_problem
@@ -576,29 +649,39 @@ def awaiting_text(current: EvidenceState) -> str | None:
         return None
     if current.pending:
         return " ".join(current.pending)
-    if not current.claims:
+    if not current.claims or not current.waiting:
         return None
     if current.round is None or not current.current:
         return None
+    # With claims already reviewed, say that they stay on video while the new ones wait.
+    reviewed = len(current.covered)
+    kept = (
+        f" ({len(current.waiting)} new {'claim' if len(current.waiting) == 1 else 'claims'}; "
+        f"the {reviewed} reviewed {'claim stays' if reviewed == 1 else 'claims stay'} on video)"
+        if reviewed
+        else ""
+    )
     if current.status == STATUS_BRIEF_WRITTEN:
         folder = current.host_folder or current.round.folder
-        return f"Run the research in {folder} with Cursor or Claude, then import the results here."
+        return (
+            f"Run the research in {folder} with Cursor or Claude{kept}, "
+            "then import the results here."
+        )
     if current.status == STATUS_IMPORTED:
         return "Review the evidence, then press Review done."
     return None
 
 
 def is_done(current: EvidenceState) -> bool:
-    """The `evidence` step is complete: nothing to prove, or the newest round has the claims
-    that count and is reviewed. Not applicable also counts (the caller checks `wanted`).
+    """The `evidence` step is complete: nothing to prove, or every claim that counts is covered by
+    a reviewed round (nothing is waiting). Not applicable also counts (the caller checks
+    `wanted`).
     """
     if not current.wanted:
         return True
     if current.pending:
         return False
-    if not current.claims:
-        return True
-    return current.round is not None and current.current and current.status == STATUS_REVIEWED
+    return not current.waiting
 
 
 # --- Starting a brief ------------------------------------------------------------------------
@@ -648,7 +731,8 @@ async def make_round(session: AsyncSession, project: Project, job_id: int) -> Ev
         raise EvidenceRoundsError(evidence_claims.NO_STORY_MESSAGE)
     bible = await story_bible.latest(session, project.id)
     topic = topic_of(bible.content if bible is not None else None, project.name)
-    entries = brief_claims(script, current.claims)
+    # Only the claims that wait for research (OVL-006): the reviewed ones stay as they are.
+    entries = brief_claims(script, current.waiting)
     today = utcnow().date().isoformat()
     # Plain values, read here: the brief is made in a thread, where the project is not touched.
     project_id, title, orientation = project.id, project.name, project.orientation

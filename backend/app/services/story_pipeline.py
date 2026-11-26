@@ -178,7 +178,9 @@ STEPS: Final[tuple[Step, ...]] = (
     # the run goes on with every step that does not need it, then waits (`waiting_for`) instead of
     # failing. It needs the Story Bible for the brief's topic line. Skipped as complete for any
     # project that is not a continuous explainer with evidence on, and for one with no claims.
-    # Shot planning waits for it: only the consumers wait (EV-9).
+    # A scene that needs a new shot plan waits for it (EV-9), scene by scene: `shot_plans` does
+    # not need this step as a whole (OVL-006), so a scene whose plan exists goes on while a claim
+    # added later waits for its research. The claim then gets a card, not a new plan.
     Step("evidence", "Gather the evidence", ("story_bible", "evidence_claims")),
     # CMO-006: the callout look and both versions of every callout of a motion project. It needs
     # the callout plan and the graphics look. Skipped as complete for any project whose callouts
@@ -192,7 +194,7 @@ STEPS: Final[tuple[Step, ...]] = (
     Step(
         "shot_plans",
         "Plan the shots",
-        ("speech_synthesis", "scene_staging", "evidence"),
+        ("speech_synthesis", "scene_staging"),
         kind=SCENE,
     ),
     # EXG-004: the brief of each graphic shot the cut planner chose, written from the shot's words

@@ -9492,6 +9492,10 @@ export interface components {
             wanted: boolean;
             /** Claims Count */
             claims_count: number;
+            /** Reviewed Claims */
+            reviewed_claims: number;
+            /** Waiting Claims */
+            waiting_claims: number;
             /** Pending */
             pending: string[];
             /** Awaiting */

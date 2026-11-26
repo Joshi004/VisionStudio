@@ -147,6 +147,10 @@ class EvidenceStateOut(BaseModel):
     wanted: bool
     # How many claims count now (not dropped, words still in the story).
     claims_count: int
+    # Of those, how many a reviewed round covers (their evidence is on video, whatever else is
+    # added later), and how many wait for research (OVL-006).
+    reviewed_claims: int
+    waiting_claims: int
     # What stops the claims from being sent to research (GLM's proposals not decided on, claims
     # whose words changed). Empty when nothing does.
     pending: list[str]
@@ -274,6 +278,8 @@ async def _state(session: AsyncSession, project: Project) -> EvidenceStateOut:
     return EvidenceStateOut(
         wanted=state.wanted,
         claims_count=len(state.claims),
+        reviewed_claims=len(state.covered),
+        waiting_claims=len(state.waiting),
         pending=state.pending,
         awaiting=evidence_rounds.awaiting_text(state),
         done=evidence_rounds.is_done(state),

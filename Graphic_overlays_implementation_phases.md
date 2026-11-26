@@ -74,7 +74,7 @@ What exists and is reused:
 - **Spans callouts keep off.** `story_render_plan` collects `graphic_spans` (graphic shots, full evidence shots, cards) and `callout_render.resolve` drops a callout that starts in one, with a `callout_dropped` warning.
 - **Limits.** A graphic shot lasts at least `cut_planning_writer.SHORTEST_GRAPHIC_S` (3.0 s). The motion service draws at most `shot_graphics.MAX_FRAMES` (720) frames at `graphics_lab.FPS` (24), so 30 s.
 
-**Evidence added later is worse than a suggestion today.** The newest evidence round counts only while it has exactly the claims that count now (`evidence_rounds.state`, `current`). One new claim makes it not current, so `evidence_review.shown_claims` returns nothing for the whole project: every scene with evidence goes out of date ("The evidence to show in this scene changed since these shots were planned."), and shots cannot be planned until a new round is researched and reviewed (`shot_plans.EVIDENCE_FIRST_MESSAGE`).
+**Evidence added later is worse than a suggestion today** (written before OVL-006, which changed it: see its notes). The newest evidence round counts only while it has exactly the claims that count now (`evidence_rounds.state`, `current`). One new claim makes it not current, so `evidence_review.shown_claims` returns nothing for the whole project: every scene with evidence goes out of date ("The evidence to show in this scene changed since these shots were planned."), and shots cannot be planned until a new round is researched and reviewed (`shot_plans.EVIDENCE_FIRST_MESSAGE`).
 
 What does not exist: a graphic tied to words instead of a shot; a graphic placed by code; a way to add evidence without a new shot plan; a split of a graphic and evidence.
 
@@ -89,7 +89,7 @@ What does not exist: a graphic tied to words instead of a shot; a graphic placed
 | OV-3 | **Full screen, over any shot.** An overlay covers whatever is under its words: presenter (the voice runs on), B-roll, the planner's own graphic shot, an evidence shot (then OV-7). The shots under it are not changed. |
 | OV-4 | **Numbers on screen are said in the script.** The brief writer's rule stays: a graphic never shows a number that the words of the overlay or the words around it do not say. |
 | OV-5 | **A sound bite wins**, as today (SB-008): its words are taken out of the suggestion. No overlay is drawn over a sound bite shot. |
-| OV-6 | **Evidence added later is a card.** A claim or a piece shown after the shots were planned gets a card (EVD-011) and no new shot plan. The plan goes out of date only when something one of its evidence shots shows is no longer shown. |
+| OV-6 | **Evidence added later is a card.** A claim or a piece shown after the shots were planned gets a card (EVD-011) and no new shot plan. The plan goes out of date only when something one of its evidence shots shows is no longer shown. Exception: a sound bite accepted later still changes its scene's plan, since a clip replaces words and cannot be a card (OVL-006). |
 | OV-7 | **A graphic and evidence on the same words share the screen.** One split stretch covers both, from the start of the first to the end of the last, so the layout never changes in the middle of a sentence. |
 | OV-8 | **No new video clip** because a suggestion was added, changed or removed, or because evidence was added. What runs again: the overlay's brief and graphic, card clips, the scene render and the video render. |
 | OV-9 | **Suggestions stay where they are.** The owner marks words in the same "Suggest graphics" box; only what happens to them changes. |
@@ -173,7 +173,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 | OVL-003 | Placing the overlays | Code | — | Completed |
 | OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Completed |
 | OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Completed |
-| OVL-006 | Evidence added later becomes a card | Code | — | Not Started |
+| OVL-006 | Evidence added later becomes a card | Code | — | Completed |
 | OVL-007 | Split screen for a graphic and evidence | Code | OVL-005, OVL-006 | Not Started |
 | OVL-008 | Project 94 end to end | Owner | OVL-005, OVL-007 | Not Started |
 | OVL-009 | Keep unchanged shots when a scene is planned again | Code, later | — | Deferred |
@@ -182,9 +182,9 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 - **Graphics:** OVL-001 and OVL-003 → OVL-004 → OVL-005.
 - **Planner:** OVL-002 (done). It had to be done before OVL-005 is used on a real project.
-- **Evidence:** OVL-006, now.
+- **Evidence:** OVL-006 (done).
 
-**Progress snapshot:** 5 completed (OVL-001, OVL-002, OVL-003, OVL-004, OVL-005).
+**Progress snapshot:** 6 completed (OVL-001, OVL-002, OVL-003, OVL-004, OVL-005, OVL-006).
 
 ---
 
@@ -420,7 +420,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 ### OVL-006 — Evidence added later becomes a card
 
-**Status:** Not Started
+**Status:** Completed (2026-11-27; the owner still has to rebuild the real app so the new code runs there)
 
 **Objective.** Showing a new claim or piece after the shots were planned makes a card, not a new shot plan, and does not take away the evidence already shown (OV-6).
 
@@ -445,14 +445,26 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Shown evidence per claim
-- [ ] New evidence check on the plan
-- [ ] Shots no longer held back by a new claim
-- [ ] Board text
-- [ ] Checks above
-- [ ] Standard checks
+- [x] Shown evidence per claim
+- [x] New evidence check on the plan
+- [x] Shots no longer held back by a new claim
+- [x] Board text
+- [x] Checks above
+- [x] Standard checks
+- [ ] Owner: real app rebuilt so the new code runs there
 
-**Completion notes.**
+**Completion notes.** Done 2026-11-27. No migration, no new job, no new setting, no change to the research skill. `DATABASE_STRUCTURE.md` has an update paragraph.
+
+- **Planning decided (the owner's choices).** (1) **Delta rounds:** a new round's brief carries only the claims that are waiting; a claim's evidence is read from the newest *reviewed* round that holds it unchanged. This replaces the EVD-003 choice "every round carries every claim and stands alone" (noted in `Evidence_layer_implementation_phases.md`). (2) **Carry on:** a scene with a current plan goes on to cards, clips and renders while a new claim waits; a scene that needs a new plan still waits (EV-9).
+- **`evidence_rounds.py`**: `EvidenceState` gains `covered` (claim id to the covering round), `waiting` (claims that count and have none) and `live` (the newest round holds at least one claim that counts, unchanged). `current` now means the newest round holds every waiting claim unchanged (a new brief would add nothing); `is_done` is "nothing is pending and nothing waits"; `make_round` writes `brief_claims(script, waiting)`; `refusal` has a new sentence for "every claim already has reviewed evidence"; `awaiting_text` adds "(N new claims; the M reviewed claims stay on video)" only when some claims are already reviewed. `claim_key` reads a missing `want` as `evidence` and a missing `speaker` as none, so a brief written without sound bites still matches a claim compared inside a set that has one. A round's standing is only worked out for a round that holds one of the waiting claims.
+- **`evidence_review.py`**: `_load` is split into `_load_round`; only the newest round gets a write refusal. `_write_refusal` and `evidence_import.import_refusal` refuse when the newest round is not `live` (before: when the claims were not exactly the round's). New `shown_view` gives the `ReviewClaim` of each covered claim from its covering round, in story order; `shown_claims` and `shown_soundbite_clips` read it, so they no longer need "the newest round has exactly the claims that count now".
+- **Readers**: `evidence_clips._newest_pieces` reads the usable pieces of the covered claims in the covering rounds' newest imports (so clips and card clips of older claims stay current); `youtube_draft` takes its Sources from `shown_view` and records the highest-version review row among the covering rounds.
+- **`shot_plans.py`**: `_load` always reads the shown claims and sound bites; `evidence_problem` (which holds back planning) is set only when the evidence step is not done. `_evidence_reasons` no longer fingerprints the scene's claims: a plan is out of date only when an evidence shot of its own shows a piece that is no longer shown, its claim is gone, its text changed, or is now a sound bite's, or the claim's words are no longer near the claim's first shot (the shot must still touch the window from three words before the claim's first word to its last word). A claim or piece added gives no reason: `place_cards` gives it a card. `inputs.evidence_sha256` is still written and nothing reads it. The timeline for the plan job reads the sound bites the same way.
+- **Pipeline**: `shot_plans` no longer needs the `evidence` step as a whole (`story_pipeline.STEPS`); `_evaluate_shot_plans` reports a scene held back by `EVIDENCE_FIRST_MESSAGE` as **awaiting** the owner (a wait), not as a block.
+- **API and UI**: `EvidenceStateOut.reviewed_claims` and `waiting_claims`; `schema.d.ts` regenerated from the app's own OpenAPI (4 lines added, nothing else). `EvidencePanel.tsx` shows "N reviewed" and "N waiting for research", the badge reads "New claims since this brief" and the help text says a new round lists only new or changed claims; `EvidenceReview.tsx` says earlier rounds' claims are kept and not listed.
+- **Exception to OV-6, kept on purpose.** A sound bite reviewed later still changes its scene's plan (`_soundbite_reasons` is unchanged): a clip replaces words, so it cannot be a card.
+- **Checked** (2026-11-27, no model call, no job; a copy of the real database taken with SQLite's backup API from the running container, upgraded to `0102`, with a throwaway files folder, and a copy of `HEAD`'s source; all removed afterwards). (1) **Identity:** for the 7 projects with evidence on, every scene's status, reasons, evidence shots, cards, unplaced cards and source lines are the same at `HEAD` and with this code. Only the new fields and the refusal sentence differ. (2) **New claim on project 94** (16 scenes with a current plan, all claims with evidence shots): after marking words as a claim, every scene stays `planned`, the shot clips and card clips are unchanged, the step reads not done with one claim waiting and a brief can be written; the brief of round 2 holds only that claim. After a stand-in import (round not reviewed) nothing changed either. After a stand-in review (done) the claim is covered, the step is done, `shown_view` holds 16 claims, and only the scene of the claim changed: it has a card `c16.1` (2.72 to 5.72 s), with the card clip `none` (not made yet); the other scenes and every shot clip are identical. (3) **A claim with an evidence shot dropped:** only its scene (`opening_puzzle`) went `out_of_date` ("The evidence that a shot of this scene shows is no longer shown, or has moved."); the 15 others stayed planned. (4) **Pipeline:** `_evaluate_shot_plans` showed 16 scenes done and the one out-of-date scene open. While a claim waited, the other targets stayed done. (5) `ruff check`, `ruff format --check`, `eslint` (the two changed components) and `tsc -b` pass.
+- **Not checked.** (1) No real research, import or review: the import and review rows of (2) are stand-ins I wrote, so the browser flow (review screen, "Review done") was not run and the panels were linted and type-checked, not opened. (2) No sound bite case: no project of the copy mixes a sound bite with a later claim, so `shown_soundbite_clips` through the covering rounds ran only on projects whose sound bites (if any) are in one round. (3) A round written **before** this change that is reviewed again after it becomes the covering round for every claim it holds; if its pieces got new keys, their evidence shots go out of date, as they would have before (not seen on the copy: no such round exists there). (4) A re-plan that gives the planner the claims while another waits was not run (it costs a model call). (5) While a claim waits, a planned scene reports `can_run` false with "Gather the evidence first..." (a manual re-plan of it waits too, as a scene without a plan does). (6) The review screen lists claims of the newest round that have since changed or been removed, and "Review done" asks for a decision on them too. (7) `mypy` is not installed in the backend environment, so it was not run.
 
 ### OVL-007 — Split screen for a graphic and evidence
 
@@ -549,3 +561,4 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 | 2026-11-27 | OVL-003 | Completed: pure `graphic_overlays.py` (placement, keys, reason codes), `SceneEntry.overlays` and `unplaced_overlays`, API fields, board notes on the Graphic briefs step, `trimmed` flag on suggestions cut by a sound bite. |
 | 2026-11-27 | OVL-004 | Completed: briefs and graphics for overlays (`target = 'overlay'` rows, `start_overlay` in both services, `overlays` on both states and APIs, pipeline and staleness targets, panel cards), `clip_frames` and the stricter `too_long` check. |
 | 2026-11-27 | OVL-005 | Completed: optional `graphic_overlays` key in the frozen timeline (version stays 6), overlays laid full screen over the shots by `render_story` (on top of callouts and cards), refusals and warnings (`overlay_without_video`, `overlay_over_evidence`), out-of-date reasons for story and scene renders, overlays kept out of the music and timing sources. |
+| 2026-11-27 | OVL-006 | Completed: evidence per claim (`covered`, `waiting`, `live` on the evidence state; delta rounds that carry only waiting claims; `shown_view` across reviewed rounds), a plan goes out of date for evidence only when its own evidence shot loses what it shows, `shot_plans` no longer waits on the evidence step as a whole, API counts and panel texts. |

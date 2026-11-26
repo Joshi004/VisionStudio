@@ -1932,6 +1932,7 @@ async def _evaluate_shot_plans(
         ready = entry.status == "planned" and entry.generation_ready
         done = ready and not active
         block: str | None = None
+        awaiting: str | None = None
         settling = False
         if not done and not active:
             if entry.status == "planned":
@@ -1951,6 +1952,10 @@ async def _evaluate_shot_plans(
                     # A continuous scene whose take is being made or timed (FLOW-005): the
                     # "Time the words" step is on it, so wait for it instead of reporting.
                     settling = True
+                elif entry.blocked_reason == shot_plans.EVIDENCE_FIRST_MESSAGE:
+                    # The evidence step is not done (OVL-006): this scene needs a new plan and
+                    # waits for the owner's research, as the step itself does. Not a failure.
+                    awaiting = entry.blocked_reason
                 else:
                     block = entry.blocked_reason
         targets.append(
@@ -1960,6 +1965,7 @@ async def _evaluate_shot_plans(
                 done,
                 active=active,
                 block=block,
+                awaiting=awaiting,
                 settling=settling,
                 consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),

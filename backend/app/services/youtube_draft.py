@@ -263,14 +263,20 @@ def _render_keys(target: _Target) -> dict[str, int]:
 
 
 async def _evidence_review_row(session: AsyncSession, project: Project) -> Any:
-    """The newest evidence review of the newest round, or None. Also None when evidence does not
-    apply to the project or the claims changed since the round's brief (then the review no longer
-    describes the video, and no Sources section is written).
+    """The newest evidence review among the rounds that cover the claims (OVL-006), or None.
+    Also None when evidence does not apply to the project or no round covers a claim (then no
+    review describes the video, and no Sources section is written). Reviews count the project's
+    versions, so the highest version is the one changed last.
     """
     current = await evidence_rounds.state(session, project)
-    if not current.wanted or current.round is None or not current.current:
+    if not current.wanted:
         return None
-    return await evidence_review.latest_review(session, current.round.id)
+    rows = [
+        await evidence_review.latest_review(session, round_id)
+        for round_id in sorted({row.id for row in current.covered.values()})
+    ]
+    found = [row for row in rows if row is not None]
+    return max(found, key=lambda row: row.version) if found else None
 
 
 async def _evidence_sources(session: AsyncSession, project: Project) -> list[dict[str, Any]]:
@@ -278,9 +284,9 @@ async def _evidence_sources(session: AsyncSession, project: Project) -> list[dic
     evidence does not apply or nothing is accepted.
     """
     current = await evidence_rounds.state(session, project)
-    if not current.wanted or current.round is None or not current.current:
+    if not current.wanted or not current.covered:
         return []
-    return youtube_sources.entries_from_review(await evidence_review.view(session, project))
+    return youtube_sources.entries_from_review(await evidence_review.shown_view(session, project))
 
 
 def _saved_inputs(

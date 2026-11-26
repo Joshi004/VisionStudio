@@ -34,6 +34,11 @@ reads as undecided again. At most one clip is shown per claim, and then nothing 
 a claim that is not a sound bite is only context and is never shown. `shown_claims` leaves clips
 out: `shown_soundbites` lists them for the cut plan (SB-008).
 
+**Evidence per claim (OVL-006).** The owner reviews the newest round. What reaches the video is
+read per claim by `shown_view`: a claim shows what the newest *reviewed* round that holds it
+unchanged (`EvidenceState.covered`) decided, so a later round that carries only new claims leaves
+the claims of earlier rounds as they were.
+
 No file is ever deleted here (EVD-006: stored files are shared between items and imports).
 """
 
@@ -47,7 +52,7 @@ from typing import Any, Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import EvidenceItem, EvidenceReview, Project
+from app.db.models import EvidenceItem, EvidenceReview, EvidenceRound, Project
 from app.jobs import store
 from app.services import (
     evidence_claims,
@@ -481,11 +486,12 @@ def _brief_claims(brief: Any) -> list[dict[str, Any]]:
 async def _write_refusal(
     session: AsyncSession, project: Project, current: evidence_rounds.EvidenceState
 ) -> EvidenceReviewError | None:
-    """Why the owner's decisions cannot be changed now, or None: the claims changed since the
-    round's brief (a new round is needed), or an import is going on (a conflict). The caller has
-    already checked that evidence applies and that the round exists.
+    """Why the owner's decisions cannot be changed now, or None: none of the claims that count is
+    held, as it is now, by the newest round (a new round is needed), or an import is going on (a
+    conflict). The caller has already checked that evidence applies and that the round exists.
+    Claims of the round that changed since are still listed, but they are not shown (OVL-006).
     """
-    if current.round is not None and not current.current:
+    if current.round is not None and not current.live:
         return EvidenceReviewError(
             f"The claims changed since round r{current.round.round_no}. Write a new round."
         )
@@ -541,6 +547,17 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded | EvidenceRe
         return EvidenceReviewError(
             evidence_import.import_refusal(current) or evidence_import.NO_ROUND_MESSAGE
         )
+    return await _load_round(session, project, current, row)
+
+
+async def _load_round(
+    session: AsyncSession,
+    project: Project,
+    current: evidence_rounds.EvidenceState,
+    row: EvidenceRound,
+) -> _Loaded | EvidenceReviewError:
+    """One round as it stands: the newest (what the owner reviews, and may change) or an earlier
+    one (only read, for the claims it covers, OVL-006)."""
     record = await evidence_import.latest_import(session, row.id)
     if record is None:
         return EvidenceReviewError(NO_IMPORT_MESSAGE)
@@ -580,7 +597,8 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded | EvidenceRe
         )
         for entry in entries
     ]
-    refusal = await _write_refusal(session, project, current)
+    is_newest = current.round is not None and current.round.id == row.id
+    refusal = await _write_refusal(session, project, current) if is_newest else None
     inputs = latest.inputs if latest is not None else None
     view = ReviewView(
         round_id=f"r{row.round_no}",
@@ -650,16 +668,54 @@ class ShownClaim:
     pieces: tuple[ShownPiece, ...]
 
 
-async def shown_claims(session: AsyncSession, project: Project) -> list[ShownClaim]:
-    """The claims whose evidence is shown on video, in story order (EVD-009). Empty unless the
-    newest round has exactly the claims that count now, so a claim whose words moved or changed
-    never gets a shot. The positions are those `evidence_claims.state()` gives (never the brief's,
-    which has none); a claim that is not placed in the story is left out.
+async def shown_view(session: AsyncSession, project: Project) -> ReviewView:
+    """The claims whose evidence counts now (OVL-006): each claim that a reviewed round covers
+    (`EvidenceState.covered`), with its pieces and the owner's decision as that round's review
+    holds them, in story order. A claim with no covering round (new, changed, or its round not
+    reviewed) is not in it, so a claim whose words moved or changed never gets a shot. Only
+    `claims` means anything: the other fields are those of no one round.
     """
     current = await evidence_rounds.state(session, project)
-    if not current.wanted or current.round is None or not current.current:
+    claims: list[ReviewClaim] = []
+    if current.wanted and current.covered:
+        loaded_rounds: dict[int, _Loaded | EvidenceReviewError] = {}
+        for claim in current.claims:
+            round_row = current.covered.get(claim["id"])
+            if round_row is None:
+                continue
+            if round_row.id not in loaded_rounds:
+                loaded_rounds[round_row.id] = await _load_round(
+                    session, project, current, round_row
+                )
+            loaded = loaded_rounds[round_row.id]
+            if isinstance(loaded, EvidenceReviewError):
+                continue
+            claims.extend(
+                review_claim
+                for review_claim in loaded.view.claims
+                if review_claim.entry["id"] == claim["id"]
+            )
+    return ReviewView(
+        round_id=None,
+        import_id=None,
+        import_version=None,
+        version=None,
+        done=True,
+        blocked_reason=None,
+        claims=claims,
+    )
+
+
+async def shown_claims(session: AsyncSession, project: Project) -> list[ShownClaim]:
+    """The claims whose evidence is shown on video, in story order (EVD-009). A claim is shown
+    from the reviewed round that covers it (`shown_view`), so a claim added later leaves the
+    others as they were (OVL-006). The positions are those `evidence_claims.state()` gives (never
+    the brief's, which has none); a claim that is not placed in the story is left out.
+    """
+    current = await evidence_rounds.state(session, project)
+    if not current.wanted:
         return []
-    review = await view(session, project)
+    review = await shown_view(session, project)
     placed = {claim["id"]: claim for claim in current.claims}
     found: list[ShownClaim] = []
     for claim in review.claims:
@@ -720,14 +776,14 @@ class SoundbiteClip:
 
 async def shown_soundbite_clips(session: AsyncSession, project: Project) -> list[SoundbiteClip]:
     """The sound bite clips shown on video, in story order, with their rows and the owner's
-    details (SB-008, SB-009). The same gate as `shown_claims`: empty unless the newest round has
-    exactly the claims that count now. A claim is listed when it is a sound bite whose one shown
-    piece is a usable `video` item with the owner's details.
+    details (SB-008, SB-009). The same source as `shown_claims`: the claims a reviewed round
+    covers. A claim is listed when it is a sound bite whose one shown piece is a usable `video`
+    item with the owner's details.
     """
     current = await evidence_rounds.state(session, project)
-    if not current.wanted or current.round is None or not current.current:
+    if not current.wanted:
         return []
-    review = await view(session, project)
+    review = await shown_view(session, project)
     placed = {claim["id"]: claim for claim in current.claims}
     found: list[SoundbiteClip] = []
     for claim in review.claims:
@@ -757,10 +813,10 @@ async def shown_soundbite_clips(session: AsyncSession, project: Project) -> list
 
 
 async def shown_soundbites(session: AsyncSession, project: Project) -> list[ShownSoundbite]:
-    """The sound bite clips shown on video, in story order (SB-008). The same gate as
-    `shown_claims`: empty unless the newest round has exactly the claims that count now. A claim
-    is listed when it is a sound bite whose one shown piece is a usable `video` item with the
-    owner's details. A change of the cut changes only `seconds`.
+    """The sound bite clips shown on video, in story order (SB-008). The same source as
+    `shown_claims`: the claims a reviewed round covers. A claim is listed when it is a sound bite
+    whose one shown piece is a usable `video` item with the owner's details. A change of the cut
+    changes only `seconds`.
     """
     return [
         ShownSoundbite(
