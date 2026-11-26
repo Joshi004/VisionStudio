@@ -248,6 +248,30 @@ def _timeline_out(timeline: scene_timeline.SceneTimeline) -> SceneTimelineOut:
     )
 
 
+class GraphicOverlayOut(BaseModel):
+    """Words the owner suggested a graphic for, placed over the shots under them (OVL-003). The
+    key is `{scene_id}/{first_word}-{last_word}`, the words counted from 1 in the scene's take."""
+
+    key: str
+    suggestion_id: str
+    text: str
+    first_word: int
+    last_word: int
+    start_seconds: float
+    end_seconds: float
+    # The shots the overlay is laid over, in order.
+    shot_ids: list[str]
+
+
+class UnplacedOverlayOut(BaseModel):
+    """A suggestion (or the part of one) that got no graphic, and why."""
+
+    suggestion_id: str
+    text: str
+    code: str
+    message: str
+
+
 class ShotPlanEntryOut(BaseModel):
     """One scene of the newest list of scenes."""
 
@@ -279,6 +303,10 @@ class ShotPlanEntryOut(BaseModel):
     # True when the newest plan was written by the user: planning it again by model has to be
     # confirmed (PHASE-038).
     needs_confirmation: bool
+    # The graphic overlays of the scene and the suggestions that got none (OVL-003). Empty unless
+    # the plan is current and the scene has suggestions.
+    overlays: list[GraphicOverlayOut]
+    unplaced_overlays: list[UnplacedOverlayOut]
 
 
 class ShotPlansOut(BaseModel):
@@ -388,6 +416,28 @@ def _entry_out(entry: SceneEntry) -> ShotPlanEntryOut:
         generation_ready=entry.generation_ready,
         generation_blocked_reason=entry.generation_blocked_reason,
         needs_confirmation=entry.needs_confirmation,
+        overlays=[
+            GraphicOverlayOut(
+                key=overlay.key,
+                suggestion_id=overlay.suggestion_id,
+                text=overlay.text,
+                first_word=overlay.first_word,
+                last_word=overlay.last_word,
+                start_seconds=overlay.start_s,
+                end_seconds=overlay.end_s,
+                shot_ids=list(overlay.shot_ids),
+            )
+            for overlay in entry.overlays
+        ],
+        unplaced_overlays=[
+            UnplacedOverlayOut(
+                suggestion_id=missing.suggestion_id,
+                text=missing.text,
+                code=missing.code,
+                message=missing.message,
+            )
+            for missing in entry.unplaced_overlays
+        ],
     )
 
 

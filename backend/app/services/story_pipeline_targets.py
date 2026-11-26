@@ -1977,6 +1977,17 @@ async def _start_shot_plans(
 # --- Graphic briefs -------------------------------------------------------------------------
 
 
+def _overlay_notes(plans: shot_plans.ShotPlansState) -> list[str]:
+    """One note for each suggestion that got no graphic (OVL-003): "Scene 2: 'the words' gets no
+    graphic: <reason>". Not a failure of a step, so it is a note. Pure.
+    """
+    return [
+        f"{_scene_label(entry.item)}: '{missing.text}' gets no graphic: {missing.message}"
+        for entry in plans.entries
+        for missing in entry.unplaced_overlays
+    ]
+
+
 async def _evaluate_graphic_briefs(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
@@ -2005,7 +2016,7 @@ async def _evaluate_graphic_briefs(
                     group=scene_id,
                 )
             )
-    return StepView(targets)
+    return StepView(targets, warnings=_overlay_notes(await shot_plans.state(session, project)))
 
 
 async def _start_graphic_briefs(

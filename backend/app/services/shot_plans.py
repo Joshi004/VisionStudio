@@ -54,6 +54,7 @@ from app.services import (
     evidence_review,
     evidence_rounds,
     evidence_source_lines,
+    graphic_overlays,
     graphic_suggestions,
     h3_lengths,
     provenance,
@@ -162,6 +163,12 @@ class SceneEntry:
     # The evidence shots of this scene drawn split with a callout (EVD-016): the callout ids that
     # land in each shot, by shot id.
     splits: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The graphic overlays of this scene (OVL-003): the words the owner suggested a graphic for,
+    # placed on the scene's timeline over the shots under them, and the suggestions that got none.
+    # Worked out on read from the suggestions, the take and the timeline; empty unless the plan is
+    # current and the scene has suggestions.
+    overlays: tuple[graphic_overlays.Overlay, ...] = ()
+    unplaced_overlays: tuple[graphic_overlays.Unplaced, ...] = ()
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -1209,6 +1216,94 @@ def _evidence_overlays(
     return placement.cards, placement.unplaced, lines
 
 
+def _graphic_overlays(
+    loaded: _Loaded,
+    item: dict[str, Any],
+    row: ShotPlan | None,
+    timeline: scene_timeline.SceneTimeline | None,
+    clock: take_timings.TakeClock | None,
+) -> tuple[tuple[graphic_overlays.Overlay, ...], tuple[graphic_overlays.Unplaced, ...]]:
+    """The graphic overlays of a scene with a current cut plan, and the suggestions that got none
+    (OVL-003). Each run of words of a suggestion that no sound bite replaces is placed on the
+    scene's timeline by `graphic_overlays.place_overlays`, from the cut times of its words, the
+    way the shots are. Nothing for any other scene, and nothing without suggestions.
+    """
+    if not loaded.suggestions or row is None or timeline is None or clock is None:
+        return (), ()
+    words = clock.words
+    take_map = timeline.take_map
+    if not words or take_map is None or not cut_planning_writer.is_cut_plan(row.content):
+        return (), ()
+    bites = _soundbite_words(loaded, item, words)
+    found = graphic_suggestions.scene_suggestions(
+        loaded.story, item, words, loaded.suggestions, bites
+    )
+    scene_id = str(item["id"])
+    wanted: list[graphic_overlays.Wanted] = []
+    unplaced: list[graphic_overlays.Unplaced] = []
+    for suggestion in found:
+        suggestion_id, text = str(suggestion["id"]), str(suggestion["text"])
+        if suggestion.get("reason"):
+            unplaced.append(
+                graphic_overlays.Unplaced(
+                    scene_id, suggestion_id, text, None, graphic_overlays.SOUNDBITE
+                )
+            )
+            continue
+        positions = [position for position in suggestion["words"] if 0 <= position < len(words)]
+        for first, last in graphic_overlays.runs(positions, bites):
+            run = (first + 1, last + 1)
+            run_text = " ".join(str(words[position]["text"]) for position in range(first, last + 1))
+            if first == last and suggestion.get("trimmed"):
+                unplaced.append(
+                    graphic_overlays.Unplaced(
+                        scene_id,
+                        suggestion_id,
+                        run_text,
+                        f"{scene_id}/{run[0]}-{run[1]}",
+                        graphic_overlays.ONE_WORD,
+                    )
+                )
+                continue
+            try:
+                # The first shot owns the lead-in; the last one runs on to the end of the scene.
+                start_s = (
+                    0.0
+                    if first == 0
+                    else take_map.to_scene(cut_planning_writer.cut_time(words, first + 1))
+                )
+                end_s = (
+                    timeline.total_s
+                    if last == len(words) - 1
+                    else take_map.to_scene(cut_planning_writer.cut_time(words, last + 2))
+                )
+            except (TakeMapError, KeyError, TypeError, ValueError):
+                continue  # a cut time is in a sound bite's clip or a word has no time
+            wanted.append(
+                graphic_overlays.Wanted(
+                    scene_id=scene_id,
+                    suggestion_id=suggestion_id,
+                    text=run_text,
+                    first_word=run[0],
+                    last_word=run[1],
+                    start_s=start_s,
+                    end_s=end_s,
+                )
+            )
+    types = {str(shot["id"]): str(shot.get("type")) for shot in row.content["shots"]}
+    slots = [
+        evidence_cards.Slot(
+            shot_id=span.shot_id,
+            type=types.get(span.shot_id, ""),
+            start_s=span.start_s,
+            end_s=span.end_s,
+        )
+        for span in timeline.shots
+    ]
+    placement = graphic_overlays.place_overlays(wanted, slots, timeline.total_s)
+    return placement.overlays, tuple(unplaced) + placement.unplaced
+
+
 def _split_shots(
     loaded: _Loaded,
     item: dict[str, Any],
@@ -1641,6 +1736,11 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             if status == "planned"
             else {}
         )
+        overlays, unplaced_overlays = (
+            _graphic_overlays(loaded, item, row, timeline, loaded.clocks.get(item["id"]))
+            if status == "planned"
+            else ((), ())
+        )
         entries.append(
             SceneEntry(
                 item=item,
@@ -1659,6 +1759,8 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                 unplaced_cards=unplaced_cards,
                 source_lines=source_lines,
                 splits=splits,
+                overlays=overlays,
+                unplaced_overlays=unplaced_overlays,
             )
         )
     policy = loaded.policy

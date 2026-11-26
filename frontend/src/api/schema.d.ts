@@ -9891,6 +9891,29 @@ export interface components {
             /** Said As */
             said_as: string;
         };
+        /**
+         * GraphicOverlayOut
+         * @description Words the owner suggested a graphic for, placed over the shots under them (OVL-003). The
+         *     key is `{scene_id}/{first_word}-{last_word}`, the words counted from 1 in the scene's take.
+         */
+        GraphicOverlayOut: {
+            /** Key */
+            key: string;
+            /** Suggestion Id */
+            suggestion_id: string;
+            /** Text */
+            text: string;
+            /** First Word */
+            first_word: number;
+            /** Last Word */
+            last_word: number;
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Shot Ids */
+            shot_ids: string[];
+        };
         /** GraphicRenderOut */
         GraphicRenderOut: {
             /** Id */
@@ -16832,6 +16855,10 @@ export interface components {
             generation_blocked_reason: string | null;
             /** Needs Confirmation */
             needs_confirmation: boolean;
+            /** Overlays */
+            overlays: components["schemas"]["GraphicOverlayOut"][];
+            /** Unplaced Overlays */
+            unplaced_overlays: components["schemas"]["UnplacedOverlayOut"][];
         };
         /**
          * ShotPlanRunIn
@@ -19444,6 +19471,20 @@ export interface components {
             start_s: number;
             /** End S */
             end_s: number;
+        };
+        /**
+         * UnplacedOverlayOut
+         * @description A suggestion (or the part of one) that got no graphic, and why.
+         */
+        UnplacedOverlayOut: {
+            /** Suggestion Id */
+            suggestion_id: string;
+            /** Text */
+            text: string;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
         };
         /**
          * UploadProgressOut

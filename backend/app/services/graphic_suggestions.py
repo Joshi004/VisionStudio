@@ -199,7 +199,8 @@ def scene_suggestions(
     They are placed with the scene's position in the story, so they are left out when `story` is
     no longer the one the scene was found in. A sound bite wins over a suggestion (SB-008):
     `soundbite_words` (the positions in the take that a sound bite replaces) are taken out of
-    each suggestion. One left with no words stays in the list, with a `reason` that code wrote.
+    each suggestion; one that lost some words has `trimmed: True`. One left with no words stays in
+    the list, with a `reason` that code wrote.
     """
     if not entries or story is None:
         return []
@@ -215,7 +216,9 @@ def scene_suggestions(
         if len(kept) == len(suggestion["words"]):
             result.append(suggestion)
         elif kept:
-            result.append({**suggestion, "words": kept})
+            # `trimmed` tells a suggestion cut down by a sound bite from one the owner marked
+            # short: placing a one-word leftover is pointless (OVL-003).
+            result.append({**suggestion, "words": kept, "trimmed": True})
         else:
             result.append({**suggestion, "words": [], "reason": SOUNDBITE_REASON})
     return result

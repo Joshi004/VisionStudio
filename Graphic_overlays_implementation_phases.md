@@ -170,7 +170,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 |----|-------|------|-------------------|--------|
 | OVL-001 | Storage for overlay graphics | Code | — | Completed |
 | OVL-002 | Suggestions leave the shot planner | Code | — | Completed |
-| OVL-003 | Placing the overlays | Code | — | Not Started |
+| OVL-003 | Placing the overlays | Code | — | Completed |
 | OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Not Started |
 | OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Not Started |
 | OVL-006 | Evidence added later becomes a card | Code | — | Not Started |
@@ -184,7 +184,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - **Planner:** OVL-002 (done). It had to be done before OVL-005 is used on a real project.
 - **Evidence:** OVL-006, now.
 
-**Progress snapshot:** 2 completed (OVL-001, OVL-002).
+**Progress snapshot:** 3 completed (OVL-001, OVL-002, OVL-003).
 
 ---
 
@@ -279,7 +279,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 ### OVL-003 — Placing the overlays
 
-**Status:** Not Started
+**Status:** Completed (2026-11-27; the owner still has to rebuild the real app so the new code runs there)
 
 **Objective.** Code places every overlay on its scene's timeline (§4.2) and gives its key (§4.3).
 
@@ -303,13 +303,24 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - Standard checks.
 
 **Completion checklist.**
-- [ ] `graphic_overlays.py`
-- [ ] `SceneEntry` fields and API
-- [ ] Board notes
-- [ ] Sample cases and project 94 placement
-- [ ] Standard checks
+- [x] `graphic_overlays.py`
+- [x] `SceneEntry` fields and API
+- [x] Board notes
+- [x] Sample cases and project 94 placement
+- [x] Standard checks
+- [ ] Owner: real app rebuilt so the new code runs there
 
-**Completion notes.**
+**Completion notes.** Done 2026-11-27. No migration, no change to `DATABASE_STRUCTURE.md` (nothing is stored), no new job or setting.
+
+- **`services/graphic_overlays.py`** (pure; imports only `evidence_cards` and `graphic_suggestions`). Constants `MIN_S` (3.0), `MAX_FRAMES` (720), `FPS` (24), `MAX_LEAD_S` (1.0), `GAP_S` (`evidence_cards.GAP_S`), copied with a comment naming their source so the module does not import `shot_graphics`. Values: `Wanted` (a run to place, with its natural start and end), `Overlay` (`scene_id`, `suggestion_id`, `text`, `first_word`, `last_word`, `start_s`, `end_s`, `shot_ids`; `overlay_id` = `"{first}-{last}"`, `key` = `"{scene_id}/{first}-{last}"`, `length_s`), `Unplaced` (`scene_id`, `suggestion_id`, `text`, `key` or None, `code`, `message`) and `Placement`. `runs(words, soundbite_words)` splits a suggestion's kept take positions (from 0) only where a sound bite word lies between neighbours; a position missing from the list is bridged. `place_overlays(wanted, slots, total_s)` takes the `evidence_cards.Slot` list of the scene's shots.
+- **Reason codes** (`UNPLACED_TEXT`): `no_room`, `too_long` (more than 720 frames, measured on the natural length before lengthening), `soundbite` (every word is a sound bite; the text is `graphic_suggestions.SOUNDBITE_REASON`) and `one_word`.
+- **Planning decided.** A run of one word is dropped (`one_word`) only when a sound bite cut the suggestion down; a suggestion the owner marked as one word is kept and lengthened. To tell them apart `graphic_suggestions.scene_suggestions` now sets `"trimmed": True` on a suggestion that lost some words (and kept some) to a sound bite. An overlay that starts on the take's first word starts at 0.0 (the first shot owns the lead-in), and one that ends on the take's last word ends at `timeline.total_s`; every other edge is `take_map.to_scene(cut_planning_writer.cut_time(...))`, the same as the shots. A run whose cut time is inside a sound bite's clip, or a word without a time, is skipped.
+- **Placement rules as built.** Start moves to the end of a sound bite shot it starts in; end is cut where the next sound bite shot starts. A short run is lengthened up to the next run's natural start less 0.15 s, the next sound bite start less 0.15 s, or the end of the scene; then its start is pulled back by up to 1.0 s, never before the previous overlay's end plus 0.15 s or a sound bite shot's end. Under 3.0 s after that: `no_room`. `shot_ids` are the overlapped shots that are not sound bite shots.
+- **`shot_plans.py`**: `SceneEntry.overlays` and `unplaced_overlays`, filled by `_graphic_overlays` beside the cards for a scene whose status is `planned`. Nothing for a project without suggestions, or a scene without a cut plan, take map or timed words.
+- **API**: `ShotPlanEntryOut.overlays` (`GraphicOverlayOut`: `key`, `suggestion_id`, `text`, `first_word`, `last_word`, `start_seconds`, `end_seconds`, `shot_ids`) and `unplaced_overlays` (`UnplacedOverlayOut`: `suggestion_id`, `text`, `code`, `message`). `schema.d.ts` regenerated from the app's own OpenAPI on a throwaway `DATA_DIR` (41 lines added, nothing else). No UI uses them yet (OVL-004).
+- **Board**: `story_pipeline_targets._overlay_notes` gives "`{scene}: '{text}' gets no graphic: {reason}`" for each unplaced overlay, as the warnings of the **Graphic briefs** step.
+- **Checked** (2026-11-27, no model call, no job). (1) Sample cases on `place_overlays` and `runs`: a short run lengthened (4.0 to 7.0 s); no room at the end of the scene; 31 s refused as `too_long` and exactly 30 s placed; across a cut (both shots listed); across two scenes (one overlay in each, keyed by scene); cut at a sound bite shot's start; starting inside one (moved to its end); short next to a sound bite (`no_room`); two close together, both placed with at least 0.15 s between them, and the tight case where the first is `no_room`. (2) A copy of the real database (SQLite's backup API from the running container, read only, upgraded to `0102`, removed afterwards), `shot_plans.state` for all 18 graphics projects: no error, no overlay for a project without suggestions (the projects with suggestions placed 2, 5, 2 and 6 overlays in the scenes that have a current plan, none unplaced). Project 94, scene `opening_puzzle`: `g1` from 4.625 to 11.75 s over `shot_2` and `shot_3` (its words run 4.72 to 11.68 s in the take) and `g2` from 13.042 to 21.792 s over `shot_4` (words 13.04 to 21.68 s); the lead-in is 0.0 s there. (3) `ruff check`, `ruff format --check`, `eslint` and `tsc -b` pass.
+- **Not checked.** (1) No real project has a sound bite and a suggestion together, so the cut-by-sound-bite path ran only in the sample cases, not through `shot_plans`. (2) No real case of `no_room`, `too_long` or `one_word` came up on the copy. (3) The board note text was not seen on the board, only built. (4) Nothing draws or stores an overlay yet, so there is no visible change until OVL-004 and OVL-005.
 
 ### OVL-004 — Briefs and graphics for overlays
 
@@ -513,3 +524,4 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 | 2026-11-26 | — | Document written. |
 | 2026-11-26 | OVL-001 | Completed: migration `0102` (`target` column on the three graphics tables), models, readers limited to shot rows, `DATABASE_STRUCTURE.md`. |
 | 2026-11-27 | OVL-002 | Completed: suggestions removed from the planner's request, answer, stored content and out-of-date check; `scene_suggestions` moved to `graphic_suggestions.py`; API field removed; panels and texts updated. |
+| 2026-11-27 | OVL-003 | Completed: pure `graphic_overlays.py` (placement, keys, reason codes), `SceneEntry.overlays` and `unplaced_overlays`, API fields, board notes on the Graphic briefs step, `trimmed` flag on suggestions cut by a sound bite. |
