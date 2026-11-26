@@ -202,6 +202,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [outfitId, setOutfitId] = useState<number | null>(initial.outfitId);
   const [graphics, setGraphics] = useState(initial.graphics);
   const [evidence, setEvidence] = useState(initial.evidence);
+  const [soundEffects, setSoundEffects] = useState(initial.soundEffects);
   const [name, setName] = useState("");
 
   // A saved outfit is only kept while it is still one of the presenter's saved outfits.
@@ -232,6 +233,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
     setOutfitId(settings.outfitId);
     setGraphics(settings.graphics);
     setEvidence(settings.evidence);
+    setSoundEffects(settings.soundEffects);
   }
 
   function resetToDefaults() {
@@ -281,6 +283,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         graphics: explainer && voiceTrack === "continuous" ? graphics : undefined,
         // Only a continuous explainer can have evidence; any other project leaves it out.
         evidence: explainer && voiceTrack === "continuous" ? evidence : undefined,
+        // Only a continuous explainer can have sound effects; any other project leaves it out.
+        sound_effects: explainer && voiceTrack === "continuous" ? soundEffects : undefined,
       },
       {
         onSuccess: (project) => {
@@ -298,6 +302,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
             delivery,
             graphics,
             evidence,
+            soundEffects,
             captionMode,
             callouts,
             calloutStyle,
@@ -520,6 +525,14 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
                 description="Proof on screen for the claims that can be checked: a price, a figure from a report, something a person said. You mark the claims, research them with Cursor or Claude, and review every piece of evidence. You can change it later in the project settings."
                 checked={evidence}
                 onChange={(event) => setEvidence(event.currentTarget.checked)}
+              />
+            )}
+            {voiceTrack === "continuous" && (
+              <Switch
+                label="Sound effects"
+                description="A soft sound at every graphic and every piece of evidence, made once for the project: you listen to the takes and choose. It only plays in projects with graphics or evidence. You can change it later in the project settings."
+                checked={soundEffects}
+                onChange={(event) => setSoundEffects(event.currentTarget.checked)}
               />
             )}
             <Stack gap="xs">

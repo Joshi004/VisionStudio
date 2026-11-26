@@ -136,6 +136,13 @@ STEPS: Final[tuple[Step, ...]] = (
     # MUSIC-007: a recording of each theme, and its emotional versions. Also skipped as complete
     # when music is switched off.
     Step("music_themes", "Record the themes", ("music_bible",)),
+    # EXM-006: the two sounds a continuous explainer plays at its graphic and evidence moments,
+    # each made from a prompt the model writes from the Story Bible's tone and the Music Bible's
+    # palette. The Music Bible step is complete when music is off, so the sounds do not need
+    # music. Skipped as complete when the project's switch is off, and for a project that is not
+    # a continuous explainer or has neither graphics nor evidence. Nothing after it waits for it:
+    # the render plays the sounds when it has them (EXM-007).
+    Step("sound_effects", "Make the sound effects", ("story_bible", "music_bible")),
     Step("resolution", "Resolve looks and states", ("scene_definitions",)),
     Step(
         "scene_staging",
@@ -345,6 +352,7 @@ SCENE_RUN_SKIPS: Final[frozenset[str]] = frozenset(
         "music_cues",
         "music_generation",
         "music_placement",
+        "sound_effects",
         "render",
     }
 )

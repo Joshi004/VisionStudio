@@ -3,7 +3,9 @@
 
 Deleting the project row removes every story artifact and job of the project (ON DELETE
 CASCADE), and its media folder `media/<project_id>/` holds the files they made (and
-`evidence/<project_id>/` the research rounds of the evidence layer, EVD-003). The library
+`evidence/<project_id>/` the research rounds of the evidence layer, EVD-003). The project's
+sound effects (EXM-006) are Music lab runs: their rows and files are removed after the project
+row, unless something else (an edit of one, a trial case) uses a run. The library
 characters and environments the project used are separate: they are offered for deletion too,
 all ticked by default, and the user can untick any of them. An item that another project uses
 as well is deleted just the same when it is ticked, and that other project is flagged
@@ -34,10 +36,11 @@ from app.db.models import (
     ProjectCharacterLink,
     ProjectEnvironmentLink,
     ShotTake,
+    SoundEffectTake,
     StoryRender,
 )
 from app.jobs import store
-from app.services import evidence_rounds, library_deletion, server_cleanup
+from app.services import evidence_rounds, lab_deletion, library_deletion, server_cleanup
 from app.services.library_deletion import Kind
 from app.services.server_cleanup import PurgePlan
 from app.services.storage import Storage, StorageError
@@ -285,6 +288,15 @@ async def delete_project(
     )
     voice_run_ids = set(voice_runs.scalars())
 
+    # The sounds made for the project (EXM-006) are Music lab runs that stay in the lab's table
+    # after the project is gone (their takes go with the row), so they are found now.
+    sound_runs = await session.execute(
+        select(SoundEffectTake.lab_run_id).where(
+            SoundEffectTake.project_id == project_id, SoundEffectTake.lab_run_id.is_not(None)
+        )
+    )
+    sound_run_ids = set(sound_runs.scalars())
+
     plan: PurgePlan | None = None
     if purge_server:
         job_ids = await _server_job_ids(session, project_id, voice_run_ids)
@@ -307,6 +319,7 @@ async def delete_project(
             _logger.warning("could not delete %s %d with the project", kind, library_id)
 
     await library_deletion.remove_voice_runs(session, storage, voice_run_ids)
+    await lab_deletion.remove_music_runs(session, storage, sound_run_ids)
     try:
         await storage.delete_project_dir(project_id)
     except (StorageError, OSError):

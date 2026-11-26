@@ -44,6 +44,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_music_cue: "Music cue detail",
   audit_music_cues: "Music prompt audit",
   rewrite_music_prompt: "Music prompt rewrite",
+  write_sound_effect: "Sound effect prompt",
   place_music: "Music placement",
   preview_music_mix: "Music preview",
   time_speech_words: "Time speech words",

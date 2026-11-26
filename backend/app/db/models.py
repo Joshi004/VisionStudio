@@ -118,6 +118,11 @@ class Project(Base):
     # continuous explainer can have it on. Can be changed at any time: switching it off deletes
     # nothing, the evidence is only ignored.
     evidence: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # EXM-006 (XM-8). Whether a continuous explainer has its two sound effects, one for graphic
+    # shots and one for evidence. On by default for a continuous explainer on the create form,
+    # off for every project that existed. Only a continuous explainer can have it on. Independent
+    # of `music_enabled`. Can be changed at any time: switching it off deletes nothing.
+    sound_effects: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # SCN-002. The scene the owner pushed to the front of the GPU server's queue (its id in the
     # scene discovery). Its clips are sent with the most urgent priority. NULL: none is pushed.
     pushed_scene_id: Mapped[str | None] = mapped_column(default=None)
@@ -191,7 +196,8 @@ class Job(Base):
         # revision 0086, and the writing of the callout look, since revision 0089, and the two
         # callout component jobs, since revision 0090, and the two YouTube jobs, since revision
         # 0096, and the four evidence jobs, since revision 0098, and the transcription of a
-        # sound bite clip, since revision 0100.
+        # sound bite clip, since revision 0100, and the writing of a sound effect's prompt, since
+        # revision 0104.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -220,7 +226,7 @@ class Job(Base):
             "'splice_voice_recording', 'write_chat_reply', "
             "'write_youtube_draft', 'publish_youtube', "
             "'suggest_evidence_claims', 'write_evidence_brief', 'import_evidence', "
-            "'render_evidence_clip', 'transcribe_evidence_clip')",
+            "'render_evidence_clip', 'transcribe_evidence_clip', 'write_sound_effect')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -519,6 +525,59 @@ class MusicTake(Base):
     requested_s: Mapped[float]
     cue_snapshot: Mapped[Any] = mapped_column(JSON)
     # `{of_take_id, note, job_id, rejected_at, claim}` for a take made after a rejection.
+    feedback: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    check_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    selected_at: Mapped[datetime | None] = mapped_column(default=None)
+    selected_by: Mapped[str | None] = mapped_column(default=None)
+    rejected_at: Mapped[datetime | None] = mapped_column(default=None)
+    reject_note: Mapped[str | None] = mapped_column(default=None)
+    locked_at: Mapped[datetime | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SoundEffectTake(Base):
+    """One take of one of a continuous explainer's two sound effects (EXM-006, XM-9, XM-11,
+    revision 0104).
+
+    `role` is `graphic` or `evidence`. The audio is the Music lab run `lab_run_id`, as for a
+    music take. `fields` are the prompt fields as sent, `check_result` the technical check with
+    the measured facts. `round` is 1 for the first takes, and one more for the takes made after
+    a rejection with a note (`feedback`) or after a fresh start. `retry_of_id` is the failed take
+    a retry replaces. `prompt_job_id` is the `write_sound_effect` job that wrote the prompt. The
+    selected take of a role is its take that is not rejected and has the newest `selected_at`;
+    `locked_at` can only be set on a selected take. Nothing else about a stored take changes.
+    """
+
+    __tablename__ = "sound_effect_take"
+    __table_args__ = (
+        CheckConstraint("role IN ('graphic', 'evidence')", name="role_valid"),
+        CheckConstraint(
+            "selected_by IS NULL OR selected_by IN ('auto', 'owner')", name="selected_by_valid"
+        ),
+        CheckConstraint(
+            "locked_at IS NULL OR selected_at IS NOT NULL", name="lock_needs_selection"
+        ),
+        Index("idx_sound_effect_take_role", "project_id", "role"),
+        Index("idx_sound_effect_take_run", "lab_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    role: Mapped[str]
+    round: Mapped[int]
+    retry_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sound_effect_take.id", ondelete="SET NULL"), default=None
+    )
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_music_run.id", ondelete="SET NULL"), default=None
+    )
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    seed: Mapped[int]
+    fields: Mapped[Any] = mapped_column(JSON)
+    requested_s: Mapped[float]
+    # `{of_take_id, note, job_id, claim}` for a take made after a rejection.
     feedback: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     check_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     selected_at: Mapped[datetime | None] = mapped_column(default=None)

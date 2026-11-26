@@ -233,6 +233,10 @@ SAVING_MUSIC_CUES: Final = "saving the music cues"
 # `rewrite_music_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_MUSIC_TAKE: Final = "saving the new prompt and starting its recording"
 
+# --- Running: a project's sound effects (EXM-006) ----------------------------------------
+# `write_sound_effect` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_SOUND_EFFECT: Final = "saving the sound effect prompt and starting its recordings"
+
 # --- Running: music placement (MUSIC-011) ------------------------------------------------
 # `place_music` also uses `asking_model` from above (once, only when code needs the model to choose
 # among real points).

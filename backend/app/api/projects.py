@@ -75,6 +75,9 @@ class ProjectCreate(BaseModel):
     # The evidence layer (EVD-001). Left out, a continuous explainer gets it on and every other
     # project off. Asking for it on any other project is refused.
     evidence: StrictBool | None = None
+    # The project's sound effects (EXM-006). Left out, a continuous explainer gets them on and
+    # every other project off. Asking for them on any other project is refused.
+    sound_effects: StrictBool | None = None
     # How an explainer's presenter is placed and moves on camera. Only for an explainer.
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Only for an explainer.
@@ -118,6 +121,9 @@ class ProjectUpdate(BaseModel):
     # Whether a continuous explainer has the evidence layer (EVD-001). Can be changed at any time;
     # switching it off deletes nothing.
     evidence: StrictBool | None = None
+    # Whether a continuous explainer has its two sound effects (EXM-006). Can be changed at any
+    # time; switching it off deletes nothing.
+    sound_effects: StrictBool | None = None
     # How an explainer's presenter is placed and moves on camera. Null or blank clears it.
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Null or blank clears it.
@@ -220,6 +226,9 @@ class ProjectDetail(BaseModel):
     graphics: bool
     # Whether a continuous explainer has the evidence layer (EVD-001). Off for every other project.
     evidence: bool
+    # Whether a continuous explainer has its two sound effects (EXM-006). Off for every other
+    # project.
+    sound_effects: bool
     # The words of the story the owner suggests a graphic for, in story order. Empty when none.
     graphic_suggestions: list[GraphicSuggestionOut]
     story_length: StoryLengthOut
@@ -308,6 +317,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         presenter_named_look_deleted=picked is not None and picked.deleted_at is not None,
         graphics=project.graphics,
         evidence=project.evidence,
+        sound_effects=project.sound_effects,
         graphic_suggestions=_graphic_suggestions(project),
         story_length=StoryLengthOut(
             word_count=length.word_count,
@@ -380,6 +390,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             callout_style=body.callout_style,
             take_source=body.take_source,
             evidence=body.evidence,
+            sound_effects=body.sound_effects,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

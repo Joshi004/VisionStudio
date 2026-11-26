@@ -40,6 +40,7 @@ import { MusicCuesPanel } from "../components/music/MusicCuesPanel";
 import { MusicPlacementPanel } from "../components/music/MusicPlacementPanel";
 import { MusicPlanPanel } from "../components/music/MusicPlanPanel";
 import { MusicTakesPanel } from "../components/music/MusicTakesPanel";
+import { SoundEffectsPanel } from "../components/music/SoundEffectsPanel";
 import { MusicThemesPanel } from "../components/music/MusicThemesPanel";
 import { SceneStagingPanel } from "../components/story/SceneStagingPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
@@ -290,6 +291,13 @@ export function ProjectPage() {
             title="Music takes"
           >
             <MusicTakesPanel projectId={project.id} />
+          </CollapsiblePanel>
+          <CollapsiblePanel
+            panelKey="sound_effects"
+            anchorId="pipeline-step-sound_effects"
+            title="Sound effects"
+          >
+            <SoundEffectsPanel projectId={project.id} />
           </CollapsiblePanel>
           <CollapsiblePanel panelKey="shot_references" title="Shot references">
             <ShotReferencesPanel projectId={project.id} />

@@ -71,6 +71,7 @@ from app.db.models import (
     MusicThemeVersion,
     Project,
     ShotReferenceManifest,
+    SoundEffectTake,
     Thumbnail,
     Voice,
 )
@@ -206,6 +207,7 @@ _OWNERS: Final[dict[Any, tuple[str, Any]]] = {
     ShotReferenceManifest: ("project", ShotReferenceManifest.project_id),
     GenerationRequest: ("project", GenerationRequest.project_id),
     MusicTake: ("project", MusicTake.project_id),
+    SoundEffectTake: ("project", SoundEffectTake.project_id),
     MusicThemeCandidate: (
         "project",
         _through(MusicTheme.project_id, MusicTheme.id, MusicThemeCandidate.theme_row_id),
@@ -507,6 +509,7 @@ async def _inspect_music_run(session: AsyncSession, run_id: int) -> _Inspection:
     owners: set[Owner] = set()
     for column in (
         MusicTake.lab_run_id,
+        SoundEffectTake.lab_run_id,
         MusicThemeCandidate.lab_run_id,
         MusicThemeVersion.lab_run_id,
     ):
@@ -786,3 +789,24 @@ async def delete(
         await session.rollback()
         _logger.exception("could not remove every file of %s %d", checked, sample_id)
     return plan
+
+
+async def remove_music_runs(session: AsyncSession, storage: Storage, run_ids: set[int]) -> None:
+    """Deletes the Music lab runs made for a project that is gone (its sound effects, EXM-006),
+    with their files. A run that something still uses (an edit of it, a trial case) stays.
+    Commits. A failure is logged and never raised.
+    """
+    if not run_ids:
+        return
+    try:
+        paths: list[str] = []
+        for run_id in sorted(run_ids):
+            found = await _inspect_music_run(session, run_id)
+            if found.used_by:
+                continue
+            paths += await _remove_music_run(session, run_id)
+        await session.commit()
+        await _remove_files(session, storage, paths)
+    except Exception:
+        await session.rollback()
+        _logger.exception("could not remove the sound effect runs of a deleted project")

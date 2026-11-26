@@ -71,6 +71,7 @@ from app.services import (
     shot_prompts,
     shot_references,
     shot_takes,
+    sound_effects,
     speech_synthesis,
     speech_units,
     story_bible,
@@ -1229,6 +1230,48 @@ async def _start_music_generation(
             item_id=target.ref[0],
             confirm_replace_owner=options.confirm_overwrite,
         )
+
+    return await _start_each(session, targets, deadline, make)
+
+
+# --- The project's sound effects (EXM-006) ---------------------------------------------------
+
+_SOUND_PREFIX: Final = "sound"
+
+
+async def _evaluate_sound_effects(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # With the switch off, for any project that is not a continuous explainer and for one with
+    # neither graphics nor evidence, nothing is made: one target that is already done.
+    if not sound_effects.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await sound_effects.state(session, project)
+    targets: list[Target] = []
+    for view in state.roles:
+        targets.append(
+            Target(
+                f"{_SOUND_PREFIX}:{view.role}",
+                view.label,
+                view.done,
+                active=view.active,
+                block=None if view.done or view.active else view.blocked_reason or view.last_error,
+                last_error=view.last_error,
+                ref=(view.role,),
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_sound_effects(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        return await sound_effects.start_run(session, project, role=target.ref[0])
 
     return await _start_each(session, targets, deadline, make)
 
@@ -2915,6 +2958,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "music_plan": Adapter(_evaluate_music_plan, _project_start(_call_music_plan)),
     "music_cues": Adapter(_evaluate_music_cues, _start_music_cues),
     "music_generation": Adapter(_evaluate_music_generation, _start_music_generation),
+    "sound_effects": Adapter(_evaluate_sound_effects, _start_sound_effects),
     "resolution": Adapter(_evaluate_resolution, _project_start(_call_resolution)),
     "scene_staging": Adapter(_evaluate_scene_staging, _start_scene_staging),
     "environment_views": Adapter(_evaluate_environment_views, _start_environment_views),

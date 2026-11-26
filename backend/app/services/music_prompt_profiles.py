@@ -447,6 +447,8 @@ PROFILES: Final[dict[MusicModel, MusicPromptProfile]] = {
 
 # For the checks in `music_prompt_writer`: a sound effect or an ambience that talks about music.
 MUSIC_WORDS: Final = _MUSIC_WORDS
+# For the check in `sound_effect_writer` (EXM-006): a sound effect that asks for a voice.
+VOCAL_WORDS: Final = _VOCAL_WORDS
 STYLE_STARTS_WITH_LANGUAGE: Final = _STYLE_STARTS_WITH_LANGUAGE
 
 

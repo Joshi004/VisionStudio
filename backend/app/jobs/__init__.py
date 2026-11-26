@@ -19,7 +19,8 @@
   (`write_environment_prompt.py`), the Music Bible (`write_music_bible.py`) and the music themes
   (`write_music_theme_prompt.py`), the music plan (`write_music_plan.py`) and the music cues
   (`write_music_cue.py`, `audit_music_cues.py`) and the rewrite of a rejected music take's prompt
-  (`rewrite_music_prompt.py`), the placement of the music on the timeline (`place_music.py`)
+  (`rewrite_music_prompt.py`), the prompt of a continuous explainer's sound effects
+  (`write_sound_effect.py`), the placement of the music on the timeline (`place_music.py`)
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), the research brief of the evidence layer
@@ -128,6 +129,7 @@ def register_handlers() -> None:
     from app.jobs.write_shot_graphic_brief import WriteShotGraphicBriefHandler
     from app.jobs.write_shot_graphic_component import WriteShotGraphicComponentHandler
     from app.jobs.write_shot_graphic_scene import WriteShotGraphicSceneHandler
+    from app.jobs.write_sound_effect import WriteSoundEffectHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
     from app.jobs.write_thumbnail_concepts import WriteThumbnailConceptsHandler
     from app.jobs.write_youtube_draft import WriteYouTubeDraftHandler
@@ -176,6 +178,7 @@ def register_handlers() -> None:
     handlers.register(WriteMusicCueHandler())
     handlers.register(AuditMusicCuesHandler())
     handlers.register(RewriteMusicPromptHandler())
+    handlers.register(WriteSoundEffectHandler())
     handlers.register(PlaceMusicHandler())
     handlers.register(PreviewMusicMixHandler())
     handlers.register(TimeSpeechWordsHandler())

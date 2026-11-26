@@ -310,7 +310,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXM-006 — The project's sound effects: switch and generation
 
-**Status:** Not started
+**Status:** Code done, live run pending
 
 **Objective.** Let a continuous explainer have two sound effects of its own, a graphic sound and an evidence sound, made once and reused at every graphic and evidence moment of that project.
 
@@ -345,10 +345,27 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Migration, project checks, create and settings forms
-- [ ] Step, takes, check and selection, owner actions on the board
-- [ ] Deletion with the project
-- [ ] Docs (`DATABASE_STRUCTURE.md`), standard checks
+- [x] Migration, project checks, create and settings forms
+- [x] Step, takes, check and selection, owner actions on the board
+- [x] Deletion with the project
+- [x] Docs (`DATABASE_STRUCTURE.md`), standard checks
+
+**Completion notes.** Code done 2026-11-27, **live run pending** (the running containers still serve the old code until `docker compose up --build -d`, and the migration runs when the backend starts). One migration, **`0104`** (not `0101`: the head was already `0103`).
+
+- **Planning decided.**
+  - *Storage:* a new table, **`sound_effect_take`** (`DATABASE_STRUCTURE.md` 4.99). `music_take.plan_id` is NOT NULL and every `music_take` query is per plan version, so a role with no plan could not use it. The table copies the take columns it needs (role, round, retry, lab run, seed, fields, requested length, feedback, check, selected/rejected/locked).
+  - *Brief:* **written by the model**, once per round, by the new `write_sound_effect` job (story model, `never_rerun`), from the Story Bible's tone and, when music is on, the Music Bible's palette. The model is told to ask for a short (0.5 to 1.5 s), soft sound that starts at once and has no tonal content (no pitched notes, melody, chord, drone or instrument); code refuses a prompt that asks for music or a voice (`music_prompt_profiles.VOCAL_WORDS`) or a length outside 0.5 to 1.5 s.
+  - *Takes:* the new setting **`sound_effect_takes`** (default 3, 1 to 6); retries of a take that fails its check use `music_take_max_retries`.
+  - *Check (first guesses, to tune by ear):* length at least 90% of what was asked (0.5 to 1.5 s), no clipping, at most 0.1 s of silence at the start, a loudest moment that is not in the last 0.2 s, and a decaying end. The first take that passes is selected by one atomic `UPDATE`, as for a music take.
+  - *Music Lab list:* the takes **show in the Music Lab** (group key `sfx:{project_id}/{role}`); the list code is unchanged.
+  - *Step needs:* `story_bible` and `music_bible` (the Music Bible step is complete when music is off). No other step waits for it.
+- **Switch.** `project.sound_effects` (default off; a new continuous explainer is created with it on). `validate_project`, create and update refuse it for any project that is not a continuous explainer. The create form and the settings form have the switch (continuous explainers only), and the last-used settings remember it.
+- **Step and board.** `sound_effects` is in the music group of the board. It is off (complete with nothing made) when the switch is off, for a project that is not a continuous explainer, and for one with neither graphics nor evidence. It does not depend on the music switch. A target is a role (`graphic` when the project has graphics, `evidence` when it has evidence); a role with no takes and nothing running is started by a pipeline run or by the button.
+- **Owner actions.** `GET /api/projects/{id}/sound-effects`, `POST .../run?role=`, `POST .../{take_id}/select`, `POST .../{take_id}/reject` (note; a new prompt and take, as MD-23), `POST` and `DELETE .../{take_id}/lock`. "Make again" on a role that is done starts a new round and never replaces the selected take by itself; a locked role refuses it. The panel (`SoundEffectsPanel`) has a player, the measurements, the check and the actions for each take.
+- **Deletion.** The take rows go with the project (`CASCADE`). `project_deletion` reads the sound lab runs first and removes them and their files afterwards (`lab_deletion.remove_music_runs`), keeping any run that an edit or a trial case still uses. `lab_deletion` now counts a `sound_effect_take` as a project using a music run, so such a run cannot be deleted from the Music Lab while its project exists.
+- **Moved to EXM-007.** The scope says changing the switch makes the render out of date. Nothing reads the sounds in the render yet, so that reason is added in EXM-007, when the render uses them.
+- **Checked.** `alembic upgrade head`, `downgrade -1` and `upgrade head` on a new database (the only `alembic check` differences are the `FLOAT`/`REAL` ones every table with a float column already shows); `ruff check`, `ruff format`, `eslint` and `tsc` pass. `schema.d.ts` was regenerated from the app's OpenAPI. Against a copy of `HEAD`: the pipeline's steps and their needs are the same except for the added `sound_effects`, so a story's pipeline is unchanged. With stand-in projects: the roles are `graphic` and `evidence` for a continuous explainer with graphics and evidence, only `graphic` with evidence off, and none with the switch off, for a story, for a `lines` explainer and with neither feature; `check_take` passes a short decaying sound and lists the problems of a short, clipped, late-starting, cut-off one.
+- **Not checked.** The two jobs and the Stable Audio 3 server were not run (no containers, no paid calls), and `mypy` is not installed in the project's environment. The owner's check is open: after a rebuild, create a continuous explainer with graphics or evidence, run the step, and listen to the takes. If the first take that passes sounds wrong, tune the check's limits and the job's prompt rules; if no take passes, the 0.1 s start and the "decay" ending are the first limits to loosen.
 
 ### EXM-007 — Sound effects in the render
 
@@ -431,6 +448,6 @@ Make a new continuous explainer (for example a short version of project 94's scr
 | EXM-003 | Code done, live run pending | Explainer music timeline (voice only, `soundbites`), voice-only plan inputs (`basis: "voice"`), placement on the voice (`voice_sha256`, no shot cuts), step needs per project. No migration. |
 | EXM-004 | Code done, live run pending | Explainer plan (score and silence only, `posts`, 120 s cue limit, four explainer critic lenses), cue detail without hits (`swell_in_gaps` from posts), palette in every wording, explainer audit and rewrite. Flag `explainer: true` in the four job inputs. No migration. |
 | EXM-005 | Code done, live run pending | Explainer mix: one duck setting (-22 dB) held through gaps under 4 s, a partial rise (+8 dB, setting) inside each planned post, optional `rises` key per sound in the render timeline (version stays 6). Settings `explainer_music_duck_db`, `explainer_music_post_rise_db`. No migration. |
-| EXM-006 | Not started | |
+| EXM-006 | Code done, live run pending | Project switch `sound_effects` (migration `0104`), table `sound_effect_take`, job `write_sound_effect`, setting `sound_effect_takes`, step `sound_effects` with a target per role, check and first-passing selection, owner actions and panel, deleted with the project. The render-out-of-date reason for the switch moves to EXM-007. |
 | EXM-007 | Not started | |
 | EXM-008 | Not started | Owner end-to-end check. |

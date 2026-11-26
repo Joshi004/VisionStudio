@@ -58,6 +58,7 @@ from app.api import (
     shot_prompts,
     shot_references,
     shot_takes,
+    sound_effects,
     speech_audio,
     speech_units,
     staleness,
@@ -90,6 +91,7 @@ api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
 api_router.include_router(thumbnails.router, tags=["thumbnails"])
 api_router.include_router(music_cues.router, tags=["music-cues"])
 api_router.include_router(music_takes.router, tags=["music-takes"])
+api_router.include_router(sound_effects.router, tags=["sound-effects"])
 api_router.include_router(music_placement.router, tags=["music-placement"])
 api_router.include_router(music_preview.router, tags=["music-preview"])
 api_router.include_router(discovery.router, tags=["discovery"])

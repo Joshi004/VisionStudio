@@ -42,7 +42,15 @@ from app.jobs.handlers import MODEL_MUSIC
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import gpu_server, music_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import ffmpeg, gpu_priority, music_lab, music_models, music_takes, music_themes
+from app.services import (
+    ffmpeg,
+    gpu_priority,
+    music_lab,
+    music_models,
+    music_takes,
+    music_themes,
+    sound_effects,
+)
 from app.services.music_models import EditOperation, MusicModel
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -265,8 +273,9 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
         """Checks the recording when it belongs to a story's music: a theme recording lets the
         first candidate that passes become the theme's canonical recording (MUSIC-007), and a
         take of a cue is measured, selected when it is the first to pass, or made again when it
-        failed (MUSIC-010). Best effort: a failure never fails the audio (it is stored), and the
-        owner can still choose by hand.
+        failed (MUSIC-010); a take of a continuous explainer's sound effect is checked and
+        selected the same way (EXM-006). Best effort: a failure never fails the audio (it is
+        stored), and the owner can still choose by hand.
         """
         try:
             if await music_themes.on_audio_stored(run_id):
@@ -278,3 +287,8 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
                 dispatcher.nudge()
         except Exception:
             _logger.exception("job %d: the music take could not continue", job_id)
+        try:
+            if await sound_effects.on_audio_stored(run_id):
+                dispatcher.nudge()
+        except Exception:
+            _logger.exception("job %d: the sound effect take could not continue", job_id)

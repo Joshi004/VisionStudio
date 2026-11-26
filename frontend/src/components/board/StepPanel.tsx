@@ -123,6 +123,10 @@ const CalloutGraphicsCard = lazyNamed(
 const GraphicsPanel = lazyNamed(() => import("../story/GraphicsPanel"), "GraphicsPanel");
 const MusicCuesPanel = lazyNamed(() => import("../music/MusicCuesPanel"), "MusicCuesPanel");
 const MusicTakesPanel = lazyNamed(() => import("../music/MusicTakesPanel"), "MusicTakesPanel");
+const SoundEffectsPanel = lazyNamed(
+  () => import("../music/SoundEffectsPanel"),
+  "SoundEffectsPanel",
+);
 const MusicPlacementPanel = lazyNamed(
   () => import("../music/MusicPlacementPanel"),
   "MusicPlacementPanel",
@@ -243,6 +247,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <MusicCuesPanel projectId={projectId} />;
       case "music_generation":
         return <MusicTakesPanel projectId={projectId} />;
+      case "sound_effects":
+        return <SoundEffectsPanel projectId={projectId} />;
       case "music_placement":
         return <MusicPlacementPanel projectId={projectId} />;
       case "shot_plans":

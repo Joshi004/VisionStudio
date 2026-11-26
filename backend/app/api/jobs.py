@@ -71,6 +71,7 @@ JobType = Literal[
     "write_music_cue",
     "audit_music_cues",
     "rewrite_music_prompt",
+    "write_sound_effect",
     "place_music",
     "preview_music_mix",
     "time_speech_words",

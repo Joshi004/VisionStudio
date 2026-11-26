@@ -276,6 +276,16 @@ export function ProjectSettingsForm({
                     Switching evidence off deletes nothing: what was marked, researched and reviewed
                     is kept, and counts again when you switch it back on.
                   </Text>
+                  <Switch
+                    label="Sound effects"
+                    description="A graphic sound and an evidence sound, made once for this project."
+                    checked={draft.sound_effects}
+                    onChange={(event) => edit("sound_effects", event.currentTarget.checked)}
+                  />
+                  <Text size="xs" c="dimmed">
+                    Switching sound effects off deletes nothing: the sounds that were made are kept,
+                    and used again when you switch it back on.
+                  </Text>
                 </>
               )}
             </Stack>

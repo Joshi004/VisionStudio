@@ -145,6 +145,8 @@ MUSIC_CUE_PUSHBACK_ROUNDS_KEY = "music_cue_pushback_rounds"
 # How many times a take of a cue that fails its technical check is made again, with the same
 # prompt and a new seed, in one round (MUSIC-010).
 MUSIC_TAKE_MAX_RETRIES_KEY = "music_take_max_retries"
+# How many takes (each with its own seed) one prompt of a project's sound effect gets (EXM-006).
+SOUND_EFFECT_TAKES_KEY = "sound_effect_takes"
 # How exact music placement is (MUSIC-011, QM-11). Whole milliseconds and percent, because
 # settings are whole numbers.
 MUSIC_PLACE_TIGHT_KEY = "music_place_tight_ms"
@@ -928,6 +930,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=2,
         min_value=0,
         max_value=5,
+    ),
+    SettingSpec(
+        key=SOUND_EFFECT_TAKES_KEY,
+        group=GROUP_MUSIC,
+        label="Takes of a project's sound effect",
+        help=(
+            "How many takes, each with its own seed, the prompt of a sound effect gets (the "
+            "graphic sound and the evidence sound of a continuous explainer). The first take "
+            "that passes its technical check is selected. A take that fails is made again, as "
+            "set by the retries of a music take. Each take is a paid remote server job. It "
+            "applies the next time the sound is made."
+        ),
+        value_type="integer",
+        default=3,
+        min_value=1,
+        max_value=6,
     ),
     SettingSpec(
         key=MUSIC_PLACE_TIGHT_KEY,

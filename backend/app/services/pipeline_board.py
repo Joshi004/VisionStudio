@@ -44,6 +44,7 @@ from app.services import (
     graphic_theme,
     music_bible,
     music_themes,
+    sound_effects,
     word_timings,
 )
 from app.services import story_pipeline as pipeline
@@ -86,6 +87,11 @@ WORD_TIMINGS_STEP: Final = "word_timings"
 # The step that is switched off for every project but an explainer with callouts on
 # (EXPLAINER-009).
 CALLOUT_PLAN_STEP: Final = "callout_plan"
+
+# The step that is switched off while the project's sound effects are off or not needed: any
+# project but a continuous explainer, or one with neither graphics nor evidence (EXM-006). It does
+# not depend on the music switch.
+SOUND_EFFECTS_STEP: Final = "sound_effects"
 
 # The steps that are switched off for every project but a continuous explainer with graphics on
 # (EXG-002, EXG-004, EXG-005).
@@ -137,6 +143,7 @@ GROUPS: Final[dict[str, str]] = {
     "music_plan": "music",
     "music_cues": "music",
     "music_generation": "music",
+    "sound_effects": "music",
     "music_placement": "music",
     "shot_plans": "shots",
     "shot_definitions": "shots",
@@ -338,6 +345,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
         off = (
             (music_off and step.key in MUSIC_STEPS)
             or (step.key == MUSIC_THEMES_STEP and not music_themes.wanted(project))
+            or (step.key == SOUND_EFFECTS_STEP and not sound_effects.wanted(project))
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))

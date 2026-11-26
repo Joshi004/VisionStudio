@@ -1229,6 +1229,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/sound-effects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sound Effects */
+        get: operations["get_sound_effects_api_projects__project_id__sound_effects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/sound-effects/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Sound Effects
+         * @description Queues the sounds that have no takes, or the sound named by `role` (a new round, also for
+         *     a sound that is done, unless it is locked). Paid calls start only from here (or from a
+         *     pipeline run), never by themselves.
+         */
+        post: operations["run_sound_effects_api_projects__project_id__sound_effects_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/sound-effects/{take_id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Sound Effect Take
+         * @description Selects a take, also one that failed its check. The sound's automatic retries stop.
+         */
+        post: operations["select_sound_effect_take_api_projects__project_id__sound_effects__take_id__select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/sound-effects/{take_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Sound Effect Take
+         * @description Rejects a take with a note. The model rewrites the sound's prompt from the note (a paid
+         *     language model call) and a new take is made from it.
+         */
+        post: operations["reject_sound_effect_take_api_projects__project_id__sound_effects__take_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/sound-effects/{take_id}/lock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lock Sound Effect Take
+         * @description Locks the selected take: it is never regenerated.
+         */
+        post: operations["lock_sound_effect_take_api_projects__project_id__sound_effects__take_id__lock_post"];
+        /**
+         * Unlock Sound Effect Take
+         * @description Removes the lock of a take.
+         */
+        delete: operations["unlock_sound_effect_take_api_projects__project_id__sound_effects__take_id__lock_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/music-placement/run": {
         parameters: {
             query?: never;
@@ -11028,7 +11132,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "write_sound_effect" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
             /**
              * Status
              * @enum {string}
@@ -11113,7 +11217,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "write_sound_effect" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
             /**
              * Kind
              * @enum {string}
@@ -11164,7 +11268,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "write_sound_effect" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
             /**
              * Status
              * @enum {string}
@@ -14011,20 +14115,6 @@ export interface components {
             /** Skipped */
             skipped: components["schemas"]["app__api__environment_views__SkippedOut"][];
         };
-        /**
-         * PostOut
-         * @description A planned rise of an explainer's music in the pause after one spoken line.
-         */
-        PostOut: {
-            /** After */
-            after: string;
-            /** Start S */
-            start_s: number;
-            /** End S */
-            end_s: number;
-            /** Length S */
-            length_s: number;
-        };
         /** PlanSilenceOut */
         PlanSilenceOut: {
             /** Cue Id */
@@ -14085,11 +14175,25 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "write_sound_effect" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip";
             /** Running */
             running: number;
             /** Queued */
             queued: number;
+        };
+        /**
+         * PostOut
+         * @description A planned rise of an explainer's music in the pause after one spoken line.
+         */
+        PostOut: {
+            /** After */
+            after: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Length S */
+            length_s: number;
         };
         /** PresenceIn */
         PresenceIn: {
@@ -14200,6 +14304,8 @@ export interface components {
             graphics?: boolean | null;
             /** Evidence */
             evidence?: boolean | null;
+            /** Sound Effects */
+            sound_effects?: boolean | null;
             /** Presenter Staging */
             presenter_staging?: string | null;
             /** Presenter Outfit */
@@ -14322,6 +14428,8 @@ export interface components {
             graphics: boolean;
             /** Evidence */
             evidence: boolean;
+            /** Sound Effects */
+            sound_effects: boolean;
             /** Graphic Suggestions */
             graphic_suggestions: components["schemas"]["GraphicSuggestionOut"][];
             story_length: components["schemas"]["StoryLengthOut"];
@@ -14411,6 +14519,8 @@ export interface components {
             take_source?: ("generated" | "recorded") | null;
             /** Evidence */
             evidence?: boolean | null;
+            /** Sound Effects */
+            sound_effects?: boolean | null;
             /** Presenter Staging */
             presenter_staging?: string | null;
             /** Presenter Outfit */
@@ -17719,6 +17829,111 @@ export interface components {
             last_error: string | null;
             /** Stale */
             stale: boolean;
+        };
+        /**
+         * SoundEffectOut
+         * @description One of the project's sounds and where its takes stand.
+         */
+        SoundEffectOut: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "graphic" | "evidence";
+            /** Label */
+            label: string;
+            /** Takes */
+            takes: components["schemas"]["SoundEffectTakeOut"][];
+            /** Selected Take Id */
+            selected_take_id: number | null;
+            /** Locked */
+            locked: boolean;
+            /** Round */
+            round: number;
+            /** Retries Used */
+            retries_used: number;
+            prompt_job: components["schemas"]["RewriteJobOut"] | null;
+            /** Done */
+            done: boolean;
+            /** Active */
+            active: boolean;
+            /** Action */
+            action: ("generate" | "retry") | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Last Error */
+            last_error: string | null;
+        };
+        /** SoundEffectRejectIn */
+        SoundEffectRejectIn: {
+            /** Note */
+            note: string;
+        };
+        /** SoundEffectRejectOut */
+        SoundEffectRejectOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** SoundEffectTakeOut */
+        SoundEffectTakeOut: {
+            /** Id */
+            id: number;
+            /** Round */
+            round: number;
+            /** Seed */
+            seed: number;
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Requested S */
+            requested_s: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "generating" | "checking" | "passed" | "check_failed" | "failed";
+            run: components["schemas"]["LabMusicRunOut"] | null;
+            check: components["schemas"]["TakeCheckOut"] | null;
+            /** Problems */
+            problems: string[];
+            /** Selected */
+            selected: boolean;
+            /** Selected By */
+            selected_by: ("auto" | "owner") | null;
+            /** Rejected */
+            rejected: boolean;
+            /** Reject Note */
+            reject_note: string | null;
+            /** Locked */
+            locked: boolean;
+            /** Of Take Id */
+            of_take_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SoundEffectsRun */
+        SoundEffectsRun: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** SoundEffectsState */
+        SoundEffectsState: {
+            /** Sound Effects */
+            sound_effects: boolean;
+            /** Wanted */
+            wanted: boolean;
+            /** Sounds */
+            sounds: components["schemas"]["SoundEffectOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Max Retries */
+            max_retries: number;
+            /** Takes Per Prompt */
+            takes_per_prompt: number;
         };
         /** SoundRequestIn */
         SoundRequestIn: {
@@ -23390,6 +23605,250 @@ export interface operations {
             };
         };
     };
+    get_sound_effects_api_projects__project_id__sound_effects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoundEffectsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_sound_effects_api_projects__project_id__sound_effects_run_post: {
+        parameters: {
+            query?: {
+                role?: ("graphic" | "evidence") | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoundEffectsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sound effects are off, the Story Bible is missing, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_sound_effect_take_api_projects__project_id__sound_effects__take_id__select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sound effects are off, the Story Bible is missing, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reject_sound_effect_take_api_projects__project_id__sound_effects__take_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SoundEffectRejectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoundEffectRejectOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sound effects are off, the Story Bible is missing, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    lock_sound_effect_take_api_projects__project_id__sound_effects__take_id__lock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sound effects are off, the Story Bible is missing, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unlock_sound_effect_take_api_projects__project_id__sound_effects__take_id__lock_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sound effects are off, the Story Bible is missing, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     run_music_placement_api_projects__project_id__music_placement_run_post: {
         parameters: {
             query?: never;
@@ -25097,7 +25556,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "write_sound_effect" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording" | "splice_voice_recording" | "write_chat_reply" | "write_youtube_draft" | "publish_youtube" | "suggest_evidence_claims" | "write_evidence_brief" | "import_evidence" | "render_evidence_clip" | "transcribe_evidence_clip")[] | null;
                 limit?: number;
                 offset?: number;
             };

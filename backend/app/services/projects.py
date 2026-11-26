@@ -85,6 +85,10 @@ OUTFIT_NOT_THE_PRESENTER_S: Final = "Choose one of the presenter's saved outfits
 GRAPHICS_ONLY_MESSAGE: Final = "Graphics are only for an explainer with a continuous voice."
 # EVD-001: the evidence layer exists only in an explainer with a continuous voice (EV-1).
 EVIDENCE_ONLY_MESSAGE: Final = "Evidence is only for an explainer with a continuous voice."
+# EXM-006: the project's sound effects exist only in an explainer with a continuous voice (XM-1).
+SOUND_EFFECTS_ONLY_MESSAGE: Final = (
+    "Sound effects are only for an explainer with a continuous voice."
+)
 
 # What the event and shot prompts branch on (EXPLAINER-004): the project's speech mode, or
 # `explainer` for an explainer project (whose speech mode is always `both`). It is never stored
@@ -148,6 +152,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "presenter_outfit": "Presenter outfit",
     "presenter_named_look_id": "Presenter saved outfit",
     "evidence": "Evidence",
+    "sound_effects": "Sound effects",
 }
 _NULLABLE_FIELDS: Final = frozenset(
     (
@@ -268,6 +273,10 @@ def validate_project(project: Project) -> None:
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
         raise ProjectValidationError(EVIDENCE_ONLY_MESSAGE)
+    if project.sound_effects and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(SOUND_EFFECTS_ONLY_MESSAGE)
     if project.callout_style not in CALLOUT_STYLES:
         raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
     # Written out here: `graphic_theme.wanted` says the same, but that module imports this one.
@@ -327,6 +336,7 @@ async def create_project(
     callout_style: str = CALLOUT_BOXES,
     take_source: str | None = None,
     evidence: bool | None = None,
+    sound_effects: bool | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -353,6 +363,8 @@ async def create_project(
 
     `evidence` (EVD-001) follows the same rule: on by default for a continuous explainer, off for
     every other project, and refused on any other project when asked for.
+
+    `sound_effects` (EXM-006) follows the same rule again.
 
     An explainer (EXPLAINER-002) needs a presenter from the Character Lab and may have a set
     from the Environment Lab. Both go into the project's cast as `as_is`, in the same commit as
@@ -400,6 +412,10 @@ async def create_project(
         raise ProjectValidationError(EVIDENCE_ONLY_MESSAGE)
     if evidence is None:
         evidence = continuous_explainer
+    if sound_effects and not continuous_explainer:
+        raise ProjectValidationError(SOUND_EFFECTS_ONLY_MESSAGE)
+    if sound_effects is None:
+        sound_effects = continuous_explainer
     if kind == KIND_EXPLAINER:
         speech_mode = SPEECH_BOTH
         if presenter_character_id is None:
@@ -439,6 +455,7 @@ async def create_project(
         presenter_named_look_id=presenter_named_look_id,
         graphics=graphics,
         evidence=evidence,
+        sound_effects=sound_effects,
     )
     validate_project(project)
     session.add(project)
@@ -539,6 +556,10 @@ async def update_project(
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
         raise ProjectValidationError(EVIDENCE_ONLY_MESSAGE)
+    if "sound_effects" in changes and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(SOUND_EFFECTS_ONLY_MESSAGE)
     if "presenter_staging" in changes and project.kind != KIND_EXPLAINER:
         raise ProjectValidationError(STAGING_ONLY_MESSAGE)
     if "presenter_outfit" in changes and project.kind != KIND_EXPLAINER:
@@ -633,6 +654,8 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
     if field == "evidence" and not isinstance(value, bool):
         raise ProjectValidationError("Evidence must be on or off.")
+    if field == "sound_effects" and not isinstance(value, bool):
+        raise ProjectValidationError("Sound effects must be on or off.")
     if field == "take_source" and value not in TAKE_SOURCES:
         raise ProjectValidationError(TAKE_SOURCE_MESSAGE)
     return value
