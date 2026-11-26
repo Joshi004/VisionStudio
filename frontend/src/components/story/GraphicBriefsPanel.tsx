@@ -1,11 +1,25 @@
 import { useState } from "react";
-import { Alert, Badge, Button, Group, List, Loader, Paper, Stack, Table, Text, Title } from "@mantine/core";
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  List,
+  Loader,
+  Paper,
+  Stack,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import {
   useGraphicBriefs,
   useRunGraphicBrief,
+  useRunOverlayBrief,
   type GraphicBriefScene,
+  type GraphicOverlay,
   type GraphicShot,
   type GraphicShotBrief,
 } from "../../api/graphicBriefs";
@@ -27,8 +41,8 @@ const STATUS_BADGE: Record<GraphicShot["status"], { label: string; color: string
   out_of_date: { label: "Out of date", color: "yellow" },
 };
 
-/** The note being written: which shot it is on. */
-type Noting = { sceneId: string; shot: GraphicShot };
+/** The note being written: which shot, or which overlay, it is on. */
+type Noting = { sceneId: string; shot: GraphicShot; overlay: boolean };
 
 /**
  * The graphic briefs stage of a continuous explainer: for each graphic shot the cut planner
@@ -38,10 +52,14 @@ type Noting = { sceneId: string; shot: GraphicShot };
 export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
   const { data, isLoading, isError, error } = useGraphicBriefs(projectId);
   const run = useRunGraphicBrief(projectId);
+  const runOverlay = useRunOverlayBrief(projectId);
   const [noting, setNoting] = useState<Noting | null>(null);
 
-  const startRun = (sceneId: string, shot: GraphicShot, feedback?: string) =>
-    run.mutate({ sceneId, shotId: shot.id, feedback });
+  const startRun = (sceneId: string, shot: GraphicShot, overlay: boolean, feedback?: string) =>
+    overlay
+      ? runOverlay.mutate({ sceneId, overlayId: shot.id, feedback })
+      : run.mutate({ sceneId, shotId: shot.id, feedback });
+  const startError = run.isError ? run.error : runOverlay.isError ? runOverlay.error : null;
 
   return (
     <Stack gap="sm">
@@ -49,9 +67,9 @@ export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
         <Stack gap="xs">
           <Title order={4}>Graphic briefs</Title>
           <Text size="sm" c="dimmed">
-            Each graphic shot gets a brief: what it shows, the numbers it uses and the words each
-            part appears on. A number must be said in the shot's words or in the sentences around
-            them. The model writes it, one call for each shot.
+            Each graphic shot, and each graphic you suggested over some words, gets a brief: what it
+            shows, the numbers it uses and the words each part appears on. A number must be said in
+            its words or in the sentences around them. The model writes it, one call for each.
           </Text>
           {isLoading && <Loader size="sm" />}
           {isError && (
@@ -59,9 +77,9 @@ export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
               {describeError(error)}
             </Alert>
           )}
-          {run.isError && (
+          {startError !== null && (
             <Alert color="red" title="Could not start the graphic brief">
-              {describeError(run.error)}
+              {describeError(startError)}
             </Alert>
           )}
           {data?.blocked_reason && (
@@ -71,8 +89,8 @@ export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
           )}
           {data?.wanted && data.scenes.length === 0 && (
             <Text size="sm" c="dimmed">
-              No scene has a graphic shot yet. Graphic shots appear when the shots of a scene are
-              planned.
+              No scene has a graphic shot or a graphic suggestion yet. Graphic shots appear when the
+              shots of a scene are planned.
             </Text>
           )}
         </Stack>
@@ -82,9 +100,9 @@ export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
         <SceneBriefs
           key={scene.id}
           scene={scene}
-          starting={run.isPending}
-          onRun={(shot) => startRun(scene.id, shot)}
-          onNote={(shot) => setNoting({ sceneId: scene.id, shot })}
+          starting={run.isPending || runOverlay.isPending}
+          onRun={(shot, overlay) => startRun(scene.id, shot, overlay)}
+          onNote={(shot, overlay) => setNoting({ sceneId: scene.id, shot, overlay })}
         />
       ))}
 
@@ -98,7 +116,7 @@ export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
         onCancel={() => setNoting(null)}
         onSubmit={(text) => {
           if (noting !== null) {
-            startRun(noting.sceneId, noting.shot, text);
+            startRun(noting.sceneId, noting.shot, noting.overlay, text);
           }
           setNoting(null);
         }}
@@ -110,16 +128,35 @@ export function GraphicBriefsPanel({ projectId }: GraphicBriefsPanelProps) {
 type SceneBriefsProps = {
   scene: GraphicBriefScene;
   starting: boolean;
-  onRun: (shot: GraphicShot) => void;
-  onNote: (shot: GraphicShot) => void;
+  /** `overlay` is true for a graphic over suggested words, false for a graphic shot. */
+  onRun: (shot: GraphicShot, overlay: boolean) => void;
+  onNote: (shot: GraphicShot, overlay: boolean) => void;
 };
 
 function SceneBriefs({ scene, starting, onRun, onNote }: SceneBriefsProps) {
   return (
     <Stack gap="xs">
-      <Text fw={600}>{scene.index !== null ? `Scene ${scene.index}: ${scene.title}` : scene.title}</Text>
+      <Text fw={600}>
+        {scene.index !== null ? `Scene ${scene.index}: ${scene.title}` : scene.title}
+      </Text>
       {scene.shots.map((shot) => (
-        <ShotBrief key={shot.id} shot={shot} starting={starting} onRun={onRun} onNote={onNote} />
+        <ShotBrief
+          key={shot.id}
+          shot={shot}
+          starting={starting}
+          onRun={(item) => onRun(item, false)}
+          onNote={(item) => onNote(item, false)}
+        />
+      ))}
+      {scene.overlays.map((overlay) => (
+        <ShotBrief
+          key={`overlay-${overlay.id}`}
+          shot={overlay}
+          overlay={overlay}
+          starting={starting}
+          onRun={(item) => onRun(item, true)}
+          onNote={(item) => onNote(item, true)}
+        />
       ))}
     </Stack>
   );
@@ -127,12 +164,14 @@ function SceneBriefs({ scene, starting, onRun, onNote }: SceneBriefsProps) {
 
 type ShotBriefProps = {
   shot: GraphicShot;
+  /** Set for a graphic overlay: it has a heading of its own and no planner's description. */
+  overlay?: GraphicOverlay;
   starting: boolean;
   onRun: (shot: GraphicShot) => void;
   onNote: (shot: GraphicShot) => void;
 };
 
-function ShotBrief({ shot, starting, onRun, onNote }: ShotBriefProps) {
+function ShotBrief({ shot, overlay, starting, onRun, onNote }: ShotBriefProps) {
   const active = isJobActive(shot.job);
   const badge = STATUS_BADGE[shot.status];
   const hasBrief = shot.brief !== null;
@@ -144,7 +183,7 @@ function ShotBrief({ shot, starting, onRun, onNote }: ShotBriefProps) {
           <Stack gap={4}>
             <Group gap="xs">
               <Text size="sm" fw={600}>
-                {shot.id.replace("shot_", "Shot ")}
+                {overlay ? "Graphic over:" : shot.id.replace("shot_", "Shot ")}
               </Text>
               <Badge color={badge.color} variant="light">
                 {badge.label}
@@ -155,9 +194,11 @@ function ShotBrief({ shot, starting, onRun, onNote }: ShotBriefProps) {
               </Text>
             </Group>
             <ShotWords shot={shot} />
-            <Text size="xs" c="dimmed">
-              Planner's description: {shot.description}
-            </Text>
+            {!overlay && (
+              <Text size="xs" c="dimmed">
+                Planner's description: {shot.description}
+              </Text>
+            )}
           </Stack>
           <Group gap="xs">
             {hasBrief && (

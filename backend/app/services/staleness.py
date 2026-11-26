@@ -14,6 +14,7 @@ edit can be accepted; for the others the answer is to make them again.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal, get_args
 
@@ -542,14 +543,43 @@ async def _collect_shots(session: AsyncSession, project: Project, found: _Collec
                         ),
                     )
 
+    def add_overlays(step: str, scenes: Any, words_of: Callable[[Any], tuple[str, str]]) -> None:
+        """The graphic overlays of a scene (OVL-004) that are out of date, titled by their
+        words. `words_of` gives an entry's `(overlay id, words)`."""
+        for scene in scenes:
+            for overlay in scene.overlays:
+                if overlay.status == "out_of_date":
+                    overlay_id, words = words_of(overlay)
+                    found.add(
+                        step,
+                        Item(
+                            step,
+                            f"{_scene_title(scene.item)}, graphic over '{words}'",
+                            overlay.reasons,
+                            acceptable=False,
+                            scene_id=scene.item["id"],
+                            shot_id=overlay_id,
+                        ),
+                    )
+
     add_shots("shot_definitions", (await shot_definitions.state(session, project)).entries, True)
     # The briefs of the graphic shots (EXG-004): an out-of-date brief is written again.
     if graphic_theme.wanted(project):
-        add_shots(
-            "graphic_briefs", (await shot_graphic_briefs.state(session, project)).entries, False
+        brief_scenes = (await shot_graphic_briefs.state(session, project)).entries
+        add_shots("graphic_briefs", brief_scenes, False)
+        add_overlays(
+            "graphic_briefs",
+            brief_scenes,
+            lambda entry: (entry.overlay.overlay_id, entry.overlay.text),
         )
         # The graphics of those shots (EXG-005): a video drawn for another look is made again.
-        add_shots("graphics", (await shot_graphics.state(session, project)).entries, False)
+        graphic_scenes = (await shot_graphics.state(session, project)).entries
+        add_shots("graphics", graphic_scenes, False)
+        add_overlays(
+            "graphics",
+            graphic_scenes,
+            lambda entry: (entry.shot["id"], entry.shot["spoken_text"]),
+        )
     add_shots("references", (await shot_references.state(session, project)).entries, True)
     add_shots(
         "generation_requests",

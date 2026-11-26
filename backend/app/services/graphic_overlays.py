@@ -18,7 +18,9 @@ numbers as `ShotSpan.start_s` and `end_s`.
 - It is at least `MIN_S` long. A shorter one runs on after its last word, up to the next overlay or
   sound bite shot or the end of the scene, and then starts up to `MAX_LEAD_S` earlier. With no
   room it is not placed.
-- It is at most `MAX_FRAMES` frames long. A longer one is not placed: the owner splits it.
+- It is at most `MAX_FRAMES` frames long, counted as its graphic is drawn (`clip_frames`: its
+  frames plus one spare frame, like a graphic shot). A longer one is not placed: the owner splits
+  it.
 - Two overlays never overlap, and a lengthened one ends `GAP_S` before the next one starts.
 - The key of an overlay is `{scene_id}/{first}-{last}`: the first and last word in the scene's
   take, counted from 1. Never the suggestion's `g` number, which is renumbered when suggestions
@@ -31,6 +33,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from app.services import evidence_cards, graphic_suggestions
+from app.services.frame_counts import target_frames
 
 # An overlay is on screen for at least this long, like a graphic shot
 # (`cut_planning_writer.SHORTEST_GRAPHIC_S`).
@@ -39,6 +42,8 @@ MIN_S: Final = 3.0
 # (`shot_graphics.MAX_FRAMES`, `graphics_lab.FPS`): 30 s.
 MAX_FRAMES: Final = 720
 FPS: Final = 24
+# The spare frame a drawn clip has (`scene_timeline._GRAPHIC_SPARE_FRAMES`).
+SPARE_FRAMES: Final = 1
 # A short overlay may start up to this long before its natural start, when it has no room after.
 MAX_LEAD_S: Final = 1.0
 # A lengthened overlay ends this long before the next one starts (`evidence_cards.GAP_S`).
@@ -54,7 +59,7 @@ UNPLACED_TEXT: Final = {
         "sound bite, or before the end of the scene."
     ),
     TOO_LONG: (
-        "These words take more than 30 seconds to say: split the suggestion into shorter ones."
+        "These words take about 30 seconds or more to say: split the suggestion into shorter ones."
     ),
     SOUNDBITE: graphic_suggestions.SOUNDBITE_REASON,
     ONE_WORD: (
@@ -143,6 +148,13 @@ def _r(value: float) -> float:
     return round(value, _DECIMALS)
 
 
+def clip_frames(start_s: float, end_s: float) -> int:
+    """The frames of the graphic drawn for an overlay from `start_s` to `end_s`: its frames on the
+    24 fps grid plus one spare frame, the same count a graphic shot gets
+    (`scene_timeline.ShotSpan.clip_frames`). Pure."""
+    return target_frames(start_s, end_s, FPS) + SPARE_FRAMES
+
+
 def runs(words: list[int], soundbite_words: set[int]) -> list[tuple[int, int]]:
     """The unbroken runs of `words` (positions in the take, from 0, in order) as `(first, last)`.
     A run is broken only where a sound bite's word lies between two neighbours; a position that
@@ -192,7 +204,7 @@ def place_overlays(
         if end - start <= 0:
             unplaced.append(_unplaced(run, NO_ROOM))
             continue
-        if round((end - start) * FPS) > MAX_FRAMES:
+        if clip_frames(start, end) > MAX_FRAMES:
             unplaced.append(_unplaced(run, TOO_LONG))
             continue
         if end - start < MIN_S - _EPSILON:
@@ -212,6 +224,9 @@ def place_overlays(
             unplaced.append(_unplaced(run, NO_ROOM))
             continue
         start, end = _r(start), _r(end)
+        if clip_frames(start, end) > MAX_FRAMES:
+            unplaced.append(_unplaced(run, TOO_LONG))
+            continue
         overlays.append(
             Overlay(
                 scene_id=run.scene_id,

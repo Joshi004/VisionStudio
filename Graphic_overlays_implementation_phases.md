@@ -171,7 +171,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 | OVL-001 | Storage for overlay graphics | Code | — | Completed |
 | OVL-002 | Suggestions leave the shot planner | Code | — | Completed |
 | OVL-003 | Placing the overlays | Code | — | Completed |
-| OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Not Started |
+| OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Completed |
 | OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Not Started |
 | OVL-006 | Evidence added later becomes a card | Code | — | Not Started |
 | OVL-007 | Split screen for a graphic and evidence | Code | OVL-005, OVL-006 | Not Started |
@@ -184,7 +184,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - **Planner:** OVL-002 (done). It had to be done before OVL-005 is used on a real project.
 - **Evidence:** OVL-006, now.
 
-**Progress snapshot:** 3 completed (OVL-001, OVL-002, OVL-003).
+**Progress snapshot:** 4 completed (OVL-001, OVL-002, OVL-003, OVL-004).
 
 ---
 
@@ -324,7 +324,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 ### OVL-004 — Briefs and graphics for overlays
 
-**Status:** Not Started
+**Status:** Completed (2026-11-27; the owner still has to rebuild the real app so the new code runs there)
 
 **Objective.** Each overlay gets a brief and a graphic, made and chosen like a graphic shot's, and out of date only for its own reasons (§4.3).
 
@@ -351,14 +351,26 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Material and briefs
-- [ ] Graphics, repairs and choice
-- [ ] Pipeline targets
-- [ ] Panels
-- [ ] Checks above
-- [ ] Standard checks
+- [x] Material and briefs
+- [x] Graphics, repairs and choice
+- [x] Pipeline targets
+- [x] Panels
+- [x] Checks above (the paid parts as stand-ins, see below)
+- [x] Standard checks
+- [ ] Owner: real app rebuilt so the new code runs there
 
-**Completion notes.**
+**Completion notes.** Done 2026-11-27. No migration (the overlay rows of `0102` are now written), no new job type, no new setting. `DATABASE_STRUCTURE.md` has the `inputs` shape of an overlay's brief and an update paragraph.
+
+- **`graphic_overlays.py`**: new `clip_frames(start_s, end_s)` (frames on the 24 fps grid plus one spare frame, the count a graphic shot gets) and `SPARE_FRAMES`. `place_overlays` refuses with `too_long` when `clip_frames` is above 720, checked on the natural length and again on the rounded times, so a placed overlay can never be refused by `resolve_for_shot`. **A change from OVL-003:** an overlay of exactly 30.0 s is now `too_long` (721 frames); 29.958 s is the longest placed. The message says "about 30 seconds or more".
+- **`shot_graphic_briefs.py`**: `_overlay_material` (words timed from the overlay's start on the scene's clock, by `take_map.to_take(start_s)` and `timed_words`; context; hashes), `_overlay_saved_inputs`, `_overlay_out_of_date_reasons`, `_overlay_refusal`, `OverlayEntry` (on `SceneEntry.overlays`), `start_overlay` and `overlay_job_key`. `newest_row` and `save_version` take a `target` (default `shot`), `_newest_rows` too. `_source_reasons` is the part of the out-of-date rule a shot and an overlay share (the sentences around, the take, its timing); the shot's reasons and their order are unchanged. The brief writer is given the fixed description `OVERLAY_DESCRIPTION` ("The owner asked for a graphic over these words. Show what they say.") and `shot_seconds = overlay.length_s`; nothing else of the request changed (OV-4 kept).
+- **Out of date (§4.3).** An overlay's brief is out of date when its start or end, its context, the take or the take's timing changed. It records no shot plan and no skeleton hash, so a re-plan cannot change it. A moved start or end is a new brief (one model call, then the engine calls), as §4.3 says; the owner chose that over a free redraw.
+- **`jobs/write_shot_graphic_brief.py`**: the task reads `target` (a job without one is for a shot) and accepts `shot_plan_id` None only for an overlay; the version is saved with that target.
+- **`shot_graphics.py`**: an overlay is read with the same `ShotEntry` as a graphic shot (`target`, `overlay`, and a stand-in `shot` whose `id` is `{first}-{last}`, `spoken_text` the words and `start_s`/`end_s` the scene's clock), kept in `SceneEntry.overlays`, so `scene.shots` and everything that reads it are as before. `_prepare_overlay` builds the span from `clip_frames` and calls `resolve_for_shot` unchanged (`shift_s = 0`, output size). `_rows_by_shot` and `_choices` take a target. `_new_row` and `_write` use the entry's target and `_write_key` (`overlay:{scene}/{first}-{last}`). `queue_repair` finds the entry by `row.target`. New: `start_overlay`, and `target` on `ask_again` and `set_choice`. Overlay refusals have their own wording ("This graphic's brief ...").
+- **API**: `OverlayId` (`^[1-9][0-9]*-[1-9][0-9]*$`, since `DiscoveryId` refuses `-`). Both states list `overlays` on each scene (`GraphicBriefOverlayOut` and `ShotGraphicOverlayOut`, subclasses of the shot's model plus `suggestion_id` and `shot_ids`; a scene is listed when it has shots or overlays). New routes: `POST /graphic-briefs/{scene}/overlays/{id}/run`, `POST /graphics/{scene}/overlays/{id}/run`, `POST .../{engine}/ask-again`, `PUT .../choice`. `schema.d.ts` regenerated from the app's own OpenAPI on a throwaway `DATA_DIR` (353 lines added, nothing removed). The name `GraphicOverlayOut` was already taken by OVL-003's model, hence `GraphicBriefOverlayOut`.
+- **Pipeline**: the `graphic_briefs` and `graphics` steps have a target `overlay:{scene}/{first}-{last}` for each overlay (label "Scene N, graphic over '...'"; `ref = (scene, overlay id, "overlay")`, so the batch key never equals a shot's). Overlays exist only for a scene whose plan is current, so these targets do not wait on an out-of-date plan. `staleness` lists an out-of-date overlay brief or graphic (not acceptable as is).
+- **Frontend**: hooks `useRunOverlayBrief`, `useMakeOverlayGraphics`, `useAskOverlayGraphicAgain`, `useSetOverlayGraphicChoice`; polling includes overlays. Both panels list a scene's overlays after its graphic shots, headed "Graphic over:" with their words (and the context in the brief panel) and no planner's description.
+- **Checked** (2026-11-27, a copy of the real database taken with SQLite's backup API from the running container and upgraded to `0102`, removed afterwards; no model call, no dispatcher: jobs were only queued rows in the copy). (1) **Identity:** for all 18 graphics projects the entries of graphic shots in both states (status, reasons, brief row and version, `resolved_sha256`, used engine and attempt, choice, refusal, engines) are byte-identical between `HEAD` and this code. (2) **Placement:** 29.9 s and 29.958 s placed (719 and 720 frames), 30.0 s and 31.0 s `too_long`, a short run lengthened to 3.0 s (73 frames). (3) **Project 94, scene `opening_puzzle`:** `12-30` (g1, 4.625 to 11.75 s over `shot_2` and `shot_3`) and `34-55` (g2, 13.042 to 21.792 s over `shot_4`). Starting a brief queued a job with `target = overlay`, `shot_plan_id` None, the fixed description, the overlay's words and 7.125 s; the same press twice gave one job; the job's task read back; a stand-in brief saved as `target = overlay`, `shot_id = 12-30`, no plan. Both then read `ready`, and the graphics resolved at 1920x1080 with 172 and 211 frames, equal to `clip_frames`. Starting the graphics of `12-30` queued `write_shot_graphic_component` and `write_shot_graphic_scene` with the dedupe value `overlay:opening_puzzle/12-30` and two attempt rows with `target = overlay`; the overlay read `working`; choosing a version without a video and an unknown overlay were refused with the sentences above. (4) **Out of date:** a new plan row with the same content left both briefs `ready`; a moved end made only that brief `out_of_date` (and its graphics blocked with "brief is out of date"); a new timing id made the other one `out_of_date`. (5) The API models, the two pipeline steps (targets with the right refs and labels) and the staleness overview ran on that copy for project 94 without error. (6) `ruff check`, `ruff format --check`, `eslint` and `tsc -b` pass.
+- **Not checked.** (1) No model call and no render: the brief text, the two engines' code and the drawn video were not made (they need the owner's go-ahead and a rebuilt app); the brief in (3) is a hand-written stand-in, so "the numbers on screen are the numbers said" was not seen on a real brief (the brief writer's rules are unchanged). (2) Repairs of an overlay's component (`queue_repair` by target) were not run. (3) The panels were linted and type-checked, not opened in a browser. (4) "A re-plan leaves them current" was checked by adding a plan row with the same content, not by a real re-plan (that costs a model call). (5) The output size is used for every overlay until OVL-007 draws a split one at the panel's size. (6) Nothing lays the overlays over the shots yet (OVL-005).
 
 ### OVL-005 — Overlays in the render
 
@@ -525,3 +537,4 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 | 2026-11-26 | OVL-001 | Completed: migration `0102` (`target` column on the three graphics tables), models, readers limited to shot rows, `DATABASE_STRUCTURE.md`. |
 | 2026-11-27 | OVL-002 | Completed: suggestions removed from the planner's request, answer, stored content and out-of-date check; `scene_suggestions` moved to `graphic_suggestions.py`; API field removed; panels and texts updated. |
 | 2026-11-27 | OVL-003 | Completed: pure `graphic_overlays.py` (placement, keys, reason codes), `SceneEntry.overlays` and `unplaced_overlays`, API fields, board notes on the Graphic briefs step, `trimmed` flag on suggestions cut by a sound bite. |
+| 2026-11-27 | OVL-004 | Completed: briefs and graphics for overlays (`target = 'overlay'` rows, `start_overlay` in both services, `overlays` on both states and APIs, pipeline and staleness targets, panel cards), `clip_frames` and the stricter `too_long` check. |

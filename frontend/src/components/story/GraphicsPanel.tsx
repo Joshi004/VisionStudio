@@ -15,11 +15,14 @@ import {
 } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import { useRunGraphicBrief } from "../../api/graphicBriefs";
+import { useRunGraphicBrief, useRunOverlayBrief } from "../../api/graphicBriefs";
 import {
   useAskGraphicAgain,
+  useAskOverlayGraphicAgain,
+  useMakeOverlayGraphics,
   useMakeShotGraphics,
   useSetGraphicChoice,
+  useSetOverlayGraphicChoice,
   useShotGraphics,
   type ShotGraphic,
   type ShotGraphicAttempt,
@@ -69,6 +72,36 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
   const askAgain = useAskGraphicAgain(projectId);
   const writeBrief = useRunGraphicBrief(projectId);
   const setChoice = useSetGraphicChoice(projectId);
+  const makeOverlay = useMakeOverlayGraphics(projectId);
+  const askOverlayAgain = useAskOverlayGraphicAgain(projectId);
+  const writeOverlayBrief = useRunOverlayBrief(projectId);
+  const setOverlayChoice = useSetOverlayGraphicChoice(projectId);
+  // The mutations of graphic shots and of overlays share their alerts.
+  const makeError = make.isError ? make.error : makeOverlay.isError ? makeOverlay.error : null;
+  const askError = askAgain.isError
+    ? askAgain.error
+    : askOverlayAgain.isError
+      ? askOverlayAgain.error
+      : null;
+  const briefError = writeBrief.isError
+    ? writeBrief.error
+    : writeOverlayBrief.isError
+      ? writeOverlayBrief.error
+      : null;
+  const choiceError = setChoice.isError
+    ? setChoice.error
+    : setOverlayChoice.isError
+      ? setOverlayChoice.error
+      : null;
+  const busy =
+    make.isPending ||
+    askAgain.isPending ||
+    writeBrief.isPending ||
+    setChoice.isPending ||
+    makeOverlay.isPending ||
+    askOverlayAgain.isPending ||
+    writeOverlayBrief.isPending ||
+    setOverlayChoice.isPending;
 
   return (
     <Stack gap="sm">
@@ -76,10 +109,11 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
         <Stack gap="xs">
           <Title order={4}>Graphics</Title>
           <Text size="sm" c="dimmed">
-            Each graphic shot is made in two versions: a component the model writes as code, and a
-            scene the model builds from ready-made blocks. Both are drawn from the shot's brief
-            and the project's theme, with the words on the beats they were spoken at. The clips
-            have no sound; the voice take plays with them.
+            Each graphic shot, and each graphic you suggested over some words, is made in two
+            versions: a component the model writes as code, and a scene the model builds from
+            ready-made blocks. Both are drawn from the brief and the project's theme, with the words
+            on the beats they were spoken at. The clips have no sound; the voice take plays with
+            them.
           </Text>
           {isLoading && <Loader size="sm" />}
           {isError && (
@@ -87,24 +121,24 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
               {describeError(error)}
             </Alert>
           )}
-          {make.isError && (
+          {makeError !== null && (
             <Alert color="red" title="Could not make the graphics">
-              {describeError(make.error)}
+              {describeError(makeError)}
             </Alert>
           )}
-          {askAgain.isError && (
+          {askError !== null && (
             <Alert color="red" title="Could not ask again">
-              {describeError(askAgain.error)}
+              {describeError(askError)}
             </Alert>
           )}
-          {writeBrief.isError && (
+          {briefError !== null && (
             <Alert color="red" title="Could not start the graphic brief">
-              {describeError(writeBrief.error)}
+              {describeError(briefError)}
             </Alert>
           )}
-          {setChoice.isError && (
+          {choiceError !== null && (
             <Alert color="red" title="Could not choose the version">
-              {describeError(setChoice.error)}
+              {describeError(choiceError)}
             </Alert>
           )}
           {data?.blocked_reason && (
@@ -114,8 +148,8 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
           )}
           {data?.wanted && data.scenes.length === 0 && (
             <Text size="sm" c="dimmed">
-              No scene has a graphic shot yet. Graphic shots appear when the shots of a scene are
-              planned.
+              No scene has a graphic shot or a graphic suggestion yet. Graphic shots appear when the
+              shots of a scene are planned.
             </Text>
           )}
         </Stack>
@@ -125,52 +159,72 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
         <SceneGraphics
           key={scene.id}
           scene={scene}
-          busy={
-            make.isPending || askAgain.isPending || writeBrief.isPending || setChoice.isPending
-          }
-          onMake={(shot) => make.mutate({ sceneId: scene.id, shotId: shot.id })}
-          onAskAgain={(shot, engine) =>
-            askAgain.mutate({ sceneId: scene.id, shotId: shot.id, engine })
-          }
-          onWriteBrief={(shot) => writeBrief.mutate({ sceneId: scene.id, shotId: shot.id })}
-          onChoose={(shot, engine) =>
-            setChoice.mutate({ sceneId: scene.id, shotId: shot.id, engine })
-          }
+          busy={busy}
+          shotHandlers={{
+            onMake: (shot) => make.mutate({ sceneId: scene.id, shotId: shot.id }),
+            onAskAgain: (shot, engine) =>
+              askAgain.mutate({ sceneId: scene.id, shotId: shot.id, engine }),
+            onWriteBrief: (shot) => writeBrief.mutate({ sceneId: scene.id, shotId: shot.id }),
+            onChoose: (shot, engine) =>
+              setChoice.mutate({ sceneId: scene.id, shotId: shot.id, engine }),
+          }}
+          overlayHandlers={{
+            onMake: (shot) => makeOverlay.mutate({ sceneId: scene.id, overlayId: shot.id }),
+            onAskAgain: (shot, engine) =>
+              askOverlayAgain.mutate({
+                sceneId: scene.id,
+                overlayId: shot.id,
+                engine,
+              }),
+            onWriteBrief: (shot) =>
+              writeOverlayBrief.mutate({
+                sceneId: scene.id,
+                overlayId: shot.id,
+              }),
+            onChoose: (shot, engine) =>
+              setOverlayChoice.mutate({
+                sceneId: scene.id,
+                overlayId: shot.id,
+                engine,
+              }),
+          }}
         />
       ))}
     </Stack>
   );
 }
 
-type SceneGraphicsProps = {
-  scene: ShotGraphicScene;
-  busy: boolean;
+/** What the buttons of one graphic do. A graphic shot and an overlay each have their own. */
+type GraphicHandlers = {
   onMake: (shot: ShotGraphic) => void;
   onAskAgain: (shot: ShotGraphic, engine: ShotGraphicEngine["key"]) => void;
   onWriteBrief: (shot: ShotGraphic) => void;
   onChoose: (shot: ShotGraphic, engine: ShotGraphicEngine["key"] | null) => void;
 };
 
-function SceneGraphics({
-  scene,
-  busy,
-  onMake,
-  onAskAgain,
-  onWriteBrief,
-  onChoose,
-}: SceneGraphicsProps) {
+type SceneGraphicsProps = {
+  scene: ShotGraphicScene;
+  busy: boolean;
+  shotHandlers: GraphicHandlers;
+  overlayHandlers: GraphicHandlers;
+};
+
+function SceneGraphics({ scene, busy, shotHandlers, overlayHandlers }: SceneGraphicsProps) {
   return (
     <Stack gap="xs">
-      <Text fw={600}>{scene.index !== null ? `Scene ${scene.index}: ${scene.title}` : scene.title}</Text>
+      <Text fw={600}>
+        {scene.index !== null ? `Scene ${scene.index}: ${scene.title}` : scene.title}
+      </Text>
       {scene.shots.map((shot) => (
+        <ShotGraphics key={shot.id} shot={shot} busy={busy} {...shotHandlers} />
+      ))}
+      {scene.overlays.map((overlay) => (
         <ShotGraphics
-          key={shot.id}
-          shot={shot}
+          key={`overlay-${overlay.id}`}
+          shot={overlay}
+          isOverlay
           busy={busy}
-          onMake={onMake}
-          onAskAgain={onAskAgain}
-          onWriteBrief={onWriteBrief}
-          onChoose={onChoose}
+          {...overlayHandlers}
         />
       ))}
     </Stack>
@@ -207,6 +261,8 @@ function shownAttempt(
 
 type ShotGraphicsProps = {
   shot: ShotGraphic;
+  /** The graphic is an overlay: it has its own heading and no planner's description. */
+  isOverlay?: boolean;
   busy: boolean;
   onMake: (shot: ShotGraphic) => void;
   onAskAgain: (shot: ShotGraphic, engine: ShotGraphicEngine["key"]) => void;
@@ -216,6 +272,7 @@ type ShotGraphicsProps = {
 
 function ShotGraphics({
   shot,
+  isOverlay = false,
   busy,
   onMake,
   onAskAgain,
@@ -252,7 +309,7 @@ function ShotGraphics({
           <Stack gap={4}>
             <Group gap="xs">
               <Text size="sm" fw={600}>
-                {shot.id.replace("shot_", "Shot ")}
+                {isOverlay ? "Graphic over:" : shot.id.replace("shot_", "Shot ")}
               </Text>
               <Badge color={badge.color} variant="light">
                 {badge.label}
@@ -270,9 +327,11 @@ function ShotGraphics({
             <Text size="sm" fw={600} style={{ wordBreak: "break-word" }}>
               {shot.spoken_text}
             </Text>
-            <Text size="xs" c="dimmed">
-              Planner's description: {shot.description}
-            </Text>
+            {!isOverlay && (
+              <Text size="xs" c="dimmed">
+                Planner's description: {shot.description}
+              </Text>
+            )}
           </Stack>
           <Group gap="xs">
             <Button
@@ -309,8 +368,8 @@ function ShotGraphics({
           <Alert color="yellow" title="Out of date">
             <Stack gap={4}>
               <Text size="sm">
-                Something these graphics were made from has changed. Press Make the graphics to
-                draw them again.
+                Something these graphics were made from has changed. Press Make the graphics to draw
+                them again.
               </Text>
               {shot.reasons.length > 0 && (
                 <List size="sm">
@@ -476,7 +535,9 @@ function VersionCard({
               Attempt {attempt.attempt}
               {engine.attempts.length > 1 ? ` of ${engine.attempts.length}` : ""}
               {attempt.url !== null && !attempt.current ? ", drawn for an earlier look" : ""}
-              {repairedAttempt !== undefined ? `, a repair of attempt ${repairedAttempt.attempt}` : ""}
+              {repairedAttempt !== undefined
+                ? `, a repair of attempt ${repairedAttempt.attempt}`
+                : ""}
             </Text>
             {engine.key === "remotion_blocks" && <GraphicsBlockScene render={attempt} />}
             {engine.key === "generated_component" && <GraphicsComponentCode render={attempt} />}

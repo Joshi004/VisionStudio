@@ -26,7 +26,7 @@ Nothing here is stored but the versions; there is no manual edit.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -37,6 +37,7 @@ from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     cut_planning_writer,
+    graphic_overlays,
     graphic_theme,
     shot_graphic_brief_writer,
     shot_plans,
@@ -44,7 +45,7 @@ from app.services import (
     take_timings,
     user_feedback,
 )
-from app.services.take_map import NO_REPLACED, TakeMap
+from app.services.take_map import NO_REPLACED, TakeMap, TakeMapError
 
 JOB_TYPE: Final = "write_shot_graphic_brief"
 DEDUPE_KEY: Final = "shot_key"
@@ -55,6 +56,10 @@ SOURCE_AI: Final = "ai"
 # `shot_graphics` reads shot rows only; overlay rows are read from OVL-004 on.
 TARGET_SHOT: Final = "shot"
 TARGET_OVERLAY: Final = "overlay"
+
+# What the brief writer is told an overlay is, in place of the planner's description of a shot
+# (OVL-004): an overlay has no planner, only the owner's wish.
+OVERLAY_DESCRIPTION: Final = "The owner asked for a graphic over these words. Show what they say."
 
 STORY_BIBLE_KIND: Final = "story_bible"
 SHOT_PLAN_KIND: Final = "shot_plan"
@@ -87,6 +92,12 @@ def is_graphic_shot(shot: dict[str, Any]) -> bool:
 
 def shot_key(scene_id: str, shot_id: str) -> str:
     return f"{scene_id}/{shot_id}"
+
+
+def overlay_job_key(scene_id: str, overlay_id: str) -> str:
+    """The dedupe value of the brief job of an overlay (`{first}-{last}` is its id in the scene).
+    The prefix keeps it from ever being the value of a shot's job."""
+    return f"overlay:{scene_id}/{overlay_id}"
 
 
 # --- What a brief is written from ------------------------------------------------------------
@@ -166,6 +177,52 @@ def _material(
     )
 
 
+@dataclass(frozen=True)
+class _OverlayMaterial:
+    """What the brief of one overlay is written from (OVL-004): its words timed from its start on
+    the scene's clock, the sentences around them, and the take they are read from."""
+
+    overlay: graphic_overlays.Overlay
+    words: list[dict[str, Any]]
+    context: shot_graphic_brief_writer.Context
+    context_sha256: str
+    take_id: int
+    timing_id: int
+
+
+def _overlay_material(
+    overlay: graphic_overlays.Overlay, clock: take_timings.TakeClock, take_map: TakeMap
+) -> _OverlayMaterial | None:
+    """The words, the context and the hashes of one overlay, or None when its words are not in
+    the take or its start cannot be placed in it. `clock` must be ready (no `blocked_reason`).
+    The words are timed from the overlay's own start, so the clip's clock needs no shift.
+    """
+    assert clock.audio is not None and clock.timing is not None
+    if not 1 <= overlay.first_word <= overlay.last_word <= len(clock.words):
+        return None
+    try:
+        start_take_s = take_map.to_take(overlay.start_s)
+    except TakeMapError:
+        return None
+    spans = [
+        {"unit_id": span.unit_id, "first_word": span.first_word, "last_word": span.last_word}
+        for span in clock.spans
+    ]
+    context = shot_graphic_brief_writer.context_of(
+        clock.words, spans, overlay.first_word, overlay.last_word
+    )
+    return _OverlayMaterial(
+        overlay=overlay,
+        words=shot_graphic_brief_writer.timed_words(
+            clock.words, overlay.first_word, overlay.last_word, start_take_s, take_map
+        ),
+        context=context,
+        context_sha256=shot_graphic_brief_writer.context_sha256(context.text),
+        take_id=clock.audio.id,
+        timing_id=clock.timing.id,
+    )
+
+
 def _refusal(loaded: _Loaded, scene_id: str) -> str | None:
     """Why the briefs of this scene's graphic shots cannot be written now, or None."""
     if not graphic_theme.wanted(loaded.project):
@@ -189,6 +246,34 @@ def _refusal(loaded: _Loaded, scene_id: str) -> str | None:
     return None
 
 
+def _overlay_refusal(loaded: _Loaded, scene_id: str) -> str | None:
+    """Why the briefs of this scene's overlays cannot be written now, or None. An overlay exists
+    only for a scene whose plan is current, so the plan is not asked about here."""
+    if not graphic_theme.wanted(loaded.project):
+        return graphic_theme.OFF_MESSAGE
+    if loaded.bible is None:
+        return NO_BIBLE_MESSAGE
+    if scene_id not in loaded.plan_by_scene:
+        return f"There is no scene '{scene_id}' in the newest list of scenes."
+    clock = loaded.clocks.get(scene_id)
+    if clock is None:
+        return take_timings.NOT_MADE_REASON
+    return clock.blocked_reason
+
+
+def _find_overlay(loaded: _Loaded, scene_id: str, overlay_id: str) -> graphic_overlays.Overlay:
+    plan = loaded.plan_by_scene.get(scene_id)
+    if plan is None:
+        raise ShotGraphicBriefError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    for overlay in plan.overlays:
+        if overlay.overlay_id == overlay_id:
+            return overlay
+    raise ShotGraphicBriefError(
+        f"There is no graphic over these words ('{overlay_id}') in the scene '{scene_id}'. "
+        "Its words may have changed."
+    )
+
+
 def _find_shot(loaded: _Loaded, scene_id: str, shot_id: str) -> dict[str, Any]:
     plan = loaded.plan_by_scene.get(scene_id)
     if plan is None:
@@ -206,14 +291,19 @@ def _find_shot(loaded: _Loaded, scene_id: str, shot_id: str) -> dict[str, Any]:
 
 
 async def newest_row(
-    session: AsyncSession, project_id: int, scene_id: str, shot_id: str
+    session: AsyncSession,
+    project_id: int,
+    scene_id: str,
+    shot_id: str,
+    target: str = TARGET_SHOT,
 ) -> ShotGraphicBrief | None:
-    """The newest brief of one shot, or None when it has none."""
+    """The newest brief of one shot (or of one overlay, `target` `overlay` and `shot_id` its
+    `{first}-{last}`), or None when it has none."""
     statement = (
         select(ShotGraphicBrief)
         .where(
             ShotGraphicBrief.project_id == project_id,
-            ShotGraphicBrief.target == TARGET_SHOT,
+            ShotGraphicBrief.target == target,
             ShotGraphicBrief.scene_id == scene_id,
             ShotGraphicBrief.shot_id == shot_id,
         )
@@ -230,25 +320,27 @@ async def save_version(
     project_id: int,
     scene_id: str,
     shot_id: str,
-    shot_plan_id: int,
+    shot_plan_id: int | None,
     job_id: int,
     inputs: dict[str, Any],
     content: dict[str, Any],
+    target: str = TARGET_SHOT,
 ) -> ShotGraphicBrief:
-    """Adds the next version of the shot's brief, made by the model (`source` is `ai`). Flushes
+    """Adds the next version of the shot's brief, made by the model (`source` is `ai`). An
+    overlay's brief has `target` `overlay` and no shot plan (`shot_plan_id` None). Flushes
     but does not commit: the job commits it together with finishing itself, so a job is never
     "succeeded" without its result.
     """
     statement = select(func.max(ShotGraphicBrief.version)).where(
         ShotGraphicBrief.project_id == project_id,
-        ShotGraphicBrief.target == TARGET_SHOT,
+        ShotGraphicBrief.target == target,
         ShotGraphicBrief.scene_id == scene_id,
         ShotGraphicBrief.shot_id == shot_id,
     )
     highest = (await session.execute(statement)).scalar_one_or_none()
     row = ShotGraphicBrief(
         project_id=project_id,
-        target=TARGET_SHOT,
+        target=target,
         scene_id=scene_id,
         shot_id=shot_id,
         shot_plan_id=shot_plan_id,
@@ -395,6 +487,115 @@ async def start_shot(
     return job
 
 
+def _overlay_saved_inputs(
+    loaded: _Loaded,
+    material: _OverlayMaterial,
+    feedback: user_feedback.Feedback | None,
+) -> dict[str, Any]:
+    """What a version of an overlay's brief is built from. No shot plan is recorded: an overlay
+    depends on the take and on its place, never on the shots (§4.3)."""
+    assert loaded.bible is not None
+    overlay = material.overlay
+    inputs: dict[str, Any] = {
+        "artifacts": [
+            {"kind": STORY_BIBLE_KIND, "id": loaded.bible.id, "version": loaded.bible.version},
+            {
+                "kind": SPEECH_TAKE_KIND,
+                "id": material.take_id,
+                "timing_id": material.timing_id,
+            },
+        ],
+        "overlay": {
+            "first_word": overlay.first_word,
+            "last_word": overlay.last_word,
+            "start_s": overlay.start_s,
+            "end_s": overlay.end_s,
+            "text": overlay.text,
+        },
+        "words": material.words,
+        "context": {
+            "first_word": material.context.first_word,
+            "last_word": material.context.last_word,
+            "text": material.context.text,
+            "sha256": material.context_sha256,
+        },
+    }
+    if feedback is not None:
+        inputs["feedback"] = feedback.for_version()
+    return inputs
+
+
+async def _queue_overlay(
+    session: AsyncSession,
+    loaded: _Loaded,
+    scene_id: str,
+    overlay_id: str,
+    feedback: user_feedback.Feedback | None = None,
+) -> tuple[Job, bool]:
+    """Queues the brief job of this overlay and returns `(job, created)`, like `_queue`. Raises
+    ShotGraphicBriefError."""
+    refusal = _overlay_refusal(loaded, scene_id)
+    if refusal is not None:
+        raise ShotGraphicBriefError(refusal)
+    overlay = _find_overlay(loaded, scene_id, overlay_id)
+    plan = loaded.plan_by_scene[scene_id]
+    material = _overlay_material(overlay, loaded.clocks[scene_id], _map_of(plan))
+    if material is None:
+        raise ShotGraphicBriefError(
+            "The words of this graphic are not in the scene's take. Check the suggestion."
+        )
+    job_input: dict[str, Any] = {
+        DEDUPE_KEY: overlay_job_key(scene_id, overlay_id),
+        "target": TARGET_OVERLAY,
+        "scene_id": scene_id,
+        "shot_id": overlay_id,
+        "shot_plan_id": None,
+        "shot_words": material.context.shot,
+        "before": material.context.before,
+        "after": material.context.after,
+        "description": OVERLAY_DESCRIPTION,
+        "shot_seconds": overlay.length_s,
+        "orientation": loaded.project.orientation,
+        "bible": shot_graphic_brief_writer.bible_for_model(loaded.bible.content),
+        "saved_inputs": _overlay_saved_inputs(loaded, material, feedback),
+    }
+    if feedback is not None:
+        job_input["feedback"] = feedback.for_job()
+    return await store.create_job(
+        session,
+        project_id=loaded.project.id,
+        type=JOB_TYPE,
+        provider="llm",
+        input=job_input,
+        dedupe_key=DEDUPE_KEY,
+    )
+
+
+async def start_overlay(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    overlay_id: str,
+    *,
+    feedback: str | None = None,
+) -> Job:
+    """Queues the job that writes the brief of one overlay, from a copy of what it is made from,
+    and commits. The same rules as `start_shot`: a job already waiting or running is returned,
+    and a note is refused in that case. Raises ShotGraphicBriefError when it cannot be written.
+    """
+    loaded = await _load(session, project)
+    note = None
+    if feedback is not None:
+        note = _feedback_on(
+            feedback,
+            await newest_row(session, project.id, scene_id, overlay_id, TARGET_OVERLAY),
+        )
+    job, created = await _queue_overlay(session, loaded, scene_id, overlay_id, note)
+    if note is not None and not created:
+        raise ShotGraphicBriefError(BEING_WRITTEN_MESSAGE)
+    return job
+
+
 # --- Reading the state -----------------------------------------------------------------------
 
 
@@ -423,13 +624,33 @@ class ShotEntry:
 
 
 @dataclass(frozen=True)
+class OverlayEntry:
+    """One graphic overlay of a scene (OVL-003) and where its brief stands."""
+
+    overlay: graphic_overlays.Overlay
+    status: Status
+    # Why a written brief is out of date, one sentence each. Empty unless `out_of_date`.
+    reasons: list[str]
+    # The context of the overlay as the take reads now, or None when it cannot be read.
+    context: shot_graphic_brief_writer.Context | None
+    row: ShotGraphicBrief | None
+    # The second each beat of the newest brief starts, from the start of the overlay.
+    beat_times: dict[str, float]
+    job: Job | None
+    last_error: str | None
+    can_run: bool
+    blocked_reason: str | None
+
+
+@dataclass(frozen=True)
 class SceneEntry:
-    """One scene of the newest list of scenes and its graphic shots."""
+    """One scene of the newest list of scenes, its graphic shots and its overlays."""
 
     item: dict[str, Any]
     shots: list[ShotEntry]
     # Why this scene's briefs cannot be written, or None.
     blocked_reason: str | None
+    overlays: list[OverlayEntry] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -462,17 +683,64 @@ def _out_of_date_reasons(row: ShotGraphicBrief, material: _Material | None) -> l
     reasons: list[str] = []
     if inputs.get("skeleton_sha256") != material.skeleton_sha256:
         reasons.append("The shot was planned again, and its words, times or description changed.")
+    reasons.extend(
+        _source_reasons(
+            inputs,
+            material.context_sha256,
+            material.take_id,
+            material.timing_id,
+            "The sentences around the shot changed.",
+        )
+    )
+    return reasons
+
+
+def _source_reasons(
+    inputs: dict[str, Any], context_sha256: str, take_id: int, timing_id: int, context_text: str
+) -> list[str]:
+    """The reasons a brief is out of date that a shot and an overlay share: the sentences around
+    it changed, or the take was made or timed again."""
+    reasons: list[str] = []
     context = inputs.get("context")
     recorded_context = context.get("sha256") if isinstance(context, dict) else None
-    if recorded_context != material.context_sha256:
-        reasons.append("The sentences around the shot changed.")
+    if recorded_context != context_sha256:
+        reasons.append(context_text)
     take = _recorded(inputs, SPEECH_TAKE_KIND)
     if take is None:
         reasons.append("This brief did not record the voice take it was written on.")
-    elif take.get("id") != material.take_id:
+    elif take.get("id") != take_id:
         reasons.append("The voice take of the scene was made again since this brief was written.")
-    elif take.get("timing_id") != material.timing_id:
+    elif take.get("timing_id") != timing_id:
         reasons.append("The words of the voice take were timed again since this brief was written.")
+    return reasons
+
+
+def _overlay_out_of_date_reasons(
+    row: ShotGraphicBrief, material: _OverlayMaterial | None
+) -> list[str]:
+    """Why the brief of an overlay is no longer current, one sentence each (§4.3). Only the
+    overlay's own place, its context and the take count: a re-plan changes none of them."""
+    if material is None or not isinstance(row.inputs, dict):
+        return []
+    inputs = row.inputs
+    reasons: list[str] = []
+    recorded = inputs.get("overlay")
+    overlay = material.overlay
+    if (
+        not isinstance(recorded, dict)
+        or recorded.get("start_s") != overlay.start_s
+        or recorded.get("end_s") != overlay.end_s
+    ):
+        reasons.append("The graphic now starts or ends at another time in the scene.")
+    reasons.extend(
+        _source_reasons(
+            inputs,
+            material.context_sha256,
+            material.take_id,
+            material.timing_id,
+            "The sentences around the graphic's words changed.",
+        )
+    )
     return reasons
 
 
@@ -508,11 +776,14 @@ async def _newest_jobs(session: AsyncSession, project_id: int) -> dict[str, Job]
     return newest
 
 
-async def _newest_rows(session: AsyncSession, project_id: int) -> dict[str, ShotGraphicBrief]:
-    """The newest brief of each shot of the project, by its `scene/shot` key."""
+async def _newest_rows(
+    session: AsyncSession, project_id: int, target: str = TARGET_SHOT
+) -> dict[str, ShotGraphicBrief]:
+    """The newest brief of each shot (or overlay, by `target`) of the project, by its
+    `scene/shot` key (`scene/first-last` for an overlay)."""
     statement = (
         select(ShotGraphicBrief)
-        .where(ShotGraphicBrief.project_id == project_id, ShotGraphicBrief.target == TARGET_SHOT)
+        .where(ShotGraphicBrief.project_id == project_id, ShotGraphicBrief.target == target)
         .order_by(ShotGraphicBrief.version.desc(), ShotGraphicBrief.id.desc())
         .execution_options(populate_existing=True)
     )
@@ -533,6 +804,55 @@ def _failure(job: Job | None, row: ShotGraphicBrief | None) -> str | None:
     return job.error or ("the job was cancelled" if job.status == "cancelled" else "the job failed")
 
 
+def _overlay_entries(
+    loaded: _Loaded,
+    plan: shot_plans.SceneEntry,
+    clock: take_timings.TakeClock | None,
+    jobs: dict[str, Job],
+    rows: dict[str, ShotGraphicBrief],
+) -> list[OverlayEntry]:
+    """The overlays of a scene and where the brief of each stands."""
+    scene_id = plan.item["id"]
+    refusal = _overlay_refusal(loaded, scene_id) if plan.overlays else None
+    entries: list[OverlayEntry] = []
+    for overlay in plan.overlays:
+        row = rows.get(shot_key(scene_id, overlay.overlay_id))
+        job = jobs.get(overlay_job_key(scene_id, overlay.overlay_id))
+        active = job is not None and job.status in store.ACTIVE_STATUSES
+        material = (
+            _overlay_material(overlay, clock, _map_of(plan))
+            if clock is not None and clock.blocked_reason is None
+            else None
+        )
+        reasons = _overlay_out_of_date_reasons(row, material) if row is not None else []
+        failure = _failure(job, row)
+        status: Status = "none"
+        if active:
+            status = "writing"
+        elif row is not None:
+            status = "out_of_date" if reasons else "ready"
+        elif failure is not None:
+            status = "failed"
+        blocked = refusal
+        if blocked is None and active:
+            blocked = BEING_WRITTEN_MESSAGE
+        entries.append(
+            OverlayEntry(
+                overlay=overlay,
+                status=status,
+                reasons=reasons,
+                context=material.context if material is not None else None,
+                row=row,
+                beat_times=_beat_times(row),
+                job=job,
+                last_error=failure,
+                can_run=blocked is None,
+                blocked_reason=blocked,
+            )
+        )
+    return entries
+
+
 async def _build(
     session: AsyncSession, project: Project, loaded: _Loaded
 ) -> ShotGraphicBriefsState:
@@ -543,6 +863,7 @@ async def _build(
         )
     jobs = await _newest_jobs(session, project.id)
     rows = await _newest_rows(session, project.id)
+    overlay_rows = await _newest_rows(session, project.id, TARGET_OVERLAY)
 
     entries: list[SceneEntry] = []
     for plan in loaded.plans.entries:
@@ -588,7 +909,10 @@ async def _build(
                     blocked_reason=blocked,
                 )
             )
-        entries.append(SceneEntry(item=plan.item, shots=shots, blocked_reason=refusal))
+        overlays = _overlay_entries(loaded, plan, clock, jobs, overlay_rows)
+        entries.append(
+            SceneEntry(item=plan.item, shots=shots, blocked_reason=refusal, overlays=overlays)
+        )
     return ShotGraphicBriefsState(entries=entries, blocked_reason=None, wanted=True)
 
 

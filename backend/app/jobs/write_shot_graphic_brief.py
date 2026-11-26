@@ -56,7 +56,11 @@ class _Task:
 
     scene_id: str
     shot_id: str
-    shot_plan_id: int
+    # The shot's plan; None for an overlay (OVL-004), whose brief depends on no plan.
+    shot_plan_id: int | None
+    # `shot` or `overlay` (`shot_graphic_briefs.TARGET_*`). `shot_id` is the overlay's
+    # `{first}-{last}` for an overlay.
+    target: str
     shot_words: str
     before: str
     after: str
@@ -79,6 +83,13 @@ def _text(value: Any, *, required: bool) -> str | None:
     return value
 
 
+def _plan_id_fits(target: str, plan_id: Any) -> bool:
+    """A shot's brief names its plan (an int); an overlay's names none."""
+    if target == shot_graphic_briefs.TARGET_OVERLAY:
+        return plan_id is None
+    return isinstance(plan_id, int) and not isinstance(plan_id, bool)
+
+
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
     """The job's input as a task, or None when it is not complete."""
     scene_id = _text(job_input.get("scene_id"), required=True)
@@ -89,6 +100,8 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     description = _text(job_input.get("description"), required=True)
     orientation = _text(job_input.get("orientation"), required=True)
     plan_id = job_input.get("shot_plan_id")
+    # A job queued before overlays has no target: it is for a shot.
+    target = job_input.get("target", shot_graphic_briefs.TARGET_SHOT)
     seconds = job_input.get("shot_seconds")
     bible = job_input.get("bible")
     saved_inputs = job_input.get("saved_inputs")
@@ -100,8 +113,8 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
         or after is None
         or description is None
         or orientation is None
-        or not isinstance(plan_id, int)
-        or isinstance(plan_id, bool)
+        or target not in (shot_graphic_briefs.TARGET_SHOT, shot_graphic_briefs.TARGET_OVERLAY)
+        or not _plan_id_fits(target, plan_id)
         or not isinstance(seconds, int | float)
         or isinstance(seconds, bool)
         or not isinstance(bible, dict)
@@ -115,6 +128,7 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
         scene_id=scene_id,
         shot_id=shot_id,
         shot_plan_id=plan_id,
+        target=target,
         shot_words=shot_words,
         before=before,
         after=after,
@@ -210,6 +224,7 @@ class WriteShotGraphicBriefHandler(JobHandler):
                 job_id=job_id,
                 inputs=task.saved_inputs,
                 content=content,
+                target=task.target,
             )
             output = {
                 "calls": {"brief": outcome.record()},
@@ -217,6 +232,7 @@ class WriteShotGraphicBriefHandler(JobHandler):
                 "shot_graphic_brief_id": row.id,
                 "scene_id": task.scene_id,
                 "shot_id": task.shot_id,
+                "target": task.target,
                 "version": row.version,
                 "seconds": round(time.monotonic() - started, 1),
             }

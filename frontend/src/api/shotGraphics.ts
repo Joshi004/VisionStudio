@@ -10,6 +10,8 @@ import type { components } from "./schema";
 export type ShotGraphicsState = components["schemas"]["ShotGraphicsStateOut"];
 export type ShotGraphicScene = components["schemas"]["ShotGraphicSceneOut"];
 export type ShotGraphic = components["schemas"]["ShotGraphicShotOut"];
+/** A graphic overlay (OVL-004), read like a graphic shot. */
+export type ShotGraphicOverlay = components["schemas"]["ShotGraphicOverlayOut"];
 export type ShotGraphicEngine = components["schemas"]["ShotGraphicEngineOut"];
 export type ShotGraphicAttempt = components["schemas"]["ShotGraphicAttemptOut"];
 export type ShotGraphicEngineKey = ShotGraphicEngine["key"];
@@ -50,7 +52,10 @@ export function useShotGraphics(projectId: number) {
     queryFn: () => fetchShotGraphics(projectId),
     enabled: isValidProjectId(projectId),
     refetchInterval: (query) =>
-      query.state.data?.scenes.some((scene) => scene.shots.some(isShotGraphicWorking))
+      query.state.data?.scenes.some(
+        (scene) =>
+          scene.shots.some(isShotGraphicWorking) || scene.overlays.some(isShotGraphicWorking),
+      )
         ? ACTIVE_POLL_MS
         : false,
   });
@@ -65,7 +70,11 @@ export function useMakeShotGraphics(projectId: number) {
         "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/run",
         {
           params: {
-            path: { project_id: projectId, scene_id: input.sceneId, shot_id: input.shotId },
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              shot_id: input.shotId,
+            },
           },
         },
       );
@@ -139,7 +148,120 @@ export function useSetGraphicChoice(projectId: number) {
         "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/choice",
         {
           params: {
-            path: { project_id: projectId, scene_id: input.sceneId, shot_id: input.shotId },
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              shot_id: input.shotId,
+            },
+          },
+          body: { engine: input.engine },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not choose the version (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: shotGraphicsKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** Makes what is missing for one graphic overlay. `overlayId` is its `{first}-{last}`. */
+export function useMakeOverlayGraphics(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; overlayId: string }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/run",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              overlay_id: input.overlayId,
+            },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not make the graphics (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: shotGraphicsKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** A paid model call: makes one version of one overlay again as a new attempt. */
+export function useAskOverlayGraphicAgain(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      overlayId: string;
+      engine: ShotGraphicEngineKey;
+    }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/{engine}/ask-again",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              overlay_id: input.overlayId,
+              engine: input.engine,
+            },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not ask again (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: shotGraphicsKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** Chooses the version the video uses for one overlay. `null` is Automatic. */
+export function useSetOverlayGraphicChoice(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      overlayId: string;
+      engine: ShotGraphicEngineKey | null;
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/choice",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              overlay_id: input.overlayId,
+            },
           },
           body: { engine: input.engine },
         },

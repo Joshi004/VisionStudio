@@ -214,6 +214,25 @@ def _shot_key(scene_id: str, shot_id: str) -> str:
     return f"shot:{scene_id}/{shot_id}"
 
 
+# The last part of the `ref` of a target that is a graphic overlay (OVL-004): its ref is
+# `(scene id, overlay id, OVERLAY_REF)`, so the first two parts never equal a shot's.
+OVERLAY_REF: Final = "overlay"
+_OVERLAY_LABEL_WORDS: Final = 40
+
+
+def _overlay_key(scene_id: str, overlay_id: str) -> str:
+    return f"overlay:{scene_id}/{overlay_id}"
+
+
+def _overlay_label(scene: dict[str, Any], text: str) -> str:
+    index = scene.get("index")
+    prefix = f"Scene {index}" if index is not None else f"Scene {scene.get('id')}"
+    words = (
+        text if len(text) <= _OVERLAY_LABEL_WORDS else text[:_OVERLAY_LABEL_WORDS].rstrip() + "..."
+    )
+    return f"{prefix}, graphic over '{words}'"
+
+
 def _blocked_project(reason: str) -> StepView:
     """A step whose stage cannot even list its targets yet: one target that is not done."""
     return StepView([Target(PROJECT_KEY, "", False, block=reason)])
@@ -2016,6 +2035,23 @@ async def _evaluate_graphic_briefs(
                     group=scene_id,
                 )
             )
+        for overlay in scene.overlays:
+            overlay_id = overlay.overlay.overlay_id
+            active = overlay.status == "writing"
+            done = overlay.status == "ready"
+            targets.append(
+                Target(
+                    _overlay_key(scene_id, overlay_id),
+                    _overlay_label(scene.item, overlay.overlay.text),
+                    done,
+                    active=active,
+                    block=None if done or active else overlay.blocked_reason,
+                    last_error=None if done else overlay.last_error,
+                    ref=(scene_id, overlay_id, OVERLAY_REF),
+                    stale=overlay.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
     return StepView(targets, warnings=_overlay_notes(await shot_plans.state(session, project)))
 
 
@@ -2026,14 +2062,15 @@ async def _start_graphic_briefs(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    return await _start_each(
-        session,
-        targets,
-        deadline,
-        lambda target: _ids_of(
-            shot_graphic_briefs.start_shot(session, project, target.ref[0], target.ref[1])
-        ),
-    )
+    def make(target: Target) -> Awaitable[tuple[int, ...]]:
+        start = (
+            shot_graphic_briefs.start_overlay
+            if target.ref[-1] == OVERLAY_REF
+            else shot_graphic_briefs.start_shot
+        )
+        return _ids_of(start(session, project, target.ref[0], target.ref[1]))
+
+    return await _start_each(session, targets, deadline, make)
 
 
 # --- Graphics ---------------------------------------------------------------------------------
@@ -2066,6 +2103,22 @@ async def _evaluate_graphics(
                     group=scene_id,
                 )
             )
+        for overlay in scene.overlays:
+            overlay_id = overlay.shot["id"]
+            active = overlay.status == "working"
+            targets.append(
+                Target(
+                    _overlay_key(scene_id, overlay_id),
+                    _overlay_label(scene.item, str(overlay.shot["spoken_text"])),
+                    overlay.done,
+                    active=active,
+                    block=None if overlay.done or active else overlay.refusal,
+                    last_error=None if overlay.done else overlay.last_error,
+                    ref=(scene_id, overlay_id, OVERLAY_REF),
+                    stale=overlay.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
     return StepView(targets)
 
 
@@ -2077,7 +2130,12 @@ async def _start_graphics(
     deadline: float,
 ) -> list[Started]:
     async def make(target: Target) -> tuple[int, ...]:
-        jobs = await shot_graphics.start_shot(session, project, target.ref[0], target.ref[1])
+        start = (
+            shot_graphics.start_overlay
+            if target.ref[-1] == OVERLAY_REF
+            else shot_graphics.start_shot
+        )
+        jobs = await start(session, project, target.ref[0], target.ref[1])
         return tuple(job.id for job in jobs)
 
     return await _start_each(session, targets, deadline, make)

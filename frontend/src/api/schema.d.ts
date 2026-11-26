@@ -942,6 +942,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/graphic-briefs/{scene_id}/overlays/{overlay_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Overlay Brief
+         * @description Starts the job that writes the brief of one graphic overlay (OVL-004). If it already has
+         *     a job waiting or running, its id is returned and no second job is made.
+         */
+        post: operations["run_overlay_brief_api_projects__project_id__graphic_briefs__scene_id__overlays__overlay_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/thumbnails": {
         parameters: {
             query?: never;
@@ -5058,6 +5079,66 @@ export interface paths {
          *     A new brief puts the shot back on the rule.
          */
         put: operations["set_shot_graphic_choice_api_projects__project_id__graphics__scene_id___shot_id__choice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Overlay Graphics
+         * @description Makes what is missing for one graphic overlay, like `run_shot_graphics` (OVL-004).
+         */
+        post: operations["run_overlay_graphics_api_projects__project_id__graphics__scene_id__overlays__overlay_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/{engine}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Overlay Graphic Again
+         * @description A paid model call: makes one version of an overlay again as a new attempt.
+         */
+        post: operations["ask_overlay_graphic_again_api_projects__project_id__graphics__scene_id__overlays__overlay_id___engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Overlay Graphic Choice
+         * @description Chooses the version the video uses for an overlay, or `null` for the rule.
+         */
+        put: operations["set_overlay_graphic_choice_api_projects__project_id__graphics__scene_id__overlays__overlay_id__choice_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -9777,6 +9858,47 @@ export interface components {
             beats: components["schemas"]["GraphicBeatOut"][];
             theme: components["schemas"]["GraphicBriefThemeOut"];
         };
+        /**
+         * GraphicBriefOverlayOut
+         * @description A graphic over words the owner suggested a graphic for (OVL-004), read like a graphic shot.
+         *     `id` is `{first}-{last}`, `description` says it has no planner, `spoken_text` is its words and
+         *     `start_s` and `end_s` are its place on the scene's clock, in seconds.
+         */
+        GraphicBriefOverlayOut: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Spoken Text */
+            spoken_text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Words Before */
+            words_before: string;
+            /** Words After */
+            words_after: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "writing" | "ready" | "failed" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            job: components["schemas"]["BriefJobOut"] | null;
+            brief: components["schemas"]["BriefOut"] | null;
+            /** Suggestion Id */
+            suggestion_id: string;
+            /** Shot Ids */
+            shot_ids: string[];
+        };
         /** GraphicBriefRun */
         GraphicBriefRun: {
             /** Job Id */
@@ -9799,6 +9921,8 @@ export interface components {
             blocked_reason: string | null;
             /** Shots */
             shots: components["schemas"]["GraphicShotOut"][];
+            /** Overlays */
+            overlays: components["schemas"]["GraphicBriefOverlayOut"][];
         };
         /** GraphicBriefThemeOut */
         GraphicBriefThemeOut: {
@@ -16607,6 +16731,56 @@ export interface components {
             /** Attempts */
             attempts: components["schemas"]["ShotGraphicAttemptOut"][];
         };
+        /**
+         * ShotGraphicOverlayOut
+         * @description A graphic overlay (OVL-004), read like a graphic shot. `id` is `{first}-{last}`,
+         *     `spoken_text` its words, and `start_s` and `end_s` its place on the scene's clock.
+         */
+        ShotGraphicOverlayOut: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Spoken Text */
+            spoken_text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "working" | "ready" | "out_of_date" | "failed";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Brief Id */
+            brief_id: number | null;
+            /** Brief Version */
+            brief_version: number | null;
+            /**
+             * Brief Status
+             * @enum {string}
+             */
+            brief_status: "none" | "writing" | "ready" | "failed" | "out_of_date";
+            resolved: components["schemas"]["GraphicResolvedOut"] | null;
+            voice: components["schemas"]["ShotVoiceOut"] | null;
+            /** Choice */
+            choice: ("generated_component" | "remotion_blocks") | null;
+            used: components["schemas"]["ShotGraphicUsedOut"] | null;
+            /** Engines */
+            engines: components["schemas"]["ShotGraphicEngineOut"][];
+            /** Suggestion Id */
+            suggestion_id: string;
+            /** Shot Ids */
+            shot_ids: string[];
+        };
         /** ShotGraphicSceneOut */
         ShotGraphicSceneOut: {
             /** Id */
@@ -16619,6 +16793,8 @@ export interface components {
             blocked_reason: string | null;
             /** Shots */
             shots: components["schemas"]["ShotGraphicShotOut"][];
+            /** Overlays */
+            overlays: components["schemas"]["ShotGraphicOverlayOut"][];
         };
         /** ShotGraphicShotOut */
         ShotGraphicShotOut: {
@@ -22461,6 +22637,52 @@ export interface operations {
                 project_id: number;
                 scene_id: string;
                 shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GraphicBriefRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the Story Bible is missing, the scene's shots are not planned and current, the shot is not a graphic shot, or the note cannot be used. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_overlay_brief_api_projects__project_id__graphic_briefs__scene_id__overlays__overlay_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                overlay_id: string;
             };
             cookie?: never;
         };
@@ -31831,6 +32053,137 @@ export interface operations {
                 project_id: number;
                 scene_id: string;
                 shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotGraphicChoiceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicChoiceOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_overlay_graphics_api_projects__project_id__graphics__scene_id__overlays__overlay_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                overlay_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_overlay_graphic_again_api_projects__project_id__graphics__scene_id__overlays__overlay_id___engine__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                overlay_id: string;
+                engine: "generated_component" | "remotion_blocks";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicAskRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_overlay_graphic_choice_api_projects__project_id__graphics__scene_id__overlays__overlay_id__choice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                overlay_id: string;
             };
             cookie?: never;
         };

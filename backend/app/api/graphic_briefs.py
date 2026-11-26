@@ -7,6 +7,8 @@ explainer (EXG-004).
   every read.
 - `POST .../{scene_id}/{shot_id}/run` starts the `write_shot_graphic_brief` job of one shot: one
   model call writes the brief. The body may hold `feedback`, the owner's note on the newest brief.
+- Each scene also lists its graphic **overlays** (OVL-004): the words the owner suggested a graphic
+  for. `POST .../{scene_id}/overlays/{overlay_id}/run` writes the brief of one, the same way.
 
 The rows and the job are made by `app/services/shot_graphic_briefs.py`. The answers never return
 ORM objects.
@@ -15,9 +17,9 @@ ORM objects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +33,10 @@ from app.jobs import dispatcher
 from app.services import shot_graphic_briefs, user_feedback
 
 router = APIRouter()
+
+# The id of an overlay in its scene: its first and last word in the take, counted from 1
+# (`graphic_overlays.Overlay.overlay_id`). Checked here so a stray value never reaches a service.
+OverlayId = Annotated[str, Path(pattern=r"^[1-9][0-9]*-[1-9][0-9]*$", max_length=20)]
 
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No such project."}}
 _INVALID = {
@@ -129,12 +135,23 @@ class GraphicShotOut(BaseModel):
     brief: BriefOut | None
 
 
+class GraphicBriefOverlayOut(GraphicShotOut):
+    """A graphic over words the owner suggested a graphic for (OVL-004), read like a graphic shot.
+    `id` is `{first}-{last}`, `description` says it has no planner, `spoken_text` is its words and
+    `start_s` and `end_s` are its place on the scene's clock, in seconds."""
+
+    suggestion_id: str
+    # The shots it is laid over.
+    shot_ids: list[str]
+
+
 class GraphicBriefSceneOut(BaseModel):
     id: str
     index: int | None
     title: str
     blocked_reason: str | None
     shots: list[GraphicShotOut]
+    overlays: list[GraphicBriefOverlayOut]
 
 
 class GraphicBriefsState(BaseModel):
@@ -159,7 +176,9 @@ class GraphicBriefRunIn(BaseModel):
 # --- Mapping ---------------------------------------------------------------------------------
 
 
-def _brief_out(entry: shot_graphic_briefs.ShotEntry) -> BriefOut | None:
+def _brief_out(
+    entry: shot_graphic_briefs.ShotEntry | shot_graphic_briefs.OverlayEntry,
+) -> BriefOut | None:
     row = entry.row
     if row is None:
         return None
@@ -180,22 +199,46 @@ def _brief_out(entry: shot_graphic_briefs.ShotEntry) -> BriefOut | None:
 
 def _shot_out(entry: shot_graphic_briefs.ShotEntry) -> GraphicShotOut:
     shot = entry.shot
-    job = entry.job
-    context = entry.context
     return GraphicShotOut(
         id=shot["id"],
         description=shot["description"],
         spoken_text=shot["spoken_text"],
         start_s=shot["start_s"],
         end_s=shot["end_s"],
-        words_before=context.before if context is not None else "",
-        words_after=context.after if context is not None else "",
-        status=cast(Status, entry.status),
-        reasons=entry.reasons,
-        last_error=entry.last_error,
-        can_run=entry.can_run,
-        blocked_reason=entry.blocked_reason,
-        job=(
+        **_common_fields(entry),
+    )
+
+
+def _overlay_out(entry: shot_graphic_briefs.OverlayEntry) -> GraphicBriefOverlayOut:
+    overlay = entry.overlay
+    return GraphicBriefOverlayOut(
+        id=overlay.overlay_id,
+        description=shot_graphic_briefs.OVERLAY_DESCRIPTION,
+        spoken_text=overlay.text,
+        start_s=overlay.start_s,
+        end_s=overlay.end_s,
+        suggestion_id=overlay.suggestion_id,
+        shot_ids=list(overlay.shot_ids),
+        **_common_fields(entry),
+    )
+
+
+def _common_fields(
+    entry: shot_graphic_briefs.ShotEntry | shot_graphic_briefs.OverlayEntry,
+) -> dict[str, Any]:
+    """What a shot and an overlay share in the answer: the words around it, where its brief
+    stands, its newest job and the brief."""
+    job = entry.job
+    context = entry.context
+    return {
+        "words_before": context.before if context is not None else "",
+        "words_after": context.after if context is not None else "",
+        "status": cast(Status, entry.status),
+        "reasons": entry.reasons,
+        "last_error": entry.last_error,
+        "can_run": entry.can_run,
+        "blocked_reason": entry.blocked_reason,
+        "job": (
             BriefJobOut(
                 id=job.id,
                 status=cast(JobStatus, job.status),
@@ -205,8 +248,8 @@ def _shot_out(entry: shot_graphic_briefs.ShotEntry) -> GraphicShotOut:
             if job is not None
             else None
         ),
-        brief=_brief_out(entry),
-    )
+        "brief": _brief_out(entry),
+    }
 
 
 async def _state(session: AsyncSession, project: Project) -> GraphicBriefsState:
@@ -219,10 +262,11 @@ async def _state(session: AsyncSession, project: Project) -> GraphicBriefsState:
                 title=str(scene.item.get("title", scene.item["id"])),
                 blocked_reason=scene.blocked_reason,
                 shots=[_shot_out(entry) for entry in scene.shots],
+                overlays=[_overlay_out(entry) for entry in scene.overlays],
             )
             for scene in state.entries
-            # A scene with no graphic shot has nothing to show.
-            if scene.shots
+            # A scene with no graphic shot and no overlay has nothing to show.
+            if scene.shots or scene.overlays
         ],
         blocked_reason=state.blocked_reason,
         wanted=state.wanted,
@@ -264,6 +308,37 @@ async def run_graphic_brief(
             project,
             scene_id,
             shot_id,
+            feedback=body.feedback if body is not None else None,
+        )
+    except shot_graphic_briefs.ShotGraphicBriefError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return GraphicBriefRun(job_id=job.id)
+
+
+@router.post(
+    "/projects/{project_id}/graphic-briefs/{scene_id}/overlays/{overlay_id}/run",
+    response_model=GraphicBriefRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def run_overlay_brief(
+    project_id: int,
+    scene_id: DiscoveryId,
+    overlay_id: OverlayId,
+    session: SessionDep,
+    body: GraphicBriefRunIn | None = None,
+) -> GraphicBriefRun:
+    """Starts the job that writes the brief of one graphic overlay (OVL-004). If it already has
+    a job waiting or running, its id is returned and no second job is made.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await shot_graphic_briefs.start_overlay(
+            session,
+            project,
+            scene_id,
+            overlay_id,
             feedback=body.feedback if body is not None else None,
         )
     except shot_graphic_briefs.ShotGraphicBriefError as exc:

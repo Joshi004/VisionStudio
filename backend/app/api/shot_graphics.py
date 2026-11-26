@@ -14,6 +14,8 @@ explainer, both versions of each shot (EXG-005).
   same brief and a new model call.
 - `PUT .../{scene_id}/{shot_id}/choice` sets the version the video uses for one shot, or `null`
   for Automatic (EXG-007). Each shot of the `GET` says which version is `used` and why.
+- Each scene also lists its graphic **overlays** (OVL-004), read the same way. They have the same
+  three endpoints under `.../{scene_id}/overlays/{overlay_id}/...`.
 
 The rows and the jobs are made by `app/services/shot_graphics.py`. The answers never return ORM
 objects.
@@ -30,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
+from app.api.graphic_briefs import OverlayId
 from app.api.graphics_lab import GraphicCallOut, GraphicResolvedOut
 from app.api.jobs import JobSummary, job_summary
 from app.api.projects import load_project
@@ -37,7 +40,7 @@ from app.db.models import Job, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
-from app.services import graphics_lab, shot_graphics
+from app.services import graphics_lab, shot_graphic_briefs, shot_graphics
 from app.services.storage import media_url
 
 router = APIRouter()
@@ -155,12 +158,22 @@ class ShotGraphicShotOut(BaseModel):
     engines: list[ShotGraphicEngineOut]
 
 
+class ShotGraphicOverlayOut(ShotGraphicShotOut):
+    """A graphic overlay (OVL-004), read like a graphic shot. `id` is `{first}-{last}`,
+    `spoken_text` its words, and `start_s` and `end_s` its place on the scene's clock."""
+
+    suggestion_id: str
+    # The shots it is laid over.
+    shot_ids: list[str]
+
+
 class ShotGraphicSceneOut(BaseModel):
     id: str
     index: int | None
     title: str
     blocked_reason: str | None
     shots: list[ShotGraphicShotOut]
+    overlays: list[ShotGraphicOverlayOut]
 
 
 class ShotGraphicsStateOut(BaseModel):
@@ -288,6 +301,15 @@ def _shot_out(entry: shot_graphics.ShotEntry, project: Project) -> ShotGraphicSh
     )
 
 
+def _overlay_out(entry: shot_graphics.ShotEntry, project: Project) -> ShotGraphicOverlayOut:
+    assert entry.overlay is not None
+    return ShotGraphicOverlayOut(
+        **dict(_shot_out(entry, project)),
+        suggestion_id=entry.overlay.suggestion_id,
+        shot_ids=list(entry.overlay.shot_ids),
+    )
+
+
 async def _state(session: AsyncSession, project: Project) -> ShotGraphicsStateOut:
     state = await shot_graphics.state(session, project)
     return ShotGraphicsStateOut(
@@ -298,10 +320,11 @@ async def _state(session: AsyncSession, project: Project) -> ShotGraphicsStateOu
                 title=str(scene.item.get("title", scene.item["id"])),
                 blocked_reason=scene.blocked_reason,
                 shots=[_shot_out(entry, project) for entry in scene.shots],
+                overlays=[_overlay_out(entry, project) for entry in scene.overlays],
             )
             for scene in state.entries
-            # A scene with no graphic shot has nothing to show.
-            if scene.shots
+            # A scene with no graphic shot and no overlay has nothing to show.
+            if scene.shots or scene.overlays
         ],
         blocked_reason=state.blocked_reason,
         wanted=state.wanted,
@@ -386,6 +409,83 @@ async def set_shot_graphic_choice(
     project = await load_project(session, project_id)
     try:
         engine = await shot_graphics.set_choice(session, project, scene_id, shot_id, body.engine)
+    except shot_graphics.ShotGraphicsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return ShotGraphicChoiceOut(engine=cast(EngineKey | None, engine))
+
+
+@router.post(
+    "/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/run",
+    response_model=ShotGraphicsRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def run_overlay_graphics(
+    project_id: int, scene_id: DiscoveryId, overlay_id: OverlayId, session: SessionDep
+) -> ShotGraphicsRun:
+    """Makes what is missing for one graphic overlay, like `run_shot_graphics` (OVL-004)."""
+    project = await load_project(session, project_id)
+    try:
+        jobs = await shot_graphics.start_overlay(session, project, scene_id, overlay_id)
+    except shot_graphics.ShotGraphicsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return ShotGraphicsRun(job_ids=[job.id for job in jobs])
+
+
+@router.post(
+    "/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/{engine}/ask-again",
+    response_model=ShotGraphicAskRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def ask_overlay_graphic_again(
+    project_id: int,
+    scene_id: DiscoveryId,
+    overlay_id: OverlayId,
+    engine: EngineKey,
+    session: SessionDep,
+) -> ShotGraphicAskRun:
+    """A paid model call: makes one version of an overlay again as a new attempt."""
+    project = await load_project(session, project_id)
+    try:
+        job = await shot_graphics.ask_again(
+            session,
+            project,
+            scene_id,
+            overlay_id,
+            engine,
+            target=shot_graphic_briefs.TARGET_OVERLAY,
+        )
+    except shot_graphics.ShotGraphicsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return ShotGraphicAskRun(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/graphics/{scene_id}/overlays/{overlay_id}/choice",
+    response_model=ShotGraphicChoiceOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_overlay_graphic_choice(
+    project_id: int,
+    scene_id: DiscoveryId,
+    overlay_id: OverlayId,
+    body: ShotGraphicChoiceIn,
+    session: SessionDep,
+) -> ShotGraphicChoiceOut:
+    """Chooses the version the video uses for an overlay, or `null` for the rule."""
+    project = await load_project(session, project_id)
+    try:
+        engine = await shot_graphics.set_choice(
+            session,
+            project,
+            scene_id,
+            overlay_id,
+            body.engine,
+            target=shot_graphic_briefs.TARGET_OVERLAY,
+        )
     except shot_graphics.ShotGraphicsError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return ShotGraphicChoiceOut(engine=cast(EngineKey | None, engine))

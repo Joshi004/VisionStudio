@@ -10,6 +10,8 @@ import type { components } from "./schema";
 export type GraphicBriefsState = components["schemas"]["GraphicBriefsState"];
 export type GraphicBriefScene = components["schemas"]["GraphicBriefSceneOut"];
 export type GraphicShot = components["schemas"]["GraphicShotOut"];
+/** A graphic over words the owner suggested a graphic for (OVL-004), read like a graphic shot. */
+export type GraphicOverlay = components["schemas"]["GraphicBriefOverlayOut"];
 export type GraphicShotBrief = components["schemas"]["BriefOut"];
 
 /**
@@ -43,7 +45,11 @@ export function useGraphicBriefs(projectId: number) {
     queryFn: () => fetchGraphicBriefs(projectId),
     enabled: isValidProjectId(projectId),
     refetchInterval: (query) =>
-      query.state.data?.scenes.some((scene) => scene.shots.some((shot) => isJobActive(shot.job)))
+      query.state.data?.scenes.some(
+        (scene) =>
+          scene.shots.some((shot) => isJobActive(shot.job)) ||
+          scene.overlays.some((overlay) => isJobActive(overlay.job)),
+      )
         ? ACTIVE_POLL_MS
         : false,
   });
@@ -61,7 +67,11 @@ export function useRunGraphicBrief(projectId: number) {
         "/api/projects/{project_id}/graphic-briefs/{scene_id}/{shot_id}/run",
         {
           params: {
-            path: { project_id: projectId, scene_id: input.sceneId, shot_id: input.shotId },
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              shot_id: input.shotId,
+            },
           },
           body: { feedback: input.feedback ?? null },
         },
@@ -76,7 +86,48 @@ export function useRunGraphicBrief(projectId: number) {
     },
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: graphicBriefsKey(projectId) }),
+        queryClient.invalidateQueries({
+          queryKey: graphicBriefsKey(projectId),
+        }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/**
+ * Starts the job that writes the brief of one graphic overlay. `overlayId` is the overlay's
+ * `{first}-{last}` in its scene. `feedback` is the owner's note on its newest brief.
+ */
+export function useRunOverlayBrief(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; overlayId: string; feedback?: string }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/graphic-briefs/{scene_id}/overlays/{overlay_id}/run",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              overlay_id: input.overlayId,
+            },
+          },
+          body: { feedback: input.feedback ?? null },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not start the graphic brief (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: graphicBriefsKey(projectId),
+        }),
         invalidateAfterJobAction(queryClient),
       ]),
   });

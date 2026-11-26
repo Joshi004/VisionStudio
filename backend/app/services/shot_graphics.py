@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from sqlalchemy import delete, func, select
@@ -58,6 +58,7 @@ from app.db.models import Job, Project, ShotGraphic, ShotGraphicBrief, ShotGraph
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    graphic_overlays,
     graphic_theme,
     graphics_lab,
     graphics_render,
@@ -104,6 +105,15 @@ NO_TIMELINE_MESSAGE: Final = (
     "This scene's shots cannot be laid out in time. Plan the shots again first."
 )
 BEING_MADE_MESSAGE: Final = "The graphics of this shot are already being made."
+# The same four messages for an overlay (OVL-004).
+OVERLAY_BRIEF_MISSING_MESSAGE: Final = (
+    "Write this graphic's brief first: the graphics are made from it."
+)
+OVERLAY_BRIEF_OUT_OF_DATE_MESSAGE: Final = (
+    "This graphic's brief is out of date. Write it again first."
+)
+OVERLAY_BRIEF_WRITING_MESSAGE: Final = "This graphic's brief is being written."
+OVERLAY_BEING_MADE_MESSAGE: Final = "This graphic is already being made."
 ENGINE_BUSY_MESSAGE: Final = "This version is already being made."
 STOPPED_MESSAGE: Final = "It stopped before a video was made."
 NO_VIDEO_TO_CHOOSE_MESSAGE: Final = "This version has no current video to use."
@@ -271,15 +281,21 @@ class ShotEntry:
     # when the graphics cannot be made now.
     material: dict[str, Any] | None
     theme: Any
+    # `shot`, or `overlay` for a graphic overlay (OVL-004). An overlay is read with this same
+    # class: `shot` is then a stand-in (`id` is the overlay's `{first}-{last}`, `spoken_text` its
+    # words, `start_s` and `end_s` its place on the scene's clock) and `overlay` is the overlay.
+    target: str = shot_graphic_briefs.TARGET_SHOT
+    overlay: graphic_overlays.Overlay | None = None
 
 
 @dataclass(frozen=True)
 class SceneEntry:
-    """One scene of the newest list of scenes and its graphic shots."""
+    """One scene of the newest list of scenes, its graphic shots and its overlays."""
 
     item: dict[str, Any]
     shots: list[ShotEntry]
     blocked_reason: str | None
+    overlays: list[ShotEntry] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -404,11 +420,10 @@ def _prepare(
     take_map = plan.timeline.take_map
     if take_map is None:
         return None, NO_TIMELINE_MESSAGE
-    inputs = brief.inputs if isinstance(brief.inputs, dict) else {}
-    words = inputs.get("words")
-    context = inputs.get("context")
-    if not isinstance(words, list) or not words or not isinstance(context, dict):
+    recorded = _recorded_words(brief)
+    if recorded is None:
         return None, "This shot's brief did not record its words. Write it again."
+    words, context = recorded
     shot_start_s = float(shot["start_s"])
     shift_s = round(take_map.shift_at(shot_start_s) + shot_start_s - span.start_s, 3)
     try:
@@ -427,21 +442,83 @@ def _prepare(
         )
     except ShotGraphicsError as exc:
         return None, str(exc)
+    return _prepared(resolved, words, context, theme, clock, voice_offset_s), None
+
+
+def _recorded_words(brief: ShotGraphicBrief) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
+    """The words and the context a brief recorded, or None when it did not."""
+    inputs = brief.inputs if isinstance(brief.inputs, dict) else {}
+    words = inputs.get("words")
+    context = inputs.get("context")
+    if not isinstance(words, list) or not words or not isinstance(context, dict):
+        return None
+    return words, context
+
+
+def _prepared(
+    resolved: dict[str, Any],
+    words: list[dict[str, Any]],
+    context: dict[str, Any],
+    theme: Any,
+    clock: take_timings.TakeClock | None,
+    voice_offset_s: float,
+) -> _Prepared:
     audio = clock.audio if clock is not None else None
-    return (
-        _Prepared(
-            resolved=resolved,
-            sha256=resolved_sha256(resolved),
-            voice_path=audio.path if audio is not None and audio.path else None,
-            voice_offset_s=voice_offset_s,
-            material={
-                "line": " ".join(str(word["text"]) for word in words),
-                "context": str(context.get("text") or ""),
-                "mood": str(theme.content["theme"]["mood"]),
-            },
-        ),
-        None,
+    return _Prepared(
+        resolved=resolved,
+        sha256=resolved_sha256(resolved),
+        voice_path=audio.path if audio is not None and audio.path else None,
+        voice_offset_s=voice_offset_s,
+        material={
+            "line": " ".join(str(word["text"]) for word in words),
+            "context": str(context.get("text") or ""),
+            "mood": str(theme.content["theme"]["mood"]),
+        },
     )
+
+
+def _prepare_overlay(
+    project: Project,
+    plan: shot_plans.SceneEntry,
+    overlay: graphic_overlays.Overlay,
+    brief: ShotGraphicBrief,
+    theme: Any,
+    clock: take_timings.TakeClock | None,
+) -> tuple[_Prepared | None, str | None]:
+    """The resolved brief of an overlay and what the jobs need, or why it cannot be worked out.
+    It is drawn for the overlay's own span at the output size (OVL-004): the words the brief
+    recorded are timed from the overlay's start, so they need no shift, and the clip lasts
+    `graphic_overlays.clip_frames`.
+    """
+    if plan.timeline is None or plan.timeline.take_map is None:
+        return None, NO_TIMELINE_MESSAGE
+    recorded = _recorded_words(brief)
+    if recorded is None:
+        return None, "This graphic's brief did not record its words. Write it again."
+    words, context = recorded
+    try:
+        voice_offset_s = plan.timeline.take_map.to_take(overlay.start_s)
+    except TakeMapError as exc:
+        return None, str(exc)
+    span = scene_timeline.ShotSpan(
+        shot_id=overlay.overlay_id,
+        start_s=overlay.start_s,
+        end_s=overlay.end_s,
+        clip_frames=graphic_overlays.clip_frames(overlay.start_s, overlay.end_s),
+    )
+    try:
+        resolved = resolve_for_shot(
+            brief=brief.content,
+            words=words,
+            theme=theme.content["theme"],
+            span=span,
+            shift_s=0.0,
+            width=project.out_width,
+            height=project.out_height,
+        )
+    except ShotGraphicsError as exc:
+        return None, str(exc)
+    return _prepared(resolved, words, context, theme, clock, voice_offset_s), None
 
 
 def _refusal(
@@ -449,18 +526,20 @@ def _refusal(
     brief: ShotGraphicBrief | None,
     brief_status: str,
     prepare_problem: str | None,
+    target: str = shot_graphic_briefs.TARGET_SHOT,
 ) -> str | None:
-    """Why the graphics of this shot cannot be made now, or None."""
+    """Why the graphics of this shot (or overlay) cannot be made now, or None."""
+    overlay = target == shot_graphic_briefs.TARGET_OVERLAY
     if theme_state.latest is None:
         return THEME_MISSING_MESSAGE
     if theme_state.out_of_date:
         return THEME_OUT_OF_DATE_MESSAGE
     if brief is None:
-        return BRIEF_MISSING_MESSAGE
+        return OVERLAY_BRIEF_MISSING_MESSAGE if overlay else BRIEF_MISSING_MESSAGE
     if brief_status == "writing":
-        return BRIEF_WRITING_MESSAGE
+        return OVERLAY_BRIEF_WRITING_MESSAGE if overlay else BRIEF_WRITING_MESSAGE
     if brief_status != "ready":
-        return BRIEF_OUT_OF_DATE_MESSAGE
+        return OVERLAY_BRIEF_OUT_OF_DATE_MESSAGE if overlay else BRIEF_OUT_OF_DATE_MESSAGE
     return prepare_problem
 
 
@@ -480,13 +559,13 @@ def _out_of_date_reasons(engines: list[EngineEntry], theme: Any) -> list[str]:
 
 
 async def _rows_by_shot(
-    session: AsyncSession, project_id: int
+    session: AsyncSession, project_id: int, target: str = shot_graphic_briefs.TARGET_SHOT
 ) -> dict[tuple[str, str, int, str], list[ShotGraphic]]:
     statement = (
         select(ShotGraphic)
         .where(
             ShotGraphic.project_id == project_id,
-            ShotGraphic.target == shot_graphic_briefs.TARGET_SHOT,
+            ShotGraphic.target == target,
         )
         .order_by(ShotGraphic.id)
         .execution_options(populate_existing=True)
@@ -498,13 +577,13 @@ async def _rows_by_shot(
 
 
 async def _choices(
-    session: AsyncSession, project_id: int
+    session: AsyncSession, project_id: int, target: str = shot_graphic_briefs.TARGET_SHOT
 ) -> dict[tuple[str, str], ShotGraphicChoice]:
     statement = (
         select(ShotGraphicChoice)
         .where(
             ShotGraphicChoice.project_id == project_id,
-            ShotGraphicChoice.target == shot_graphic_briefs.TARGET_SHOT,
+            ShotGraphicChoice.target == target,
         )
         .execution_options(populate_existing=True)
     )
@@ -544,7 +623,12 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
     clocks = await take_timings.scene_clocks(session, project)
     grouped = await _rows_by_shot(session, project.id)
     choices = await _choices(session, project.id)
-    jobs = await _jobs_of(session, [row for rows in grouped.values() for row in rows])
+    overlay_grouped = await _rows_by_shot(session, project.id, shot_graphic_briefs.TARGET_OVERLAY)
+    overlay_choices = await _choices(session, project.id, shot_graphic_briefs.TARGET_OVERLAY)
+    jobs = await _jobs_of(
+        session,
+        [row for rows in (*grouped.values(), *overlay_grouped.values()) for row in rows],
+    )
 
     scenes: list[SceneEntry] = []
     for scene in briefs.entries:
@@ -591,7 +675,56 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
                     choice,
                 )
             )
-        scenes.append(SceneEntry(item=scene.item, shots=shots, blocked_reason=scene.blocked_reason))
+        overlays: list[ShotEntry] = []
+        for brief_overlay in scene.overlays:
+            overlay = brief_overlay.overlay
+            brief = brief_overlay.row
+            prepared = None
+            problem = None
+            if brief is not None and theme is not None and plan is not None:
+                prepared, problem = _prepare_overlay(
+                    project, plan, overlay, brief, theme, clocks.get(scene_id)
+                )
+            sha = prepared.sha256 if prepared is not None else None
+            engines = [
+                _engine(
+                    key,
+                    overlay_grouped.get((scene_id, overlay.overlay_id, brief.id, key), [])
+                    if brief is not None
+                    else [],
+                    jobs,
+                    sha,
+                )
+                for key in ENGINES
+            ]
+            picked = overlay_choices.get((scene_id, overlay.overlay_id))
+            choice = (
+                picked.engine
+                if picked is not None and brief is not None and picked.brief_id == brief.id
+                else None
+            )
+            overlays.append(
+                _shot_entry(
+                    _overlay_stand_in(overlay),
+                    brief,
+                    brief_overlay.status,
+                    theme_state,
+                    prepared,
+                    problem,
+                    engines,
+                    theme,
+                    choice,
+                    overlay=overlay,
+                )
+            )
+        scenes.append(
+            SceneEntry(
+                item=scene.item,
+                shots=shots,
+                blocked_reason=scene.blocked_reason,
+                overlays=overlays,
+            )
+        )
     return ShotGraphicsState(
         entries=scenes,
         blocked_reason=None,
@@ -599,6 +732,18 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
         theme_version=theme.version if theme is not None else None,
         theme_current=theme is not None and not theme_state.out_of_date,
     )
+
+
+def _overlay_stand_in(overlay: graphic_overlays.Overlay) -> dict[str, Any]:
+    """The `shot` of the entry of an overlay: the fields the panels and the jobs read from a shot,
+    with the overlay's own values (times are the scene's, not the take's)."""
+    return {
+        "id": overlay.overlay_id,
+        "description": shot_graphic_briefs.OVERLAY_DESCRIPTION,
+        "spoken_text": overlay.text,
+        "start_s": overlay.start_s,
+        "end_s": overlay.end_s,
+    }
 
 
 def _shot_entry(
@@ -611,11 +756,17 @@ def _shot_entry(
     engines: list[EngineEntry],
     theme: Any,
     choice: str | None,
+    overlay: graphic_overlays.Overlay | None = None,
 ) -> ShotEntry:
+    target = (
+        shot_graphic_briefs.TARGET_OVERLAY
+        if overlay is not None
+        else shot_graphic_briefs.TARGET_SHOT
+    )
     used = _used(engines, choice)
     done = used is not None
     working = any(e.status in ("writing", "rendering") for e in engines)
-    refusal = _refusal(theme_state, brief, brief_status, problem)
+    refusal = _refusal(theme_state, brief, brief_status, problem, target)
     reasons: list[str] = []
     errors: list[str] = []
     status: Status
@@ -636,7 +787,8 @@ def _shot_entry(
             status = "failed"
         else:
             status = "none"
-    blocked = refusal if refusal is not None else (BEING_MADE_MESSAGE if working else None)
+    being_made = OVERLAY_BEING_MADE_MESSAGE if overlay is not None else BEING_MADE_MESSAGE
+    blocked = refusal if refusal is not None else (being_made if working else None)
     return ShotEntry(
         shot=shot,
         status=status,
@@ -657,6 +809,8 @@ def _shot_entry(
         blocked_reason=blocked,
         material=prepared.material if prepared is not None and refusal is None else None,
         theme=theme,
+        target=target,
+        overlay=overlay,
     )
 
 
@@ -678,6 +832,13 @@ def voice_url(entry: ShotEntry) -> str | None:
 
 def graphic_key(scene_id: str, shot_id: str) -> str:
     return f"{scene_id}/{shot_id}"
+
+
+def _write_key(scene_id: str, shot: ShotEntry) -> str:
+    """The dedupe value of the write jobs of a shot or an overlay: one job of a kind at a time."""
+    if shot.target == shot_graphic_briefs.TARGET_OVERLAY:
+        return shot_graphic_briefs.overlay_job_key(scene_id, shot.shot["id"])
+    return graphic_key(scene_id, shot.shot["id"])
 
 
 def _attempt_inputs(shot: ShotEntry, rerender_of: int | None = None) -> dict[str, Any]:
@@ -733,7 +894,7 @@ async def _new_row(
     assert shot.brief is not None
     row = ShotGraphic(
         project_id=project.id,
-        target=shot_graphic_briefs.TARGET_SHOT,
+        target=shot.target,
         scene_id=scene_id,
         shot_id=shot.shot["id"],
         brief_id=shot.brief.id,
@@ -765,7 +926,7 @@ async def _write(
     assert shot.material is not None and shot.brief is not None and shot.resolved is not None
     row = await _new_row(session, project, scene_id, shot, engine, repair_of=repair_of)
     job_input: dict[str, Any] = {
-        WRITE_DEDUPE_KEY: graphic_key(scene_id, shot.shot["id"]),
+        WRITE_DEDUPE_KEY: _write_key(scene_id, shot),
         RENDER_DEDUPE_KEY: row.id,
         "scene_id": scene_id,
         "shot_id": shot.shot["id"],
@@ -861,7 +1022,7 @@ async def queue_repair(
     if code is None or row.engine != COMPONENT:
         return None
     try:
-        shot = _find(await _build(session, project), row.scene_id, row.shot_id)
+        shot = _find(await _build(session, project), row.scene_id, row.shot_id, row.target)
     except ShotGraphicsError:
         return None
     recorded = row.inputs.get("resolved_sha256") if isinstance(row.inputs, dict) else None
@@ -900,13 +1061,25 @@ async def _start_engine(
     return await queue_render(session, source.row)
 
 
-def _find(state_: ShotGraphicsState, scene_id: str, shot_id: str) -> ShotEntry:
+def _find(
+    state_: ShotGraphicsState,
+    scene_id: str,
+    shot_id: str,
+    target: str = shot_graphic_briefs.TARGET_SHOT,
+) -> ShotEntry:
+    """The entry of a graphic shot, or of an overlay (`target` `overlay`, `shot_id` its
+    `{first}-{last}`)."""
     for scene in state_.entries:
         if scene.item["id"] != scene_id:
             continue
-        for shot in scene.shots:
+        for shot in scene.overlays if target == shot_graphic_briefs.TARGET_OVERLAY else scene.shots:
             if shot.shot["id"] == shot_id:
                 return shot
+    if target == shot_graphic_briefs.TARGET_OVERLAY:
+        raise ShotGraphicsError(
+            f"There is no graphic over these words ('{shot_id}') in the scene '{scene_id}'. "
+            "Its words may have changed."
+        )
     raise ShotGraphicsError(f"There is no graphic shot '{shot_id}' in the scene '{scene_id}'.")
 
 
@@ -918,6 +1091,23 @@ async def start_shot(
     when the graphics cannot be made now.
     """
     shot = _find(await _build(session, project), scene_id, shot_id)
+    return await _start(session, project, scene_id, shot)
+
+
+async def start_overlay(
+    session: AsyncSession, project: Project, scene_id: str, overlay_id: str
+) -> list[Job]:
+    """`start_shot` for an overlay: makes what is missing for its graphics, in the same order and
+    with the same rules (OVL-004). Commits. Raises ShotGraphicsError."""
+    overlay = _find(
+        await _build(session, project), scene_id, overlay_id, shot_graphic_briefs.TARGET_OVERLAY
+    )
+    return await _start(session, project, scene_id, overlay)
+
+
+async def _start(
+    session: AsyncSession, project: Project, scene_id: str, shot: ShotEntry
+) -> list[Job]:
     if not shot.can_run:
         raise ShotGraphicsError(shot.blocked_reason or BEING_MADE_MESSAGE)
     jobs: list[Job] = []
@@ -930,14 +1120,20 @@ async def start_shot(
 
 
 async def ask_again(
-    session: AsyncSession, project: Project, scene_id: str, shot_id: str, engine: str
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    engine: str,
+    target: str = shot_graphic_briefs.TARGET_SHOT,
 ) -> Job:
     """A paid model call for one version, as a new attempt with the same brief. Commits. Raises
-    ShotGraphicsError when it cannot be asked now.
+    ShotGraphicsError when it cannot be asked now. `target` `overlay` asks for an overlay, whose
+    `shot_id` is its `{first}-{last}`.
     """
     if engine not in ENGINES:
         raise ShotGraphicsError(f"'{engine}' is not one of the versions of a graphic.")
-    shot = _find(await _build(session, project), scene_id, shot_id)
+    shot = _find(await _build(session, project), scene_id, shot_id, target)
     if shot.refusal is not None:
         raise ShotGraphicsError(shot.refusal)
     if next(e for e in shot.engines if e.key == engine).status in ("writing", "rendering"):
@@ -950,21 +1146,27 @@ async def ask_again(
 
 
 async def set_choice(
-    session: AsyncSession, project: Project, scene_id: str, shot_id: str, engine: str | None
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    engine: str | None,
+    target: str = shot_graphic_briefs.TARGET_SHOT,
 ) -> str | None:
     """The owner's choice of the version a graphic shot uses (§3.8). `None` is Automatic: the
     row is deleted and the shot is back on the rule. A version needs a current video to be chosen.
     The row names the shot's current brief, so a new brief puts the shot back on the rule.
-    Commits. Raises ShotGraphicsError when it cannot be set.
+    Commits. Raises ShotGraphicsError when it cannot be set. `target` `overlay` sets the choice of
+    an overlay, whose `shot_id` is its `{first}-{last}`.
     """
     if engine is not None and engine not in ENGINES:
         raise ShotGraphicsError(f"'{engine}' is not one of the versions of a graphic.")
-    shot = _find(await _build(session, project), scene_id, shot_id)
+    shot = _find(await _build(session, project), scene_id, shot_id, target)
     existing = (
         await session.execute(
             select(ShotGraphicChoice).where(
                 ShotGraphicChoice.project_id == project.id,
-                ShotGraphicChoice.target == shot_graphic_briefs.TARGET_SHOT,
+                ShotGraphicChoice.target == target,
                 ShotGraphicChoice.scene_id == scene_id,
                 ShotGraphicChoice.shot_id == shot_id,
             )
@@ -985,7 +1187,7 @@ async def set_choice(
         session.add(
             ShotGraphicChoice(
                 project_id=project.id,
-                target=shot_graphic_briefs.TARGET_SHOT,
+                target=target,
                 scene_id=scene_id,
                 shot_id=shot_id,
                 brief_id=shot.brief.id,
