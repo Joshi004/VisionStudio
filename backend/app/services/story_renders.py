@@ -393,6 +393,24 @@ async def graphic_videos(
     }
 
 
+async def overlay_videos(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], shot_graphics.ShotEntry]:
+    """Every graphic overlay of the scenes whose plan is current (OVL-005), by `(scene id, overlay
+    id)`, with where its graphic stands (`used` is the video the render lays over the shots).
+    Empty for a project without graphics, which reads nothing of them.
+    """
+    if not graphic_theme.wanted(project):
+        return {}
+    state = await shot_graphics.state(session, project)
+    return {
+        (scene.item["id"], overlay.overlay.overlay_id): overlay
+        for scene in state.entries
+        for overlay in scene.overlays
+        if overlay.overlay is not None
+    }
+
+
 async def evidence_clips_now(
     session: AsyncSession, project: Project
 ) -> dict[tuple[str, str], evidence_clips.ShotClipEntry]:
@@ -534,6 +552,24 @@ def _graphic_source(used: shot_graphics.UsedVideo | None) -> story_render_plan.G
     )
 
 
+def _overlay_sources(
+    scene_id: str, overlays: dict[tuple[str, str], shot_graphics.ShotEntry]
+) -> list[story_render_plan.OverlaySource]:
+    """The graphic overlays of a scene for the render plan (OVL-005), in the order they start."""
+    sources = [
+        story_render_plan.OverlaySource(
+            overlay_id=entry.overlay.overlay_id,
+            text=entry.overlay.text,
+            start_s=entry.overlay.start_s,
+            end_s=entry.overlay.end_s,
+            graphic=_graphic_source(entry.used),
+        )
+        for (scene, _overlay_id), entry in overlays.items()
+        if scene == scene_id and entry.overlay is not None
+    ]
+    return sorted(sources, key=lambda source: source.start_s)
+
+
 async def scene_sources(
     session: AsyncSession,
     project: Project,
@@ -541,6 +577,8 @@ async def scene_sources(
     takes: shot_takes.ShotTakesState,
     speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
     timings: dict[int, SpeechWordTiming] | None = None,
+    *,
+    with_overlays: bool = True,
 ) -> list[story_render_plan.SceneSource]:
     shots_by_scene = {
         scene.item["id"]: {shot.shot["id"]: shot for shot in scene.shots} for scene in takes.entries
@@ -550,6 +588,7 @@ async def scene_sources(
     switched = await shot_voice_sources.clip_shots(session, project)
     continuous = word_timings.times_takes(project)
     graphics = await graphic_videos(session, project)
+    overlays = await overlay_videos(session, project) if with_overlays else {}
     evidence = await evidence_clips_now(session, project)
     bite_state = await evidence_clips.soundbite_state(session, project)
     bite_clips = {
@@ -708,6 +747,7 @@ async def scene_sources(
                 voice=voice,
                 cards=cards,
                 source_lines=source_lines,
+                overlays=_overlay_sources(scene_id, overlays) if blocked is None else [],
             )
         )
     return scenes
@@ -960,13 +1000,15 @@ def _render_reasons(
     graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None] | None = None,
     evidence: dict[tuple[str, str], evidence_clips.ShotClipEntry] | None = None,
     soundbites: dict[tuple[str, str], evidence_clips.SoundbiteClipEntry] | None = None,
+    overlays: dict[tuple[str, str], shot_graphics.ShotEntry] | None = None,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
     `switched` is every presenter shot now on its clip's own voice (`shot_voice_sources`).
     `graphics` is the video each graphic shot uses now (`graphic_videos`), and `evidence` the
     clip of each evidence shot now (`evidence_clips_now`), and `soundbites` the clip of each sound
-    bite shot now (`soundbite_clips_now`).
+    bite shot now (`soundbite_clips_now`), and `overlays` the graphic overlays now
+    (`overlay_videos`, OVL-005).
     """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
@@ -1041,6 +1083,7 @@ def _render_reasons(
             reasons.append(f"{label} is no longer ready.")
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{label} was made again since this video was made.")
+    reasons.extend(overlay_reasons(recorded, overlays or {}))
     reasons.extend(music_reasons(recorded, *music))
     reasons.extend(caption_reasons(recorded, music[0]))
     reasons.extend(callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
@@ -1085,6 +1128,46 @@ def graphic_reasons(
         f"{_version_text(used.engine, used.attempt.row.attempt)}; this video used "
         f"{_version_text(then.get('engine'), then.get('attempt'))})."
     ]
+
+
+def overlay_reasons(
+    recorded: dict[str, Any],
+    overlays: dict[tuple[str, str], shot_graphics.ShotEntry],
+    scene_id: str | None = None,
+) -> list[str]:
+    """Why the graphic overlays a render laid over its shots (OVL-005) are not the ones there are
+    now: one was removed, has no video now or is another video, or one with a video was added. A
+    render is compared with the overlays of its own scene only when `scene_id` is given. An
+    overlay that has no video yet does not count as added: a render cannot have it.
+    """
+    entries = recorded.get("graphic_overlays")
+    then = [entry for entry in entries or [] if isinstance(entry, dict)]
+    if scene_id is not None:
+        then = [entry for entry in then if entry.get("scene_id") == scene_id]
+    reasons: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in then:
+        key = (str(entry.get("scene_id")), str(entry.get("overlay_id")))
+        seen.add(key)
+        label = f"The graphic over '{entry.get('text')}' of scene {entry.get('scene_index')}"
+        now = overlays.get(key)
+        if now is None:
+            reasons.append(f"{label} was removed since this video was made.")
+        elif now.used is None:
+            reasons.append(f"{label} has no current video now.")
+        elif now.used.attempt.row.id != entry.get("graphic_id"):
+            reasons.append(
+                f"{label} changed since this video was made (now "
+                f"{_version_text(now.used.engine, now.used.attempt.row.attempt)}; this video used "
+                f"{_version_text(entry.get('engine'), entry.get('attempt'))})."
+            )
+    for key, now in overlays.items():
+        if key in seen or now.used is None or now.overlay is None:
+            continue
+        if scene_id is not None and key[0] != scene_id:
+            continue
+        reasons.append(f"A graphic over '{now.overlay.text}' was added since this video was made.")
+    return reasons
 
 
 def evidence_reasons(
@@ -1260,6 +1343,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     graphics = await graphic_videos(session, project)
     evidence = await evidence_clips_now(session, project)
     soundbites = await soundbite_clips_now(session, project)
+    overlays = await overlay_videos(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -1292,6 +1376,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             graphics,
             evidence,
             soundbites,
+            overlays,
         )
         entries.append(
             RenderEntry(
@@ -1342,7 +1427,9 @@ async def next_render_sources(session: AsyncSession, project: Project) -> Render
     if blocked is not None:
         return RenderSources([], None, blocked, takes)
     speech = speech_by_unit(await speech_synthesis.state(session, project))
-    scenes = await scene_sources(session, project, plans, takes, speech)
+    # Graphic overlays are drawn over the shots and move no second of the story, so they are left
+    # out here: a graphic that is not made yet must not block the music (OVL-005).
+    scenes = await scene_sources(session, project, plans, takes, speech, with_overlays=False)
     # Where the shots and the speech sit does not depend on the music, so the plan is made
     # without it (the placement itself is made from this timeline).
     # ... nor on the captions, which are drawn over the finished picture.
@@ -1362,7 +1449,8 @@ async def timing_sources(session: AsyncSession, project: Project) -> RenderSourc
     if blocked is not None:
         return RenderSources([], None, blocked, takes)
     speech = speech_by_unit(await speech_synthesis.state(session, project))
-    scenes = await scene_sources(session, project, plans, takes, speech)
+    # Without the graphic overlays, as in `next_render_sources` (OVL-005).
+    scenes = await scene_sources(session, project, plans, takes, speech, with_overlays=False)
     try:
         plan = story_render_plan.build_timing_plan(
             scenes, fps=project.fps, width=project.out_width, height=project.out_height

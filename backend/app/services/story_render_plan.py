@@ -64,6 +64,11 @@ default (`take`) the sound inside a presenter clip is dropped, because it is a c
 B-roll sound is ducked under the take as it is under narration. `narration` is empty and `voice`
 is null for every other render.
 
+**Graphic overlays** (OVL-005). A render of a project with graphic suggestions may have the
+optional key `graphic_overlays`: each entry is a full-frame video laid at (0, 0) over every shot
+it spans, on top of callouts and evidence cards. It changes no shot and no second of the story, so
+the version stays 6. A callout that starts in one is left out, as under a graphic shot.
+
 `master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
@@ -89,6 +94,8 @@ from app.services.take_map import NO_REPLACED, TakeMap, TakeMapError
 # text). A version 5 timeline has none of them and is read as a track of boxes.
 # A sound bite shot (SB-008) adds a `soundbite` key to its shot's entry; the render job reads shots
 # by the keys it knows, so the version stays 6.
+# The optional `graphic_overlays` key (OVL-005) holds the graphics laid over the shots; a timeline
+# without it renders as before, so the version stays 6 here too.
 TIMELINE_VERSION: Final = 6
 # The versions the render job reads.
 READABLE_TIMELINE_VERSIONS: Final = (5, 6)
@@ -195,6 +202,11 @@ PLACEHOLDER_EVIDENCE_TOO_SHORT: Final = "Evidence clip too short"
 PLACEHOLDER_SOUNDBITE_TOO_SHORT: Final = "Sound bite clip too short"
 # An evidence card (EVD-011) with no clip is left out of a scene render, with this warning code.
 CARD_WITHOUT_CLIP: Final = "card_without_clip"
+# A graphic overlay (OVL-005) with no video is left out of a scene render, with this warning code.
+OVERLAY_WITHOUT_VIDEO: Final = "overlay_without_video"
+# A graphic overlay covers an evidence card or a full-screen evidence shot: the graphic is on top
+# until the split screen (OVL-007).
+OVERLAY_OVER_EVIDENCE: Final = "overlay_over_evidence"
 
 # A music sound cut by the edge of a scene render fades over this long (a starting value, not yet
 # tuned by ear).
@@ -293,6 +305,20 @@ class SourceLineSource:
     start_s: float
     end_s: float
     text: str
+
+
+@dataclass(frozen=True)
+class OverlaySource:
+    """A graphic overlay over the shots of a scene (OVL-005): `start_s` and `end_s` sit on the
+    scene's timeline like a shot's, and `graphic` is the video the owner's choice (or the rule)
+    picks for it, or None while it has none. It is laid full screen over every shot it spans.
+    """
+
+    overlay_id: str
+    text: str
+    start_s: float
+    end_s: float
+    graphic: GraphicSource | None
 
 
 @dataclass(frozen=True)
@@ -428,6 +454,8 @@ class SceneSource:
     # EVD-012). Empty without evidence.
     cards: list[CardSource] = field(default_factory=list)
     source_lines: list[SourceLineSource] = field(default_factory=list)
+    # The graphic overlays over its shots (OVL-005). Empty without suggestions.
+    overlays: list[OverlaySource] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1272,6 +1300,106 @@ def _card_entries(
     return entries, missing
 
 
+def _overlay_entries(
+    scenes: list[SceneSource],
+    fps: int,
+    total_frames: int,
+    *,
+    placeholders: bool,
+    warnings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The graphic overlays of the scenes as timeline entries (OVL-005), and the overlays that
+    have no usable video. An overlay is laid over whatever shots it spans, so it only needs a
+    frame range of the story and a video with the frames that range needs (one source frame short
+    is allowed, as for a shot). In a scene render an overlay without a video is left out with a
+    warning; in a full render it is returned as missing, and the plan refuses.
+    """
+    entries: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for scene in scenes:
+        if scene.story_start_s is None:
+            continue
+        for overlay in scene.overlays:
+            start_ms = _ms(scene.story_start_s + overlay.start_s)
+            end_ms = _ms(scene.story_start_s + overlay.end_s)
+            start_frame = frame_at(start_ms, fps)
+            frames = min(frame_at(end_ms, fps), total_frames) - start_frame
+            if frames < 1:
+                continue
+            label = f"'{overlay.text}' of scene {scene.index}"
+            graphic = overlay.graphic
+            needed = source_frames_needed(frames, fps)
+            if (
+                graphic is None
+                or not graphic.file_exists
+                or graphic.frame_count is None
+                or graphic.frame_count < needed - 1
+            ):
+                if not placeholders:
+                    missing.append(label)
+                    continue
+                warnings.append(
+                    {
+                        "code": OVERLAY_WITHOUT_VIDEO,
+                        "scene_id": scene.scene_id,
+                        "shot_id": None,
+                        "message": f"The graphic over {label} is left out: it has no video yet.",
+                    }
+                )
+                continue
+            entries.append(
+                {
+                    "id": f"{scene.scene_id}/{overlay.overlay_id}",
+                    "scene_id": scene.scene_id,
+                    "scene_index": scene.index,
+                    "overlay_id": overlay.overlay_id,
+                    "text": overlay.text,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "start_frame": start_frame,
+                    "frames": frames,
+                    "source_frames": needed,
+                    "graphic_id": graphic.graphic_id,
+                    "engine": graphic.engine,
+                    "attempt": graphic.attempt,
+                    "path": graphic.path,
+                    "clip_frames": graphic.frame_count,
+                    "x": 0,
+                    "y": 0,
+                }
+            )
+    return entries, missing
+
+
+def _overlay_evidence_warnings(
+    overlays: list[dict[str, Any]],
+    cards: list[dict[str, Any]],
+    shots: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """One warning for each overlay that covers an evidence card or a full-screen evidence shot:
+    the graphic is on top until the split screen (OVL-007).
+    """
+    covered = [(card["start_ms"], card["end_ms"]) for card in cards]
+    covered.extend(
+        (shot["start_ms"], shot["end_ms"])
+        for shot in shots
+        if isinstance(shot.get("evidence"), dict) and shot["evidence"].get("layout") != "split"
+    )
+    warnings: list[dict[str, Any]] = []
+    for overlay in overlays:
+        if any(low < overlay["end_ms"] and overlay["start_ms"] < high for low, high in covered):
+            warnings.append(
+                {
+                    "code": OVERLAY_OVER_EVIDENCE,
+                    "scene_id": overlay["scene_id"],
+                    "shot_id": None,
+                    "message": f"The graphic over '{overlay['text']}' of scene "
+                    f"{overlay['scene_index']} covers evidence. The graphic is shown on top.",
+                }
+            )
+    return warnings
+
+
 def _source_line_entries(scenes: list[SceneSource]) -> list[dict[str, Any]]:
     """The source lines of the scenes as timeline entries (EVD-012), in story order."""
     entries: list[dict[str, Any]] = []
@@ -1849,6 +1977,18 @@ def _build(
             "shots first (the step makes the cards too)."
         )
     graphic_spans.extend((entry["start_ms"], entry["end_ms"]) for entry in card_entries)
+    # The graphic overlays (OVL-005) are laid over the shots and the cards: a callout stays off
+    # them too.
+    overlay_entries, overlays_missing = _overlay_entries(
+        scenes, fps, cursor, placeholders=placeholders, warnings=warnings
+    )
+    if overlays_missing:
+        raise RenderPlanError(
+            f"These graphics over your words have no video yet: {_named(overlays_missing)}. "
+            "Make them in the Graphics step."
+        )
+    graphic_spans.extend((entry["start_ms"], entry["end_ms"]) for entry in overlay_entries)
+    warnings.extend(_overlay_evidence_warnings(overlay_entries, card_entries, shots))
     source_line_entries = _source_line_entries(scenes)
 
     total_ms = _ms(cursor / fps)
@@ -1921,6 +2061,8 @@ def _build(
         # Only a render with evidence cards or source lines has these keys (EVD-011, EVD-012).
         **({"evidence_cards": card_entries} if card_entries else {}),
         **({"source_lines": source_line_entries} if source_line_entries else {}),
+        # Only a render with graphic overlays has this key (OVL-005).
+        **({"graphic_overlays": overlay_entries} if overlay_entries else {}),
         "master": master(mix),
         "constants": {**constants(mix), **(bite_constants() if bite_windows_story else {})},
         "warnings": warnings,
@@ -2039,6 +2181,10 @@ def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> Non
         card["start_frame"] -= first_frame
         card["start_ms"] = earlier(card["start_ms"])
         card["end_ms"] = earlier(card["end_ms"])
+    for overlay in timeline.get("graphic_overlays", []):
+        overlay["start_frame"] -= first_frame
+        overlay["start_ms"] = earlier(overlay["start_ms"])
+        overlay["end_ms"] = earlier(overlay["end_ms"])
     for line in timeline.get("source_lines", []):
         line["start_ms"] = earlier(line["start_ms"])
         line["end_ms"] = earlier(line["end_ms"])

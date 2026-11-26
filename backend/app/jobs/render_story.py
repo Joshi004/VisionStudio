@@ -293,6 +293,22 @@ class EvidenceCard:
 
 
 @dataclass(frozen=True)
+class GraphicOverlay:
+    """A graphic overlay (OVL-005) laid full screen over the shots it spans: its video (H.264,
+    no alpha), the story frame it starts at and where it sits in the picture (always 0, 0).
+    """
+
+    overlay_id: str
+    text: str
+    path: str
+    start_frame: int
+    frames: int
+    clip_frames: int
+    x: int
+    y: int
+
+
+@dataclass(frozen=True)
 class Timeline:
     fps: int
     width: int
@@ -326,6 +342,8 @@ class Timeline:
     # Evidence cards and source lines (EVD-011, EVD-012); a timeline made before has none.
     cards: tuple[EvidenceCard, ...] = ()
     source_lines: tuple[caption_ass.SourceLineEvent, ...] = ()
+    # The graphic overlays (OVL-005); a timeline without any has none.
+    graphic_overlays: tuple[GraphicOverlay, ...] = ()
     # The sound bite values (SB-009). A timeline without a bite does not record them, and one
     # that is older than the phase has none either: they read as the plan's own values.
     bite_max_boost_db: float = story_render_plan.BITE_MAX_BOOST_DB
@@ -587,6 +605,40 @@ def _parse_cards(raw: dict[str, Any], total_frames: int) -> tuple[EvidenceCard, 
             raise RenderFailed(_CHANGED_MESSAGE)
         cards.append(EvidenceCard(card_id, path, start, frames, clip_frames, x, y))
     return tuple(cards)
+
+
+def _parse_graphic_overlays(raw: dict[str, Any], total_frames: int) -> tuple[GraphicOverlay, ...]:
+    """The graphic overlays of the timeline: none when the key is missing."""
+    entries = raw.get("graphic_overlays", [])
+    if not isinstance(entries, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    overlays: list[GraphicOverlay] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        overlay_id, text, path = entry.get("id"), entry.get("text"), entry.get("path")
+        numbers = [
+            _whole(entry.get(key))
+            for key in ("start_frame", "frames", "source_frames", "clip_frames", "x", "y")
+        ]
+        if (
+            not isinstance(overlay_id, str)
+            or not isinstance(text, str)
+            or not isinstance(path, str)
+            or any(value is None for value in numbers)
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        start, frames, source_frames, clip_frames, x, y = (value or 0 for value in numbers)
+        # One source frame short is allowed, as for a shot (the render repeats the last frame).
+        if (
+            start < 0
+            or frames < 1
+            or clip_frames < source_frames - 1
+            or start + frames > total_frames
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        overlays.append(GraphicOverlay(overlay_id, text, path, start, frames, clip_frames, x, y))
+    return tuple(overlays)
 
 
 def _parse_source_lines(raw: dict[str, Any]) -> tuple[caption_ass.SourceLineEvent, ...]:
@@ -892,6 +944,7 @@ def parse_timeline(recorded: object) -> Timeline:
         callouts=callouts,
         callout_style=callout_style,
         cards=_parse_cards(raw, total),
+        graphic_overlays=_parse_graphic_overlays(raw, total),
         source_lines=_parse_source_lines(raw),
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
@@ -1000,6 +1053,19 @@ class RenderStoryHandler(JobHandler):
             shot_overlays = [
                 [*callouts_on, *cards_on]
                 for callouts_on, cards_on in zip(shot_overlays, on_cards, strict=True)
+            ]
+
+        # Graphic overlays (OVL-005): full-screen videos laid last, so they are on top of the
+        # callouts and the cards. The shots under them are not changed.
+        if timeline.graphic_overlays:
+            overlay_files = [
+                (overlay, await probe_graphic_overlay(storage, overlay))
+                for overlay in timeline.graphic_overlays
+            ]
+            on_overlays = card_overlays(overlay_files, [shot.frames for shot in timeline.shots])
+            shot_overlays = [
+                [*already_on, *overlays_on]
+                for already_on, overlays_on in zip(shot_overlays, on_overlays, strict=True)
             ]
 
         await self._phase(job_id, phases.MEASURING_LEVELS)
@@ -1455,11 +1521,26 @@ async def probe_card(storage: Storage, card: EvidenceCard) -> Path:
     return path
 
 
+async def probe_graphic_overlay(storage: Storage, overlay: GraphicOverlay) -> Path:
+    """The video of a graphic overlay; refuses one that cannot be read or is too short."""
+    try:
+        path = storage.get_path(overlay.path)
+    except StorageError as exc:
+        raise RenderFailed("A file of this render could not be found on disk.") from exc
+    probe = await ffmpeg.probe_video(path)
+    if probe is None or probe.frame_count is None or probe.frame_count < overlay.clip_frames:
+        raise RenderFailed(
+            f"The graphic over '{overlay.text}' could not be read. Make the graphic again."
+        )
+    return path
+
+
 def card_overlays(
-    cards: Sequence[tuple[EvidenceCard, Path]], shot_frames: Sequence[int]
+    cards: Sequence[tuple[EvidenceCard | GraphicOverlay, Path]], shot_frames: Sequence[int]
 ) -> list[list[render_commands.Overlay]]:
-    """The overlays of each shot for the evidence cards, as `DrawnCallouts.overlays_by_shot` does
-    for callouts: a card that runs across a cut is split over the shots it crosses.
+    """The overlays of each shot for the evidence cards (and for the graphic overlays, OVL-005),
+    as `DrawnCallouts.overlays_by_shot` does for callouts: a card that runs across a cut is split
+    over the shots it crosses.
     """
     shots: list[list[render_commands.Overlay]] = []
     first = 0

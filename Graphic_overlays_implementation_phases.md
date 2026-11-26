@@ -172,7 +172,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 | OVL-002 | Suggestions leave the shot planner | Code | — | Completed |
 | OVL-003 | Placing the overlays | Code | — | Completed |
 | OVL-004 | Briefs and graphics for overlays | Code | OVL-001, OVL-003 | Completed |
-| OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Not Started |
+| OVL-005 | Overlays in the render | Code | OVL-002, OVL-004 | Completed |
 | OVL-006 | Evidence added later becomes a card | Code | — | Not Started |
 | OVL-007 | Split screen for a graphic and evidence | Code | OVL-005, OVL-006 | Not Started |
 | OVL-008 | Project 94 end to end | Owner | OVL-005, OVL-007 | Not Started |
@@ -184,7 +184,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - **Planner:** OVL-002 (done). It had to be done before OVL-005 is used on a real project.
 - **Evidence:** OVL-006, now.
 
-**Progress snapshot:** 4 completed (OVL-001, OVL-002, OVL-003, OVL-004).
+**Progress snapshot:** 5 completed (OVL-001, OVL-002, OVL-003, OVL-004, OVL-005).
 
 ---
 
@@ -374,7 +374,7 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 
 ### OVL-005 — Overlays in the render
 
-**Status:** Not Started
+**Status:** Completed (2026-11-27; the owner still has to rebuild the real app so the new code runs there)
 
 **Objective.** The scene render and the video render lay each overlay full screen over the shots it spans (§4.4).
 
@@ -400,13 +400,23 @@ Where overlay briefs, attempts and choices are stored. **Planning decides** betw
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Timeline key and render job
-- [ ] Callouts kept off
-- [ ] Refusals, warnings and out-of-date reasons
-- [ ] Identity check and throwaway render
-- [ ] Standard checks
+- [x] Timeline key and render job
+- [x] Callouts kept off
+- [x] Refusals, warnings and out-of-date reasons
+- [x] Identity check and throwaway render
+- [x] Standard checks
+- [ ] Owner: real app rebuilt so the new code runs there
 
-**Completion notes.**
+**Completion notes.** Done 2026-11-27. No migration, no new job type, no new setting. `DATABASE_STRUCTURE.md` has an update paragraph for the new timeline key and warning codes.
+
+- **`story_render_plan.py`**: `OverlaySource` (`overlay_id`, `text`, `start_s`, `end_s`, `graphic`) and `SceneSource.overlays`. `_overlay_entries` is shaped like `_card_entries`: an overlay needs a video with `source_frames_needed(frames, fps)` frames (one short allowed); in a scene render one without it is left out with the warning `overlay_without_video`, in a full render the plan is refused with "These graphics over your words have no video yet: ... Make them in the Graphics step." The optional key `graphic_overlays` (`id`, `scene_id`, `scene_index`, `overlay_id`, `text`, times, `start_frame`, `frames`, `source_frames`, `graphic_id`, `engine`, `attempt`, `path`, `clip_frames`, `x` 0, `y` 0) is written only when there is one, so `TIMELINE_VERSION` stays 6. Overlay spans are added to `graphic_spans` (a callout starting in one is dropped). `_shift_timeline` moves them. New warning `overlay_over_evidence` when an overlay covers a card or a full-screen (not split) evidence shot.
+- **`story_renders.py`**: `overlay_videos` (the overlay entries of `shot_graphics.state`, by `(scene id, overlay id)`), `_overlay_sources`, `scene_sources(..., with_overlays=True)`. `next_render_sources` and `timing_sources` pass `with_overlays=False`, so the music placement and its `_timeline_hash` cannot be touched by overlays. `overlay_reasons` is wired into `_render_reasons` and `state`: an overlay removed, with no current video, or with another attempt; an overlay with a video added since. An overlay with no video yet is not "added" (the render could not have had it).
+- **`scene_renders.py`**: `_Context.overlays`; `_scene_reasons` uses `overlay_reasons` for the scene's own overlays.
+- **`jobs/render_story.py`** (also used by `render_scene`): `GraphicOverlay`, `Timeline.graphic_overlays`, `_parse_graphic_overlays` (a bad entry is `_CHANGED_MESSAGE`; the video needs `source_frames - 1` frames), `probe_graphic_overlay`, and `card_overlays` now takes cards or overlays. The overlays of a shot are `[*callouts, *cards, *graphic overlays]`, so the graphic is on top (the owner's choice, until OVL-007).
+- **Planning decided.** B-roll sound is not lowered under an overlay (no change to the mix). Stacking: graphic on top of a card, with a warning. Overlays are left out of the music and timing sources.
+- **API**: the two warning codes in `WarningCode`; `schema.d.ts` regenerated from the app's own OpenAPI on a throwaway `DATA_DIR` (one line changed).
+- **Checked** (2026-11-27, no model call, no render job queued; a copy of the real database taken with SQLite's backup API from the running container, upgraded to `0102`, and a worktree of `HEAD`; both removed afterwards). (1) **Identity:** for all 18 projects, the SHA-256 of the frozen timeline of every scene render (101 scenes), of the full render when it can be made, and of `next_render_sources`' timeline is the same at `HEAD` and with this code (the copy has no media, so most projects are blocked and the check is of the reason as well). `story_renders.state` and `scene_renders.state` ran for every project without error; the count of `generate_shot` jobs was 370 before and after. (2) **A scene render of a synthetic scene shaped like project 94's** (five shots: three clips, an evidence shot, a clip; solid-colour videos made with FFmpeg; an overlay of 4.625 to 11.75 s with a magenta video and one of 13.042 to 21.792 s): at 24 and at 30 fps the plan has the entry (frames 111 + 171 at 24, 139 + 214 at 30), the job reads it back (`parse_timeline`), and stage 1 (`trim_args` with the overlays `card_overlays` gives) shows the clip under the first shot, the graphic for all of the second shot and for the third shot until the overlay ends, and the clip again after it; no overlay on the others. The second overlay without a video: warning `overlay_without_video`, and a full plan is refused with the sentence; with a video: `overlay_over_evidence`. Without overlays the key is absent. (3) **Out of date:** `overlay_reasons` on sample cases: same, removed, no video, new attempt, added, added without a video (no reason), another scene ignored. (4) `ruff check`, `ruff format --check`, `eslint` and `tsc -b` pass.
+- **Not checked.** (1) No real render and no real overlay video: project 94's copy has no media files, so "the graphic over both B-roll shots of scene 1" was checked on the synthetic scene, not on project 94, and the voice was not heard (the sound path of `trim_args` and the voice layer are not touched by overlays, but nothing was listened to). (2) The whole `render_story` job was not run (it needs the app's storage and job queue); its stage 1 was run with the same functions. (3) A callout dropped under an overlay was not run; the overlay span is added to `graphic_spans`, which `callout_render.resolve` already uses. (4) `mypy` is not installed in the backend environment, so it was not run. (5) The overlay is laid at the project's output size; a video of another size is scaled by the `overlay` filter's input, not checked (OVL-004 draws it at the output size). (6) When a scene's plan goes out of date its overlays are no longer listed, so a render laying them also says "removed" next to the plan's own reason.
 
 ### OVL-006 — Evidence added later becomes a card
 
@@ -538,3 +548,4 @@ Follow §7 of `Evidence_layer_implementation_phases.md`: when a phase changes st
 | 2026-11-27 | OVL-002 | Completed: suggestions removed from the planner's request, answer, stored content and out-of-date check; `scene_suggestions` moved to `graphic_suggestions.py`; API field removed; panels and texts updated. |
 | 2026-11-27 | OVL-003 | Completed: pure `graphic_overlays.py` (placement, keys, reason codes), `SceneEntry.overlays` and `unplaced_overlays`, API fields, board notes on the Graphic briefs step, `trimmed` flag on suggestions cut by a sound bite. |
 | 2026-11-27 | OVL-004 | Completed: briefs and graphics for overlays (`target = 'overlay'` rows, `start_overlay` in both services, `overlays` on both states and APIs, pipeline and staleness targets, panel cards), `clip_frames` and the stricter `too_long` check. |
+| 2026-11-27 | OVL-005 | Completed: optional `graphic_overlays` key in the frozen timeline (version stays 6), overlays laid full screen over the shots by `render_story` (on top of callouts and cards), refusals and warnings (`overlay_without_video`, `overlay_over_evidence`), out-of-date reasons for story and scene renders, overlays kept out of the music and timing sources. |
