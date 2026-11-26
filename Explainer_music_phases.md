@@ -60,7 +60,7 @@ continuous explainer, sound effects on (music on or off)
 
 A 6-minute explainer has seven sections (scenes). The plan has six score cues and one silence: a tense hook (scene 1), a lighter bed under the credentials and the promise (scenes 2 and 3, one cue), a steady investigative bed for the evidence (scene 4), a rising bed into the reveal with a drop just before the key line (scene 5), a calm takeaway (scene 6) and a short outro (scene 7). Every cue uses the same palette (for example muted synth pulse, soft piano, light percussion, 96 BPM, D minor). The plan names `scene:...` and `unit:...` refs only.
 
-Later the owner adds a graphic shot to scene 4. The cut plan of scene 4 changes, but its take, its units and its sound bites do not, so the music plan, the cue details and the takes stay current. Only the placement is worked out again (code, seconds), and the render plays the graphic sound on the new graphic shot's first frame.
+Later the owner adds a graphic shot to scene 4. The cut plan of scene 4 changes, but its take, its units and its sound bites do not, so the music plan, the cue details, the takes and the placement all stay current (the placement is made on the voice, not on shot cuts, EXM-003), and the render plays the graphic sound on the new graphic shot's first frame.
 
 ---
 
@@ -143,7 +143,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXM-003 — Music follows the voice, not the shots
 
-**Status:** Not started
+**Status:** Code done, live run pending
 
 **Objective.** Make an explainer's music plan, cue details and takes depend only on the voice, the sections and the sound bites, and make its placement independent of the clips.
 
@@ -179,10 +179,25 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Explainer music timeline (scenes, units, gaps; no shots, no events)
-- [ ] Explainer out-of-date inputs for the plan
-- [ ] Step needs: cue detail without shot definitions, placement without clips
-- [ ] Docs, standard checks
+- [x] Explainer music timeline (scenes, units, gaps; no shots, no events)
+- [x] Explainer out-of-date inputs for the plan
+- [x] Step needs: cue detail without shot definitions, placement without clips
+- [x] Docs, standard checks
+
+**Completion notes.** Code done 2026-11-27, **live run pending** (the running containers still serve the old code until `docker compose up --build -d`). No migration. Nothing here calls a model.
+
+- **Planning decided.**
+  - *Step needs:* one graph, with `Step.explainer_needs` and `story_pipeline.for_project(step, explainer=...)`, applied once per step in the run loop (`jobs/story_pipeline.py`) and the board (`services/pipeline_board.py`). `music_cues` needs `music_plan` and `music_themes`; `music_placement` needs `music_generation` and `shot_plans`.
+  - *Plan start:* the plan still waits for every scene's cut plan (scene starts and bite lengths exact).
+  - *Gaps:* from the pauses between units (no silence detection), listed from 0.5 s (`EXPLAINER_MIN_GAP_S`) with a `length_s`. Measured on project 94 the pauses inside a take are 0.4 to 0.96 s, `lead_in_s` is 0 and the tail 0.3 s, so a 1.0 s limit would list almost nothing. **Flag for EXM-004 and EXM-005:** a "post" in a gap has little room; most gaps are under 1 s.
+  - *Old plans:* an explainer plan without `inputs.basis = "voice"` is out of date once.
+  - *Placement and shot cuts:* the explainer placement is not snapped to shot cuts (`cuts_s` is empty), so a new shot cannot move it. This follows XM-6 and the expected outcome above, and replaces the sentence of §2.1 that said the placement is worked out again after a new graphic.
+- **Flag.** `music_bible.explainer_music(project)`, as for EXM-002.
+- **Timeline.** `music_timeline.build_voice`: the keys of a story's timeline, with `shots` and `events` empty, `mood: null`, and a new `soundbites` list (no shot ids). `GET /music-plan` scenes may have `mood: null` (`SceneSpanOut.mood` optional; `MusicPlanStrip` shows it only when present).
+- **Plan.** `music_plan._inputs` for an explainer records the Bible, each scene's speech units, and `voice` (take, timing, bite hash) read from the scene's newest shot plan. `_voice_out_of_date_reasons` never reads the shot plan row, events or definitions. Cue details skip shot definitions and themes (`music_cues.load`).
+- **Placement.** `story_renders.timing_sources` for an explainer; `inputs.voice_sha256` (`_voice_hash`: length, unit spans, take starts) replaces `timeline_sha256`.
+- **Checked.** A script with stand-in data (not kept): a changed shot plan, a replanned scene with new shot ids, an added graphic and evidence shot give the same timeline, hash and no out-of-date reason; a remade take, a retimed take, a changed unit text, a changed sound bite, a longer bite clip, a new Bible and a changed scene list each give one; the explainer placement hash ignores shots and clips and the layout has no cuts. Against `HEAD`: a story's timeline and hash, `Step.needs` of every step, placement `inputs` (final and provisional) and `input_differences` are the same. `ruff check`, `ruff format`, `eslint` and `tsc` pass. `schema.d.ts` was edited by hand for the one field (the OpenAPI of the new code was read to confirm it) and is not regenerated from the running API.
+- **Not checked.** `mypy` is not installed in the project's environment. The first real run on project 94 (the step board, a plan, cue details and the placement after adding a graphic shot) is for the owner after a rebuild. Until EXM-004, the plan's prompts are still the film ones: the model may name `shot:` refs or hits, which the check refuses and retries.
 
 ### EXM-004 — The explainer music plan and cue detail
 
@@ -383,7 +398,7 @@ Make a new continuous explainer (for example a short version of project 94's scr
 |----|--------|-------|
 | EXM-001 | Passed | Owner trial: two section underscores with one palette, their join, and the two sound effects. Marked complete by the owner 2026-11-27. |
 | EXM-002 | Code done, live run pending | Explainer Bible: palette in `sound_world`/`musical_feel`, arc with role and energy, no themes, themes step off. No migration. |
-| EXM-003 | Not started | |
+| EXM-003 | Code done, live run pending | Explainer music timeline (voice only, `soundbites`), voice-only plan inputs (`basis: "voice"`), placement on the voice (`voice_sha256`, no shot cuts), step needs per project. No migration. |
 | EXM-004 | Not started | |
 | EXM-005 | Not started | |
 | EXM-006 | Not started | |

@@ -55,7 +55,9 @@ export function MusicPlanStrip({ timeline, cues }: MusicPlanStripProps) {
         start: scene.start_s,
         end: scene.end_s,
         color: index % 2 === 0 ? "gray" : "dark",
-        title: `${scene.title} (${scene.mood.start}, then ${scene.mood.middle}, then ${scene.mood.end})`,
+        title: scene.mood
+          ? `${scene.title} (${scene.mood.start}, then ${scene.mood.middle}, then ${scene.mood.end})`
+          : scene.title,
         text: scene.title,
       })),
     },

@@ -97,6 +97,9 @@ class Step:
     # The needs of a lane step that are waited for as whole steps, like a story-wide need: every
     # scene must be done there. The other needs of a lane step are waited for scene by scene.
     whole: tuple[str, ...] = ()
+    # EXM-003: the needs of the step in a continuous explainer, when they differ from `needs`. The
+    # graph stays one graph: `needs` is the widest list, and `for_project` swaps this one in.
+    explainer_needs: tuple[str, ...] | None = None
 
 
 # The order is a valid order to look at the steps in: each comes after the steps it needs.
@@ -223,10 +226,12 @@ STEPS: Final[tuple[Step, ...]] = (
     ),
     # MUSIC-009: the exact detail of each cue and its prompts, then an audit of all prompts. A cue
     # may send the plan back once (a revision target in this step). Skipped when music is off.
+    # A continuous explainer's cues need no shot definition (EXM-003).
     Step(
         "music_cues",
         "Detail the music cues",
         ("music_plan", "music_themes", "shot_definitions"),
+        explainer_needs=("music_plan", "music_themes"),
     ),
     # MUSIC-010: a recording (a take) of each prompt of each cue, checked, and the first that
     # passes selected. A target for each item. Skipped when music is off.
@@ -270,10 +275,13 @@ STEPS: Final[tuple[Step, ...]] = (
     # The render waits for it (MUSIC-012): it mixes the placed music in.
     # EXG-007: both also wait for the graphics, whose videos are shots of the timeline, and
     # (EVD-009) for the evidence clips, which are too.
+    # A continuous explainer's placement is made on the voice alone, so it waits for no clip
+    # (EXM-003). It still needs the shot plans: they give the scene starts and the sound bites.
     Step(
         "music_placement",
         "Place the music",
         ("music_generation", "shot_generation", "graphics", "evidence_clips"),
+        explainer_needs=("music_generation", "shot_plans"),
     ),
     Step(
         "render",
@@ -285,6 +293,16 @@ STEPS: Final[tuple[Step, ...]] = (
 STEP_KEYS: Final = tuple(step.key for step in STEPS)
 STEP_LABELS: Final = {step.key: step.label for step in STEPS}
 STEPS_BY_KEY: Final = {step.key: step for step in STEPS}
+
+
+def for_project(step: Step, *, explainer: bool) -> Step:
+    """The step as it waits in this project: in a continuous explainer, a step with
+    `explainer_needs` waits for those instead of `needs` (EXM-003). Any other step is returned as
+    it is. Pure.
+    """
+    if explainer and step.explainer_needs is not None:
+        return replace(step, needs=step.explainer_needs)
+    return step
 
 
 def is_lane_step(step: Step) -> bool:
@@ -356,6 +374,12 @@ def _check_graph() -> None:
         unknown = [key for key in step.needs if key not in seen]
         if unknown:
             raise ValueError(f"step {step.key} needs {unknown}, not before it")
+        if step.explainer_needs is not None:
+            unknown = [key for key in step.explainer_needs if key not in seen]
+            if unknown:
+                raise ValueError(f"step {step.key} needs {unknown} in an explainer, not before it")
+            if step.kind != STORY or step.whole:
+                raise ValueError(f"step {step.key} has explainer needs, but is not story-wide")
         stray = [key for key in step.whole if key not in step.needs]
         if stray:
             raise ValueError(f"step {step.key} lists {stray} as whole, but does not need them")

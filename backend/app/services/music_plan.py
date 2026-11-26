@@ -66,6 +66,12 @@ _SCENE_KINDS: Final = (
     (SCENE_DEFINITION_KIND, "definition"),
 )
 
+# EXM-003: a continuous explainer's plan is made from the voice alone. Its `inputs.basis` says so.
+BASIS_VOICE: Final = "voice"
+VOICE_KEY: Final = "voice"
+OLD_BASIS_MESSAGE: Final = (
+    "This plan was written before the music followed the voice, so it is made again once."
+)
 MUSIC_OFF_MESSAGE: Final = "Music is switched off for this project. Switch it on in the settings."
 REPLACE_MESSAGE: Final = (
     "The newest music plan was written by you. Running the model adds a new version from the "
@@ -104,6 +110,8 @@ class _Loaded:
     blocked_reason: str | None
     # The condensed timeline, when every scene is ready (`blocked_reason` is then None).
     timeline: dict[str, Any] | None
+    # A continuous explainer (EXM-003): the plan follows the voice, not the shots.
+    explainer: bool = False
 
     @property
     def scene_ids(self) -> list[str]:
@@ -116,13 +124,15 @@ class _Loaded:
         return {theme["id"] for theme in self.bible.content["themes"]}
 
 
-def _scene_blocked_reason(scene: _Scene) -> str | None:
+def _scene_blocked_reason(scene: _Scene, *, explainer: bool = False) -> str | None:
     title = scene.item["title"]
     if not scene.shot_plan.generation_ready:
         why = scene.shot_plan.generation_blocked_reason or "its shot plan cannot be used"
         return f"Plan the shots of the scene '{title}' first: {why}"
     if scene.speech is None or scene.speech.row is None:
         return f"The speech of the scene '{title}' is not planned."
+    if explainer:
+        return None  # an explainer's plan needs no events and no scene definition
     if scene.events is None or scene.events.row is None:
         return f"The events of the scene '{title}' are missing."
     if scene.definition is None or scene.definition.row is None:
@@ -151,15 +161,56 @@ def _scene_input(scene: _Scene, names: dict[str, str]) -> music_timeline.SceneIn
     )
 
 
+def _voice_input(scene: _Scene) -> music_timeline.VoiceSceneInput:
+    plan = scene.shot_plan
+    assert plan.timeline is not None and plan.story_start_s is not None and plan.content
+    assert scene.speech is not None and scene.speech.content is not None
+    return music_timeline.VoiceSceneInput(
+        scene_id=scene.item["id"],
+        title=scene.item["title"],
+        story_start_s=plan.story_start_s,
+        timeline=plan.timeline,
+        shots=plan.content["shots"],
+        units=scene.speech.content["units"],
+    )
+
+
+def _voice_record(scene: _Scene) -> dict[str, Any]:
+    """What an explainer scene's voice is made of, read from its newest shot plan, which records
+    the take and the timing of its words it was cut on. A replan that cuts the same take
+    differently gives the same record. `soundbites_sha256` is the words the sound bites replace
+    (absent without one); the clip's length is not in it and is covered by the timeline hash.
+    """
+    row = scene.shot_plan.row
+    inputs = row.inputs if row is not None and isinstance(row.inputs, dict) else {}
+    take = next(
+        (
+            artifact
+            for artifact in inputs.get("artifacts") or []
+            if isinstance(artifact, dict) and artifact.get("kind") == shot_plans.SPEECH_TAKE_KIND
+        ),
+        {},
+    )
+    return {
+        "take_id": take.get("id"),
+        "timing_id": take.get("timing_id"),
+        "soundbites_sha256": inputs.get("soundbites_sha256"),
+    }
+
+
 async def _load(session: AsyncSession, project: Project) -> _Loaded:
+    explainer = music_bible.explainer_music(project)
     bible = await music_bible.latest(session, project.id)
     plans = await shot_plans.state(session, project)
     speech = await speech_units.state(session, project)
-    events = await scene_events.state(session, project)
-    definitions = await scene_definitions.state(session, project)
+    # An explainer's plan reads no events and no scene definitions (EXM-003).
+    events = None if explainer else await scene_events.state(session, project)
+    definitions = None if explainer else await scene_definitions.state(session, project)
     speech_by = {entry.item["id"]: entry for entry in speech.entries}
-    events_by = {entry.item["id"]: entry for entry in events.entries}
-    definitions_by = {entry.item["id"]: entry for entry in definitions.entries}
+    events_by = {entry.item["id"]: entry for entry in events.entries} if events else {}
+    definitions_by = (
+        {entry.item["id"]: entry for entry in definitions.entries} if definitions else {}
+    )
     scenes = [
         _Scene(
             item=entry.item,
@@ -179,15 +230,24 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         blocked = plans.blocked_reason or "Find the scenes first: the plan covers every scene."
     else:
         for scene in scenes:
-            blocked = _scene_blocked_reason(scene)
+            blocked = _scene_blocked_reason(scene, explainer=explainer)
             if blocked is not None:
                 break
 
     timeline = None
     if blocked is None:
-        timeline = music_timeline.build([_scene_input(scene, names) for scene in scenes])
+        timeline = (
+            music_timeline.build_voice([_voice_input(scene) for scene in scenes])
+            if explainer
+            else music_timeline.build([_scene_input(scene, names) for scene in scenes])
+        )
     return _Loaded(
-        bible=bible, scenes=scenes, names=names, blocked_reason=blocked, timeline=timeline
+        bible=bible,
+        scenes=scenes,
+        names=names,
+        blocked_reason=blocked,
+        timeline=timeline,
+        explainer=explainer,
     )
 
 
@@ -199,6 +259,26 @@ def _inputs(loaded: _Loaded) -> dict[str, Any]:
     artifacts: list[dict[str, Any]] = [
         {"kind": MUSIC_BIBLE_KIND, "id": loaded.bible.id, "version": loaded.bible.version}
     ]
+    if loaded.explainer:
+        # Only the speech and the voice (EXM-003): no shot plan, events or definition is recorded,
+        # so a plan that moves no word of the voice never makes this out of date.
+        for scene in loaded.scenes:
+            row = scene.speech.row if scene.speech else None
+            assert row is not None
+            artifacts.append(
+                {
+                    "kind": SPEECH_UNITS_KIND,
+                    "id": row.id,
+                    "version": row.version,
+                    "scene_id": scene.item["id"],
+                }
+            )
+        return {
+            "basis": BASIS_VOICE,
+            "artifacts": artifacts,
+            VOICE_KEY: {scene.item["id"]: _voice_record(scene) for scene in loaded.scenes},
+            "timeline_sha256": music_timeline.sha256(loaded.timeline),
+        }
     for scene in loaded.scenes:
         rows = (
             (SHOT_PLAN_KIND, scene.shot_plan.row),
@@ -461,13 +541,61 @@ def _recorded(
     return None
 
 
+def _voice_out_of_date_reasons(
+    inputs: dict[str, Any], loaded: _Loaded, already_late: bool
+) -> list[str]:
+    """Why a continuous explainer's plan is no longer current (EXM-003): only what moves the voice.
+    The shot plans, events and scene definitions are never looked at, so a graphic, an evidence
+    shot, B-roll or a presenter cut changes nothing here.
+    """
+    reasons: list[str] = []
+    recorded_voice = inputs.get(VOICE_KEY) if isinstance(inputs.get(VOICE_KEY), dict) else {}
+    titles = {scene.item["id"]: scene.item["title"] for scene in loaded.scenes}
+    if set(recorded_voice) != set(titles):
+        reasons.append("The list of scenes has changed since this plan was made.")
+
+    for scene in loaded.scenes:
+        scene_id = scene.item["id"]
+        if scene_id not in recorded_voice:
+            continue  # a new scene: the list of scenes has already been reported
+        title = titles[scene_id]
+        speech = scene.speech.row if scene.speech else None
+        if not provenance.same_row(_recorded(inputs, SPEECH_UNITS_KIND, scene_id), speech):
+            reasons.append(f"The speech of the scene '{title}' changed since this plan was made.")
+        recorded = recorded_voice[scene_id] if isinstance(recorded_voice[scene_id], dict) else {}
+        now = _voice_record(scene)
+        if recorded.get("take_id") != now["take_id"]:
+            reasons.append(
+                f"The voice take of the scene '{title}' was made again since this plan was made."
+            )
+        elif recorded.get("timing_id") != now["timing_id"]:
+            reasons.append(
+                f"The words of the scene '{title}' were timed again since this plan was made."
+            )
+        if recorded.get("soundbites_sha256") != now["soundbites_sha256"]:
+            reasons.append(
+                f"The sound bites of the scene '{title}' changed since this plan was made."
+            )
+
+    if not reasons and not already_late and loaded.timeline is not None:
+        if inputs.get("timeline_sha256") != music_timeline.sha256(loaded.timeline):
+            reasons.append("The timing of the voice has changed since this plan was made.")
+    return reasons
+
+
 def _out_of_date_reasons(row: MusicPlan, loaded: _Loaded) -> list[str]:
     """Why this version is no longer current, one sentence each. Worked out on every read."""
     inputs = row.inputs if isinstance(row.inputs, dict) else {}
     reasons: list[str] = []
 
+    if loaded.explainer and inputs.get("basis") != BASIS_VOICE:
+        return [OLD_BASIS_MESSAGE]  # made on shots, before the music followed the voice
+
     if not provenance.same_row(_recorded(inputs, MUSIC_BIBLE_KIND), loaded.bible):
         reasons.append("The Music Bible has been written again since this plan was made.")
+
+    if loaded.explainer:
+        return reasons + _voice_out_of_date_reasons(inputs, loaded, bool(reasons))
 
     recorded_scenes = {
         artifact["scene_id"]

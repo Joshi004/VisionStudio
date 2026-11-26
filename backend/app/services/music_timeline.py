@@ -189,13 +189,13 @@ def _event_entries(
     return entries
 
 
-def _gaps(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The silences between consecutive speech units of the whole story, at least `MIN_GAP_S`."""
+def _gaps(units: list[dict[str, Any]], min_gap_s: float = MIN_GAP_S) -> list[dict[str, Any]]:
+    """The silences between consecutive speech units of the whole story, at least `min_gap_s`."""
     ordered = sorted(units, key=lambda unit: (unit["start_s"], unit["end_s"]))
     gaps: list[dict[str, Any]] = []
     for before, after in zip(ordered, ordered[1:], strict=False):
         length = after["start_s"] - before["end_s"]
-        if length >= MIN_GAP_S:
+        if length >= min_gap_s:
             gaps.append(
                 {
                     "after": before["ref"],
@@ -241,6 +241,125 @@ def build(scenes: list[SceneInput]) -> dict[str, Any]:
         "units": unit_entries,
         "events": event_entries,
         "gaps": _gaps(unit_entries),
+    }
+
+
+# --- The timeline of a continuous explainer (EXM-003) ----------------------------------------
+
+# Gaps between speech units of an explainer shorter than this are not listed. The voice runs almost
+# the whole time (the pauses inside a take are 0.4 to 0.9 s), so the limit is lower than a story's.
+# Each gap carries its length: the plan and the mix decide which are long enough to use.
+EXPLAINER_MIN_GAP_S: Final = 0.5
+
+
+@dataclass(frozen=True)
+class VoiceSceneInput:
+    """What the explainer timeline needs of one scene: only the voice. The caller has checked that
+    the scene's shot plan is current and its timeline has no blocking problem.
+    """
+
+    scene_id: str
+    title: str
+    # Where the scene starts in the story, in seconds.
+    story_start_s: float
+    timeline: scene_timeline.SceneTimeline
+    # The stored list of the newest plan's shots, read only for its sound bite shots.
+    shots: list[dict[str, Any]]
+    # The stored speech units, for their texts.
+    units: list[dict[str, Any]]
+
+
+def _voice_unit_entries(scene: VoiceSceneInput) -> list[dict[str, Any]]:
+    stored = {unit["id"]: unit for unit in scene.units}
+    entries: list[dict[str, Any]] = []
+    for span in scene.timeline.units:
+        unit = stored.get(span.unit_id)
+        if unit is None:
+            continue
+        # The same shape as a story's entry, so every reader of a timeline works unchanged.
+        entries.append(
+            {
+                "ref": unit_ref(scene.scene_id, span.unit_id),
+                "scene_id": scene.scene_id,
+                "kind": span.kind,
+                "speaker": None,
+                "off_screen": False,
+                "text": _short(unit.get("text") or ""),
+                "start_s": _round(scene.story_start_s + span.start_s),
+                "end_s": _round(scene.story_start_s + span.end_s),
+                "event_id": None,
+            }
+        )
+    return entries
+
+
+def _soundbite_entries(scene: VoiceSceneInput) -> list[dict[str, Any]]:
+    """The real people's clips of the scene, in story seconds. They carry no shot id: shot ids
+    are renumbered with every plan, and a replan that moves nothing must not change the timeline.
+    """
+    stored = {shot["id"]: shot for shot in scene.shots}
+    entries: list[dict[str, Any]] = []
+    for span in scene.timeline.shots:
+        shot = stored.get(span.shot_id)
+        if shot is None or shot.get("type") != scene_timeline.SOUNDBITE_SHOT_TYPE:
+            continue
+        about = shot.get("soundbite")
+        if not isinstance(about, dict):
+            continue
+        entries.append(
+            {
+                "scene_id": scene.scene_id,
+                "claim_id": about.get("claim_id"),
+                "item_key": about.get("item_key"),
+                "start_s": _round(scene.story_start_s + span.start_s),
+                "end_s": _round(scene.story_start_s + span.end_s),
+            }
+        )
+    return entries
+
+
+def build_voice(scenes: list[VoiceSceneInput]) -> dict[str, Any]:
+    """The condensed timeline of a continuous explainer: scenes, speech units, the gaps between
+    them and the sound bites. It has the keys of `build`, but no shots and no events, so the model
+    cannot name them, and a scene has no mood. A change that moves no word of the voice (a
+    graphic, an evidence shot, B-roll, a presenter cut) leaves it exactly as it was.
+    """
+    scene_entries: list[dict[str, Any]] = []
+    unit_entries: list[dict[str, Any]] = []
+    bite_entries: list[dict[str, Any]] = []
+    total = 0.0
+    for scene in scenes:
+        end = _round(scene.story_start_s + scene.timeline.total_s)
+        scene_entries.append(
+            {
+                "ref": scene_ref(scene.scene_id),
+                "id": scene.scene_id,
+                "title": scene.title,
+                "start_s": _round(scene.story_start_s),
+                "end_s": end,
+                "mood": None,
+            }
+        )
+        unit_entries.extend(_voice_unit_entries(scene))
+        bite_entries.extend(_soundbite_entries(scene))
+        total = max(total, end)
+    gaps = [
+        {**gap, "length_s": _round(gap["end_s"] - gap["start_s"])}
+        for gap in _gaps(unit_entries, EXPLAINER_MIN_GAP_S)
+        # A stretch where a clip plays is not a gap in the voice.
+        if not any(
+            gap["start_s"] < bite["end_s"] and bite["start_s"] < gap["end_s"]
+            for bite in bite_entries
+        )
+    ]
+    return {
+        "total_s": total,
+        "scenes": scene_entries,
+        "shots": [],
+        "units": unit_entries,
+        "events": [],
+        "gaps": gaps,
+        "soundbites": bite_entries,
     }
 
 

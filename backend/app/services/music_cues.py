@@ -128,7 +128,10 @@ async def load(session: AsyncSession, project: Project) -> Loaded:
         blocked = NO_PLAN_MESSAGE
     elif plan_state.out_of_date:
         blocked = STALE_PLAN_MESSAGE
-    if plan is not None:
+    # A continuous explainer's cues are detailed from the voice alone (EXM-003): its plan has no
+    # shots and no theme, so no shot definition is read and none is waited for.
+    explainer = music_bible.explainer_music(project)
+    if plan is not None and not explainer:
         speech = await speech_units.state(session, project)
         names = {item["id"]: item["name"] for item in speech.characters}
         definitions = await shot_definitions.state(session, project)

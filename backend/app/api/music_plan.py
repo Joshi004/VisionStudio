@@ -67,7 +67,8 @@ class SceneSpanOut(BaseModel):
     title: str
     start_s: float
     end_s: float
-    mood: MoodOut
+    # None for a scene of a continuous explainer: its music follows the voice (EXM-003).
+    mood: MoodOut | None = None
 
 
 class ShotSpanOut(BaseModel):

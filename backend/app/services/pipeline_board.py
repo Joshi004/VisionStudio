@@ -42,6 +42,7 @@ from app.services import (
     callout_plan,
     evidence_claims,
     graphic_theme,
+    music_bible,
     music_themes,
     word_timings,
 )
@@ -330,7 +331,10 @@ async def build(session: AsyncSession, project: Project) -> Board:
 
     statuses: dict[str, BoardStatus] = {}
     steps: list[BoardStep] = []
-    for step in STEPS:  # the order of STEPS puts every step after the steps it needs
+    explainer = music_bible.explainer_music(project)
+    for listed in STEPS:  # the order of STEPS puts every step after the steps it needs
+        # A continuous explainer's music steps wait for fewer steps (EXM-003).
+        step = pipeline.for_project(listed, explainer=explainer)
         off = (
             (music_off and step.key in MUSIC_STEPS)
             or (step.key == MUSIC_THEMES_STEP and not music_themes.wanted(project))

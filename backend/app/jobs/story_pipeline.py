@@ -57,6 +57,7 @@ from app.db.models import Job, Project
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
 from app.jobs.handlers import JobHandler, PollContext
+from app.services import music_bible
 from app.services import review_points as review_rules
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline_targets import ADAPTERS
@@ -392,7 +393,10 @@ class StoryPipelineHandler(JobHandler):
         # reached is missing, and is open for everything.
         opens: dict[str, pipeline.Open] = {}
 
-        for step in pipeline.STEPS:
+        explainer = music_bible.explainer_music(project)
+        for listed in pipeline.STEPS:
+            # A continuous explainer's music steps wait for fewer steps (EXM-003).
+            step = pipeline.for_project(listed, explainer=explainer)
             if options.scenes and step.key in pipeline.SCENE_RUN_SKIPS:
                 # A run of some scenes makes no music and no full video (SCN-004).
                 output["steps"][step.key]["status"] = "skipped"

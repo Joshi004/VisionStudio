@@ -16096,7 +16096,7 @@ export interface components {
             start_s: number;
             /** End S */
             end_s: number;
-            mood: components["schemas"]["MoodOut"];
+            mood?: components["schemas"]["MoodOut"] | null;
         };
         /** SceneStagingOut */
         SceneStagingOut: {

@@ -37,6 +37,7 @@ from app.jobs import store
 from app.services import (
     audio_analysis,
     audio_measurements,
+    music_bible,
     music_cues,
     music_placer,
     music_takes,
@@ -143,6 +144,36 @@ def _timeline_hash(sources: story_renders.RenderSources, *, with_takes: bool = T
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _voice_hash(sources: story_renders.RenderSources) -> str:
+    """A fingerprint of what decides the seconds of a continuous explainer's placement (EXM-003):
+    the length of the video, every speech unit's span and where each scene's take starts. The
+    shots and their clips are not in it: a graphic, an evidence shot, B-roll or a presenter cut
+    moves no second of the voice, and the explainer's placement ignores shot cuts (XM-5, XM-6).
+    """
+    assert sources.plan is not None
+    timeline = sources.plan.timeline
+    voice = timeline.get("voice")
+    material = {
+        "fps": timeline["fps"],
+        "total_frames": timeline["total_frames"],
+        "units": [
+            [
+                music_timeline.unit_ref(scene.scene_id, unit.unit_id),
+                round((scene.story_start_s or 0.0) + unit.start_s, 3),
+                round((scene.story_start_s or 0.0) + unit.end_s, 3),
+            ]
+            for scene in sources.scenes
+            for unit in scene.units
+        ],
+        "takes": [
+            [take["scene_id"], take["audio_id"], take["start_ms"], take["seconds"]]
+            for take in (voice["takes"] if voice is not None else [])
+        ],
+    }
+    text = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 async def _setting_values(session: AsyncSession) -> dict[str, int]:
     return {
         "tight_ms": await settings_service.get_int(session, settings_service.MUSIC_PLACE_TIGHT_KEY),
@@ -163,17 +194,26 @@ def _inputs(
     values: dict[str, int],
     *,
     provisional: bool = False,
+    explainer: bool = False,
 ) -> dict[str, Any]:
     rows = {
         item.cue_view.row.id: item.cue_view.row for item in items if item.cue_view.row is not None
     }
     # A provisional placement (SCN-011) is made on the story's timing alone: `timing_sha256`
     # stands in for `timeline_sha256`, and `provisional` marks it.
-    timeline_keys: dict[str, Any] = (
-        {"timing_sha256": _timeline_hash(sources, with_takes=False), "provisional": True}
-        if provisional
-        else {"timeline_sha256": _timeline_hash(sources)}
-    )
+    timeline_keys: dict[str, Any]
+    if explainer:
+        # A continuous explainer's placement is made on the voice alone, final or not (EXM-003).
+        timeline_keys = {"voice_sha256": _voice_hash(sources)}
+        if provisional:
+            timeline_keys["provisional"] = True
+    elif provisional:
+        timeline_keys = {
+            "timing_sha256": _timeline_hash(sources, with_takes=False),
+            "provisional": True,
+        }
+    else:
+        timeline_keys = {"timeline_sha256": _timeline_hash(sources)}
     return {
         "plan": {"id": plan.id, "version": plan.version},
         "cues": [
@@ -234,9 +274,12 @@ async def _collect(
         reason = _item_block(item)
         if reason is not None:
             return _blocked(reason, plan)
+    # A continuous explainer's music waits for no clip (EXM-003): its timing sources stand in for
+    # a clip that is missing, and its placement does not depend on them.
+    explainer = music_bible.explainer_music(project)
     sources = (
         await story_renders.timing_sources(session, project)
-        if provisional
+        if provisional or explainer
         else await story_renders.next_render_sources(session, project)
     )
     if sources.blocked_reason is not None or sources.plan is None:
@@ -248,7 +291,7 @@ async def _collect(
         items,
         sources,
         loaded,
-        _inputs(plan, items, sources, values, provisional=provisional),
+        _inputs(plan, items, sources, values, provisional=provisional, explainer=explainer),
         None,
     )
 
@@ -278,9 +321,10 @@ class _Layout:
     fps: int
 
 
-def _layout(sources: story_renders.RenderSources) -> _Layout:
+def _layout(sources: story_renders.RenderSources, *, explainer: bool = False) -> _Layout:
     """Where every scene, shot and speech unit sits on the render's own timeline: shots on
-    frame boundaries, units where the render puts them.
+    frame boundaries, units where the render puts them. A continuous explainer's music is not
+    placed on shot cuts (EXM-003): they are left out, so a new shot moves nothing.
     """
     assert sources.plan is not None
     timeline = sources.plan.timeline
@@ -307,7 +351,9 @@ def _layout(sources: story_renders.RenderSources) -> _Layout:
                 scene.story_start_s + unit.end_s,
             )
     total = render_commands.sample_count(int(timeline["total_frames"]), fps)
-    return _Layout(spans=spans, cuts_s=sorted(cuts), total_samples=total, fps=fps)
+    return _Layout(
+        spans=spans, cuts_s=[] if explainer else sorted(cuts), total_samples=total, fps=fps
+    )
 
 
 async def _measure_file(
@@ -635,7 +681,7 @@ async def gather(
     assert sources.plan is not None
 
     unmeasured: list[str] = []
-    layout = _layout(sources)
+    layout = _layout(sources, explainer=music_bible.explainer_music(project))
     values: dict[str, int] = collected.inputs["settings"]
     params = music_placer.Params(
         tight_s=values["tight_ms"] / 1000,
@@ -839,6 +885,11 @@ def input_differences(saved: dict[str, Any], current: dict[str, Any]) -> list[st
         reasons.append(
             "The story's timeline changed since the music was placed (a shot take, the "
             "narration or a shot plan is different)."
+        )
+    if saved.get("voice_sha256") != current.get("voice_sha256"):
+        reasons.append(
+            "The timing of the voice changed since the music was placed (a take, a sound bite "
+            "or the scenes are different)."
         )
     if saved.get("timing_sha256") != current.get("timing_sha256"):
         reasons.append(
