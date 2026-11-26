@@ -50,6 +50,12 @@ JOB_TYPE: Final = "write_shot_graphic_brief"
 DEDUPE_KEY: Final = "shot_key"
 SOURCE_AI: Final = "ai"
 
+# What a stored graphic belongs to (OVL-001): a graphic shot, or an overlay. Every reader of
+# `shot_graphic_brief`, `shot_graphic` and `shot_graphic_choice` in this module and in
+# `shot_graphics` reads shot rows only; overlay rows are read from OVL-004 on.
+TARGET_SHOT: Final = "shot"
+TARGET_OVERLAY: Final = "overlay"
+
 STORY_BIBLE_KIND: Final = "story_bible"
 SHOT_PLAN_KIND: Final = "shot_plan"
 SPEECH_TAKE_KIND: Final = "speech_take"
@@ -207,6 +213,7 @@ async def newest_row(
         select(ShotGraphicBrief)
         .where(
             ShotGraphicBrief.project_id == project_id,
+            ShotGraphicBrief.target == TARGET_SHOT,
             ShotGraphicBrief.scene_id == scene_id,
             ShotGraphicBrief.shot_id == shot_id,
         )
@@ -234,12 +241,14 @@ async def save_version(
     """
     statement = select(func.max(ShotGraphicBrief.version)).where(
         ShotGraphicBrief.project_id == project_id,
+        ShotGraphicBrief.target == TARGET_SHOT,
         ShotGraphicBrief.scene_id == scene_id,
         ShotGraphicBrief.shot_id == shot_id,
     )
     highest = (await session.execute(statement)).scalar_one_or_none()
     row = ShotGraphicBrief(
         project_id=project_id,
+        target=TARGET_SHOT,
         scene_id=scene_id,
         shot_id=shot_id,
         shot_plan_id=shot_plan_id,
@@ -503,7 +512,7 @@ async def _newest_rows(session: AsyncSession, project_id: int) -> dict[str, Shot
     """The newest brief of each shot of the project, by its `scene/shot` key."""
     statement = (
         select(ShotGraphicBrief)
-        .where(ShotGraphicBrief.project_id == project_id)
+        .where(ShotGraphicBrief.project_id == project_id, ShotGraphicBrief.target == TARGET_SHOT)
         .order_by(ShotGraphicBrief.version.desc(), ShotGraphicBrief.id.desc())
         .execution_options(populate_existing=True)
     )

@@ -1544,12 +1544,17 @@ class ShotGraphicBrief(Base):
     `shot_id` the shot's id in that scene's shot plan; `shot_plan_id` is the plan the brief was
     written for. `inputs` holds the plan, the skeleton hash, the context and its hash, and the
     take and timing used. `content` is the brief.
+
+    `target` (OVL-001, revision 0102) is `shot` for a graphic shot or `overlay` for an overlay
+    graphic. For an overlay, `shot_id` is `{first}-{last}` (the overlay's first and last word in
+    the take, counted from 1) and `shot_plan_id` is NULL.
     """
 
     __tablename__ = "shot_graphic_brief"
     __table_args__ = (
         CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
-        UniqueConstraint("project_id", "scene_id", "shot_id", "version"),
+        CheckConstraint("target IN ('shot', 'overlay')", name="target_valid"),
+        UniqueConstraint("project_id", "target", "scene_id", "shot_id", "version"),
         Index("idx_shot_graphic_brief_project_scene", "project_id", "scene_id"),
     )
 
@@ -1557,6 +1562,7 @@ class ShotGraphicBrief(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     scene_id: Mapped[str]
     shot_id: Mapped[str]
+    target: Mapped[str] = mapped_column(default="shot", server_default=text("'shot'"))
     # The shot plan row this was written for. NULL when that row was deleted.
     shot_plan_id: Mapped[int | None] = mapped_column(
         ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None
@@ -1583,6 +1589,9 @@ class ShotGraphic(Base):
     is queued, so `input`, `inputs` and the video columns are NULL until they are written.
     `failed_outright` is set on the newest attempt of a component that has no video and that
     nothing more will be tried for (EXG-006); the rule of EXG-007 then uses the blocks.
+
+    `target` (OVL-001, revision 0102) is `shot` or `overlay`, the same as its brief's; for an
+    overlay, `shot_id` is `{first}-{last}`.
     """
 
     __tablename__ = "shot_graphic"
@@ -1590,6 +1599,7 @@ class ShotGraphic(Base):
         CheckConstraint(
             "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
         ),
+        CheckConstraint("target IN ('shot', 'overlay')", name="target_valid"),
         UniqueConstraint("brief_id", "engine", "attempt"),
         Index("idx_shot_graphic_brief_engine", "brief_id", "engine"),
         Index("idx_shot_graphic_project_scene", "project_id", "scene_id"),
@@ -1599,6 +1609,7 @@ class ShotGraphic(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     scene_id: Mapped[str]
     shot_id: Mapped[str]
+    target: Mapped[str] = mapped_column(default="shot", server_default=text("'shot'"))
     brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
     engine: Mapped[str]
     attempt: Mapped[int]
@@ -1627,6 +1638,9 @@ class ShotGraphicChoice(Base):
 
     One row per shot, like `ShotVoiceSource`. It names the brief it was set on and counts only
     while that brief is the shot's current one, so a new brief puts the shot back on the rule.
+
+    `target` (OVL-001, revision 0102) is `shot` or `overlay`; for an overlay, `shot_id` is
+    `{first}-{last}`.
     """
 
     __tablename__ = "shot_graphic_choice"
@@ -1634,7 +1648,8 @@ class ShotGraphicChoice(Base):
         CheckConstraint(
             "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
         ),
-        UniqueConstraint("project_id", "scene_id", "shot_id"),
+        CheckConstraint("target IN ('shot', 'overlay')", name="target_valid"),
+        UniqueConstraint("project_id", "target", "scene_id", "shot_id"),
         Index("idx_shot_graphic_choice_project", "project_id"),
     )
 
@@ -1642,6 +1657,7 @@ class ShotGraphicChoice(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     scene_id: Mapped[str]
     shot_id: Mapped[str]
+    target: Mapped[str] = mapped_column(default="shot", server_default=text("'shot'"))
     brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
     engine: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

@@ -225,6 +225,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (SB-009 the sound bite in the render, 2026-11-22):** no migration, no new column, no new table, no new job type, no new setting. Only JSON that already exists changes, and each new key is **written only when a scene has an accepted, shown sound bite**, so every plan, hash and frozen timeline of a project without one is byte for byte as before. (1) **`evidence_clip` rows of purpose `soundbite`** are now written, and the review's rendered preview of an accepted `video` clip is a `preview` row: both are made by the existing `render_evidence_clip` job (a new branch for a `video` item). `inputs` holds the look (the usual frame look plus the cut `in_s` and `out_s`, the lower third's `speaker`, `role`, `venue` and `recorded`, the credit's `channel` and the item's `video_sha256`) and `item_key`, `claim_id`, `first_word` and `last_word`; a clip is out of date when its look differs. `metrics` has `framing` (`full`, or `fitted` over a blurred copy for portrait, low resolution or another aspect), `frames`, `width`, `height`, `fps`, `codec`, `pix_fmt`, `speech_lufs`, `lower_third` and `credit`. The file is h264 with the clip's own stereo sound and the motion service's overlay (lower third and source credit) baked in: `.mov` for a `soundbite` clip, `.mp4` for a preview. (2) **The frozen render timeline** stays version 6. A bite's shot entry now has the clip's `path`, `has_audio` true, `duck` `[]` and `soundbite` `{"clip_id", "claim_id", "item_key", "seconds", "music_drop", "take_window"}`; each music sound has `bite_ducks` (`windows`, `db`, `attack_s`, `release_s`); a caption group may have `colour`; the constants `bite_max_boost_db`, `bite_clip_fade_s`, `bite_music_duck_db`, `bite_duck_attack_s`, `bite_duck_release_s`, `bite_drop_db`, `bite_drop_attack_s` and `bite_drop_release_s` are written with a bite and have defaults when a timeline without them is read. A full render is refused only when a bite's clip is missing or out of date. The scene render's levels record has `soundbite_clip_id`. (3) **`evidence_review.content[...].soundbite.music_drop`** is now written (the review card's switch; it was always `false` before). It is not part of a clip's look nor of the plan's fingerprint: a new value makes the scene and story renders out of date and nothing else. (4) **Captions:** a bite's units are made from the clip's heard words and carry the speaker's `colour` (one of four, by first appearance). ASS writes one event for the whole group in that colour, YTT one pen for each colour, SRT is unchanged. (5) **The description's Sources section** links an accepted clip as `https://www.youtube.com/watch?v=<id>&t=<n>s`. See Sections 4.98 and 5.
 
+**Update (OVL-001 overlay graphics storage, 2026-11-26):** migration `0102` (`Graphic_overlays_implementation_phases.md`; the head revision is now `0102`). **The three graphics tables can hold the graphics of overlays, so the later overlay phases add no migration; nothing is written to the new column yet.** (1) **`shot_graphic_brief` (4.76), `shot_graphic` (4.77) and `shot_graphic_choice` (4.78) each gain `target`** (TEXT, NOT NULL, default `shot`, `CHECK (target IN ('shot', 'overlay'))`; every row that exists reads `shot`). For an `overlay` row, `scene_id` is the scene, `shot_id` is `{first}-{last}` (the overlay's first and last word in the take, counted from 1, so `shot_key(scene_id, shot_id)` is the overlay key `{scene_id}/{first}-{last}`) and `shot_plan_id` of a brief is NULL. (2) **The UNIQUE of the brief and of the choice includes `target`**: `(project_id, target, scene_id, shot_id, version)` and `(project_id, target, scene_id, shot_id)`. The UNIQUE of `shot_graphic` is on `brief_id`, which fixes the target, so it is unchanged. (3) **Every reader reads shot rows only**: `shot_graphic_briefs` (`newest_row`, `save_version`, `_newest_rows`) and `shot_graphics` (`_rows_by_shot`, `_choices`, `set_choice`, `_new_row`) filter on `target = 'shot'` (`shot_graphic_briefs.TARGET_SHOT`; `TARGET_OVERLAY` is for OVL-004), so graphic shots read exactly as before. No job type, setting or API changes. Downgrade deletes the overlay rows (choices, graphics, briefs) before it drops the column.
+
 **Update (EVD-017 evidence links in the YouTube description, 2026-11-20):** no migration, no new column, no new table, no new job type, no new route. **The YouTube draft's description ends with a "Sources" section, built by code from the owner's accepted evidence.** (1) The `write_youtube_draft` job input gains `sources` (Section 5): the accepted pieces of the newest review, frozen when the draft is queued; a job queued before this reads it as `[]`. (2) `youtube_draft.inputs` gains `evidence_review`: `{id, version}` of the newest `evidence_review` row of the current round, or null when evidence does not apply (migration-free: an older version without the key reads as null). A draft is out of date ("The evidence review changed since this draft was made.") when that record is no longer the newest. (3) The handler adds the section (`youtube_draft_writer.with_sources`) after the model's answer is checked, inside YouTube's 5,000-byte limit with the hashtags counted; claims that do not fit are left out and the section says how many sources are not listed. The model is told not to write links, and an answer with a link is refused (the owner's own edit may keep any link). Only `accepted` and usable pieces are listed, whether or not they are shown on video; the text comes only from `evidence_item.source` and the claim's words.
 
 **Update (EVD-011 evidence cards, EVD-012 source lines, EVD-016 split evidence shots, 2026-11-17):** migration `0099`. (1) **`evidence_clip.purpose` gains `card`** (the head revision is now `0099`): the CHECK `ck_evidence_clip_purpose_valid` is rebuilt in batch mode as `purpose IN ('preview', 'shot', 'card')`; the downgrade deletes the `card` rows first. (2) **A card clip is an `evidence_clip` with `purpose='card'`**: `item_id` the piece, `scene_id` set, `shot_id` the first shot the card covers, `shot_plan_id` the plan it was placed from; `inputs` as for a shot plus `card_id` (`{claim_id}.{piece}`), `box` (`[x, y, width, height]` of the card on the frame) and `frame` (`[width, height]` of the output); `width`, `height` and `frames` are the card's own. The file is a transparent ProRes 4444 `.mov`. Its `render_evidence_clip` job has `input` `{"evidence_clip_id": 5, "card_clip_ref": "scene_2/c3.1"}`. **Which cards exist, and where, is worked out on read** from the newest plan and the words of the scene's take (`shot_plans.SceneEntry.cards`), and so are the source lines; nothing is stored for them. (3) **`evidence_clip.inputs` of a shot clip may have `layout: "split"`, `panel: [x, y, width, height]` and `callouts: [...]`** when a callout lands in the shot (EVD-016); a clip with no `layout` is a full-frame clip. They are compared as part of the clip's look: a clip is out of date when its shot is split now and the clip is not, or the other way round. (4) **The frozen render timeline** (`story_render.inputs`, `scene_render.inputs`) gets the optional keys `evidence_cards` (`id`, `scene_id`, `claim_id`, `item_key`, `start_ms`, `end_ms`, `start_frame`, `frames`, `clip_id`, `path`, `clip_frames`, `x`, `y`, `width`, `height`) and `source_lines` (`scene_id`, `claim_id`, `item_key`, `start_ms`, `end_ms`, `text`), and an evidence shot's `evidence` entry may have `layout: "split"`; a render of a project without evidence has none of them. The timeline version is unchanged. (5) Render warnings gain the codes `card_without_clip` and `evidence_split_empty`.
@@ -3693,8 +3695,9 @@ CREATE INDEX idx_graphic_theme_project ON graphic_theme (project_id);
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `scene_id` | TEXT | NOT NULL | — | The scene's slug id |
-| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan. `UNIQUE (project_id, scene_id, shot_id, version)` |
-| `shot_plan_id` | INTEGER, FK → `shot_plan.id` | NULL | — | The plan it was written for. `ON DELETE SET NULL` |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan; for an overlay, `{first}-{last}` (OVL-001) |
+| `target` | TEXT | NOT NULL | `'shot'` | `shot` or `overlay` (`CHECK`; since migration `0102`). `UNIQUE (project_id, target, scene_id, shot_id, version)` |
+| `shot_plan_id` | INTEGER, FK → `shot_plan.id` | NULL | — | The plan it was written for. NULL for an overlay. `ON DELETE SET NULL` |
 | `version` | INTEGER | NOT NULL | — | From 1, for each shot |
 | `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote it. NULL for a manual version. `ON DELETE SET NULL` |
@@ -3715,7 +3718,8 @@ CREATE TABLE shot_graphic_brief (
     inputs       JSON NOT NULL,
     content      JSON NOT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (project_id, scene_id, shot_id, version)
+    target       TEXT NOT NULL DEFAULT 'shot' CHECK (target IN ('shot', 'overlay')),
+    UNIQUE (project_id, target, scene_id, shot_id, version)
 );
 CREATE INDEX idx_shot_graphic_brief_project_scene ON shot_graphic_brief (project_id, scene_id);
 ```
@@ -3745,7 +3749,8 @@ Deleting a brief deletes its attempts (`CASCADE`). The video files are deleted b
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `scene_id` | TEXT | NOT NULL | — | The scene's slug id |
-| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan; for an overlay, `{first}-{last}` (OVL-001) |
+| `target` | TEXT | NOT NULL | `'shot'` | `shot` or `overlay`, the same as its brief's (`CHECK`; since migration `0102`) |
 | `brief_id` | INTEGER, FK → `shot_graphic_brief.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (brief_id, engine, attempt)` |
 | `engine` | TEXT | NOT NULL | — | `generated_component` or `remotion_blocks` (`CHECK`) |
 | `attempt` | INTEGER | NOT NULL | — | From 1, for each engine of a brief |
@@ -3783,6 +3788,7 @@ CREATE TABLE shot_graphic (
     last_error      TEXT,
     failed_outright BOOLEAN NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    target          TEXT NOT NULL DEFAULT 'shot' CHECK (target IN ('shot', 'overlay')),
     UNIQUE (brief_id, engine, attempt)
 );
 CREATE INDEX idx_shot_graphic_brief_engine ON shot_graphic (brief_id, engine);
@@ -3796,9 +3802,10 @@ CREATE INDEX idx_shot_graphic_project_scene ON shot_graphic (project_id, scene_i
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
-| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, scene_id, shot_id)` |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, target, scene_id, shot_id)` |
 | `scene_id` | TEXT | NOT NULL | — | The scene's slug id |
-| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan; for an overlay, `{first}-{last}` (OVL-001) |
+| `target` | TEXT | NOT NULL | `'shot'` | `shot` or `overlay` (`CHECK`; since migration `0102`) |
 | `brief_id` | INTEGER, FK → `shot_graphic_brief.id` | NOT NULL | — | The brief the choice was set on. `ON DELETE CASCADE` |
 | `engine` | TEXT | NOT NULL | — | `generated_component` or `remotion_blocks` (`CHECK`) |
 | `created_at` | DATETIME | NOT NULL | now | |
@@ -3812,7 +3819,8 @@ CREATE TABLE shot_graphic_choice (
     brief_id   INTEGER NOT NULL REFERENCES shot_graphic_brief(id) ON DELETE CASCADE,
     engine     TEXT NOT NULL CHECK (engine IN ('generated_component', 'remotion_blocks')),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (project_id, scene_id, shot_id)
+    target     TEXT NOT NULL DEFAULT 'shot' CHECK (target IN ('shot', 'overlay')),
+    UNIQUE (project_id, target, scene_id, shot_id)
 );
 CREATE INDEX idx_shot_graphic_choice_project ON shot_graphic_choice (project_id);
 ```

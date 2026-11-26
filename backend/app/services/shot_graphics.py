@@ -484,7 +484,10 @@ async def _rows_by_shot(
 ) -> dict[tuple[str, str, int, str], list[ShotGraphic]]:
     statement = (
         select(ShotGraphic)
-        .where(ShotGraphic.project_id == project_id)
+        .where(
+            ShotGraphic.project_id == project_id,
+            ShotGraphic.target == shot_graphic_briefs.TARGET_SHOT,
+        )
         .order_by(ShotGraphic.id)
         .execution_options(populate_existing=True)
     )
@@ -499,7 +502,10 @@ async def _choices(
 ) -> dict[tuple[str, str], ShotGraphicChoice]:
     statement = (
         select(ShotGraphicChoice)
-        .where(ShotGraphicChoice.project_id == project_id)
+        .where(
+            ShotGraphicChoice.project_id == project_id,
+            ShotGraphicChoice.target == shot_graphic_briefs.TARGET_SHOT,
+        )
         .execution_options(populate_existing=True)
     )
     return {
@@ -727,6 +733,7 @@ async def _new_row(
     assert shot.brief is not None
     row = ShotGraphic(
         project_id=project.id,
+        target=shot_graphic_briefs.TARGET_SHOT,
         scene_id=scene_id,
         shot_id=shot.shot["id"],
         brief_id=shot.brief.id,
@@ -957,6 +964,7 @@ async def set_choice(
         await session.execute(
             select(ShotGraphicChoice).where(
                 ShotGraphicChoice.project_id == project.id,
+                ShotGraphicChoice.target == shot_graphic_briefs.TARGET_SHOT,
                 ShotGraphicChoice.scene_id == scene_id,
                 ShotGraphicChoice.shot_id == shot_id,
             )
@@ -977,6 +985,7 @@ async def set_choice(
         session.add(
             ShotGraphicChoice(
                 project_id=project.id,
+                target=shot_graphic_briefs.TARGET_SHOT,
                 scene_id=scene_id,
                 shot_id=shot_id,
                 brief_id=shot.brief.id,
