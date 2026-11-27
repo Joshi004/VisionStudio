@@ -1572,7 +1572,7 @@ async def _evaluate_speech_synthesis(
             take = scene.take
             if take is not None:
                 # A recorded take is never made by a job: its `blocked_reason` says what to record.
-                take_kind = "recorded voice" if state.recorded else "voice take"
+                take_kind = "recorded voice" if scene.recorded else "voice take"
                 targets.append(
                     Target(
                         f"take:{scene_id}",
@@ -1663,7 +1663,7 @@ async def _evaluate_word_timings(
                         active=take.status == "in_progress",
                         block=None
                         if take.status == "in_progress"
-                        else take_timings.blocked_reason_of(take, None, recorded=state.recorded),
+                        else take_timings.blocked_reason_of(take, None, recorded=scene.recorded),
                         group=scene_id,
                     )
                 )
@@ -1682,7 +1682,7 @@ async def _evaluate_word_timings(
                         take_timings.poor_match_reason(
                             take_timing.match_percent if take_timing is not None else None,
                             take_timing.threshold if take_timing is not None else None,
-                            recorded=state.recorded,
+                            recorded=scene.recorded,
                         )
                         if take_status == "estimated"
                         else None

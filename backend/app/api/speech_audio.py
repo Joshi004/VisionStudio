@@ -13,6 +13,11 @@
   each scene has a `take` with the same kind of state as a unit's, "Make all" starts one take per
   scene, and `POST .../{scene_id}/take/run` starts the take of one scene. Its units are not
   spoken one by one.
+- A recorded project (REC-002) can also have the speech model speak some of its scenes
+  (REC-007), in the presenter's voice. Each scene says which take it uses (`take_source`) and
+  keeps the other (`other_take`). `POST .../{scene_id}/take/run` makes the generated take and
+  switches the scene to it, "Make all" makes only the scenes with no usable recorded take, and
+  `PUT .../{scene_id}/take/source` switches a scene either way without making anything.
 
 A speech is made by the `synthesize_speech_unit` job (`services/speech_synthesis.py`). For an
 explainer, each unit also says where the timing of its words stands
@@ -140,13 +145,20 @@ class SpeechTakeOut(BaseModel):
     # The time of each word of the stored take (FLOW-004). None until the take has stored audio
     # (and for a project that does not time its takes).
     word_timing: WordTimingOut | None
+    # Recorded take only (REC-007): a full recording is about to give the scene its take.
+    awaiting_recording: bool
 
 
 class SpeechSceneAudioOut(BaseModel):
     scene_id: str
     units: list[SpeechUnitAudioOut]
-    # None unless the project is a continuous explainer and the scene has units.
+    # None unless the project is a continuous explainer and the scene has units. In a recorded
+    # project it is the take in use: the recorded one, or the generated one (REC-007).
     take: SpeechTakeOut | None
+    # Where `take` comes from (REC-007): `generated` (the speech model) or `recorded`.
+    take_source: TakeSource
+    # Recorded projects only: the take of the other kind, kept so the scene can be switched.
+    other_take: SpeechTakeOut | None
 
 
 class SpeechAudioStateOut(BaseModel):
@@ -157,8 +169,9 @@ class SpeechAudioStateOut(BaseModel):
     blocked_reason: str | None
     # True for a continuous explainer, whose scenes are spoken as takes.
     continuous: bool
-    # Where the takes come from (REC-002): `recorded` means a person records them, and Make and
-    # Make all are refused. `generated` for every other project.
+    # Where the takes come from by default (REC-002): `recorded` means a person records them,
+    # but a scene can still be switched to a generated take (REC-007). `generated` for every
+    # other project.
     take_source: TakeSource
 
 
@@ -249,6 +262,7 @@ def _take_out(
             if timings is not None and take.audio is not None
             else None
         ),
+        awaiting_recording=take.awaiting_recording,
     )
 
 
@@ -272,6 +286,9 @@ async def get_speech_audio(project_id: int, session: SessionDep) -> SpeechAudioS
                 scene_id=scene.scene.item["id"],
                 units=[_unit_out(item, timings) for item in scene.units],
                 take=_take_out(scene.take, timings),
+                # The scene's source is `generated` or `recorded`, nothing else.
+                take_source=cast(TakeSource, scene.source),
+                other_take=_take_out(scene.other_take, timings),
             )
             for scene in current.scenes
         ],
@@ -306,6 +323,31 @@ async def run_all(project_id: int, session: SessionDep) -> SpeechAudioRunAllOut:
             for item in started.skipped
         ],
     )
+
+
+class SceneTakeSourceIn(BaseModel):
+    """Which take of a scene of a recorded project goes into the video (REC-007)."""
+
+    source: TakeSource
+
+
+@router.put(
+    "/projects/{project_id}/speech-audio/{scene_id}/take/source",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def put_take_source(
+    project_id: int, scene_id: DiscoveryId, body: SceneTakeSourceIn, session: SessionDep
+) -> None:
+    """Switches one scene of a recorded project between its recorded take and its generated
+    take. Nothing is made and nothing is deleted. Refused for a project whose voice is not
+    recorded.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await speech_synthesis.set_take_source(session, project, scene_id, body.source)
+    except speech_synthesis.SpeechSynthesisError as exc:
+        raise _refused(exc) from exc
 
 
 # Declared before the unit's route: "take" would otherwise be read as a unit id.

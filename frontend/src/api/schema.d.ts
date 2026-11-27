@@ -4875,6 +4875,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/speech-audio/{scene_id}/take/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Take Source
+         * @description Switches one scene of a recorded project between its recorded take and its generated
+         *     take. Nothing is made and nothing is deleted. Refused for a project whose voice is not
+         *     recorded.
+         */
+        put: operations["put_take_source_api_projects__project_id__speech_audio__scene_id__take_source_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/speech-audio/{scene_id}/take/run": {
         parameters: {
             query?: never;
@@ -16259,6 +16281,17 @@ export interface components {
             /** After */
             after: string;
         };
+        /**
+         * SceneTakeSourceIn
+         * @description Which take of a scene of a recorded project goes into the video (REC-007).
+         */
+        SceneTakeSourceIn: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "generated" | "recorded";
+        };
         /** SceneTimeIn */
         SceneTimeIn: {
             /** Time Of Day */
@@ -18302,6 +18335,12 @@ export interface components {
             /** Units */
             units: components["schemas"]["SpeechUnitAudioOut"][];
             take: components["schemas"]["SpeechTakeOut"] | null;
+            /**
+             * Take Source
+             * @enum {string}
+             */
+            take_source: "generated" | "recorded";
+            other_take: components["schemas"]["SpeechTakeOut"] | null;
         };
         /**
          * SpeechTakeOut
@@ -18333,6 +18372,8 @@ export interface components {
             blocked_reason: string | null;
             job: components["schemas"]["DiscoveryJobOut"] | null;
             word_timing: components["schemas"]["WordTimingOut"] | null;
+            /** Awaiting Recording */
+            awaiting_recording: boolean;
         };
         /**
          * SpeechUnitAudioOut
@@ -31774,6 +31815,49 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SpeechAudioRunAllOut"];
                 };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_take_source_api_projects__project_id__speech_audio__scene_id__take_source_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneTakeSourceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No such project. */
             404: {

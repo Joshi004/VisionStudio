@@ -237,24 +237,23 @@ export function ProjectSettingsForm({
                     Switching deletes nothing: the other kind's takes count again when you switch
                     back.
                   </Text>
-                  {draft.take_source === "generated" && (
-                    <>
-                      <Textarea
-                        label="Presenter delivery"
-                        description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default."
-                        value={draft.presenter_delivery}
-                        onChange={(event) => edit("presenter_delivery", event.currentTarget.value)}
-                        maxLength={DELIVERY_MAX_CHARS}
-                        autosize
-                        minRows={2}
-                        maxRows={6}
-                      />
-                      <Text size="xs" c="dimmed">
-                        Every scene's voice take is made with this text, so changing it makes the
-                        takes out of date.
-                      </Text>
-                    </>
-                  )}
+                  <Textarea
+                    label="Presenter delivery"
+                    description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default."
+                    value={draft.presenter_delivery}
+                    onChange={(event) => edit("presenter_delivery", event.currentTarget.value)}
+                    maxLength={DELIVERY_MAX_CHARS}
+                    autosize
+                    minRows={2}
+                    maxRows={6}
+                  />
+                  <Text size="xs" c="dimmed">
+                    {draft.take_source === "recorded"
+                      ? "Used for scenes made by the speech model. "
+                      : ""}
+                    Every generated voice take is made with this text, so changing it makes those
+                    takes out of date.
+                  </Text>
                   <Group gap="sm">
                     <Text size="sm" fw={500}>
                       Graphics

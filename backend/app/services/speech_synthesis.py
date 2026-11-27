@@ -36,6 +36,13 @@ undecided tight boundaries (`services/full_recordings.py`); if it is refused or 
 keep their earlier takes. A take of that recording whose cut was decided differently since is
 stale and never counts, and only the scenes whose cut moved are split again (REC-005).
 
+A recorded project can also have the speech model speak some of its scenes (REC-007), in the
+presenter's voice with the presenter delivery. `project.generated_take_scenes` lists the scenes
+that use the generated take; every other scene uses its recorded take. Each scene keeps both
+kinds of take (`SceneAudio.take` is the one in use, `other_take` the other), so it can be
+switched at any time without making or deleting anything. Making a scene's take switches it to
+the generated take; recording or uploading it, or recording the whole video, switches it back.
+
 `start_unit`, `start_take` and `start_all` queue the jobs and write one `speech_unit_audio` row
 per job, in one transaction.
 """
@@ -93,7 +100,9 @@ _SPOKEN_AS_TAKE: Final = "This explainer speaks each scene as one take. Make the
 _SPOKEN_AS_RECORDED_TAKE: Final = (
     "This explainer speaks each scene as one recorded take. Record the scene."
 )
-RECORDED_REFUSED: Final = "This explainer's voice is recorded. Record or upload it."
+NOT_A_RECORDED_PROJECT: Final = (
+    "Only an explainer with a recorded voice can choose between a recording and speech."
+)
 RECORD_THE_VOICE: Final = "Record the voice (the whole video or this scene)."
 RECORDED_OUT_OF_DATE: Final = (
     "The text of this scene has changed since it was recorded. Record the scene again."
@@ -153,6 +162,9 @@ class TakeEntry:
     can_run: bool
     blocked_reason: str | None
     job: Job | None
+    # Recorded take only (REC-007): a full recording that covers this scene is being transcribed,
+    # split or waiting on the owner's decision, so the scene is about to get a recorded take.
+    awaiting_recording: bool = False
 
 
 @dataclass(frozen=True)
@@ -160,11 +172,23 @@ class SceneAudio:
     """One scene of the newest list, with its plan and the audio of each of its units. A
     continuous explainer's scene also has its `take`; it is None for any other project and for a
     scene with no units.
+
+    `source` is where the scene's `take` comes from: `generated` (the speech model) or
+    `recorded` (a person). It is `generated` for every project that is not recorded. In a recorded
+    project (REC-007) `other_take` is the take of the other kind, so the scene can be switched
+    to it; it is None for any other project.
     """
 
     scene: speech_units.SceneEntry
     units: list[UnitEntry]
     take: TakeEntry | None = None
+    source: str = projects.TAKE_GENERATED
+    other_take: TakeEntry | None = None
+
+    @property
+    def recorded(self) -> bool:
+        """Whether the scene's `take` is one a person recorded."""
+        return self.source == projects.TAKE_RECORDED
 
 
 @dataclass(frozen=True)
@@ -247,6 +271,43 @@ def is_recorded(project: Project) -> bool:
     (REC-002). Only a continuous explainer can be.
     """
     return is_continuous(project) and project.take_source == projects.TAKE_RECORDED
+
+
+def generated_scene_ids(project: Project) -> list[str]:
+    """The scenes of a recorded project that use the generated take (REC-007)."""
+    raw = project.generated_take_scenes
+    return [str(scene_id) for scene_id in raw] if isinstance(raw, list) else []
+
+
+def scene_take_source(project: Project, scene_id: str) -> str:
+    """Where a scene's take comes from: `generated` unless the project is recorded and the scene
+    has not been chosen to use the generated take (REC-007).
+    """
+    if is_recorded(project) and scene_id not in generated_scene_ids(project):
+        return projects.TAKE_RECORDED
+    return projects.TAKE_GENERATED
+
+
+def use_generated_take(project: Project, scene_id: str) -> None:
+    """Makes the scene use the generated take. Changes the project; the caller commits. A new
+    list is assigned, so the change to the JSON column is seen.
+    """
+    chosen = generated_scene_ids(project)
+    if scene_id not in chosen:
+        project.generated_take_scenes = [*chosen, scene_id]
+
+
+def use_recorded_take(project: Project, scene_id: str) -> None:
+    """Makes the scene use the recorded take. Changes the project; the caller commits."""
+    chosen = generated_scene_ids(project)
+    if scene_id in chosen:
+        project.generated_take_scenes = [item for item in chosen if item != scene_id]
+
+
+def use_recorded_takes_everywhere(project: Project) -> None:
+    """Makes every scene use the recorded take. Changes the project; the caller commits."""
+    if generated_scene_ids(project):
+        project.generated_take_scenes = []
 
 
 def take_text(units: list[dict[str, Any]]) -> str:
@@ -591,6 +652,7 @@ def _recorded_take_entry(
                 can_run=False,
                 blocked_reason=scene_refusal or full_recordings.stage_message(full),
                 job=None,
+                awaiting_recording=True,
             )
     status: Status
     reasons: list[str] = []
@@ -724,11 +786,9 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
     continuous = is_continuous(project)
     recorded = is_recorded(project)
     full = await full_recordings.newest(session, project) if recorded else None
-    # One instruction for every take of the project (FLOW-003, F-3). A recorded project has none:
-    # nobody is told how to sound.
-    delivery = (
-        await explainer.presenter_delivery(session, project) if continuous and not recorded else ""
-    )
+    # One instruction for every generated take of the project (FLOW-003, F-3). A recorded project
+    # needs it too, for the scenes the owner has the speech model speak (REC-007).
+    delivery = await explainer.presenter_delivery(session, project) if continuous else ""
 
     scenes: list[SceneAudio] = []
     for entry in planned.entries:
@@ -746,9 +806,13 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
                 _unit_entry(unit, entry.item["id"], refusal, choice, by_key, by_unit, jobs, speaker)
             )
         take: TakeEntry | None = None
+        other_take: TakeEntry | None = None
+        source = scene_take_source(project, entry.item["id"])
         if continuous:
             # The units are not spoken one by one: the scene is, as one take.
-            spoken_as = _SPOKEN_AS_RECORDED_TAKE if recorded else _SPOKEN_AS_TAKE
+            spoken_as = (
+                _SPOKEN_AS_RECORDED_TAKE if source == projects.TAKE_RECORDED else _SPOKEN_AS_TAKE
+            )
             units = [
                 replace(unit, can_run=False, blocked_reason=unit.blocked_reason or spoken_as)
                 for unit in units
@@ -756,27 +820,34 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
             if units:
                 text = take_text([unit.unit for unit in units])
                 scene_takes = takes_by_scene.get(entry.item["id"], [])
-                # Each kind of take counts only in its own mode: switching `take_source` hides
-                # the other kind's rows and deletes none.
+                # Each kind of take counts only in its own mode: a take of the other kind is
+                # kept, never deleted, and is only the scene's `other_take`.
+                generated_take = _take_entry(
+                    text,
+                    delivery,
+                    refusal,
+                    narrator,
+                    by_key,
+                    [row for row in scene_takes if row.mode != MODE_RECORDED],
+                    jobs,
+                )
                 if recorded:
-                    take = _recorded_take_entry(
+                    recorded_take = _recorded_take_entry(
                         entry.item["id"],
                         text,
                         refusal,
                         [row for row in scene_takes if row.mode == MODE_RECORDED],
                         full,
                     )
+                    if source == projects.TAKE_RECORDED:
+                        take, other_take = recorded_take, generated_take
+                    else:
+                        take, other_take = generated_take, recorded_take
                 else:
-                    take = _take_entry(
-                        text,
-                        delivery,
-                        refusal,
-                        narrator,
-                        by_key,
-                        [row for row in scene_takes if row.mode != MODE_RECORDED],
-                        jobs,
-                    )
-        scenes.append(SceneAudio(scene=entry, units=units, take=take))
+                    take = generated_take
+        scenes.append(
+            SceneAudio(scene=entry, units=units, take=take, source=source, other_take=other_take)
+        )
     return AudioState(
         scenes_version=planned.scenes_version,
         scenes=scenes,
@@ -996,20 +1067,44 @@ def _find_take(current: AudioState, scene_id: str) -> tuple[SceneAudio, TakeEntr
 
 
 async def start_take(session: AsyncSession, project: Project, scene_id: str) -> Job:
-    """Makes the take of one scene (again if it is made) and commits. Raises
-    SpeechSynthesisError.
+    """Makes the take of one scene (again if it is made) and commits. In a recorded project
+    (REC-007) this makes the generated take and switches the scene to it; the recorded take is
+    kept. Raises SpeechSynthesisError.
     """
     current = await state(session, project)
-    if current.recorded:
-        raise SpeechSynthesisError(RECORDED_REFUSED)
     if current.blocked_reason is not None:
         raise SpeechSynthesisError(current.blocked_reason)
     scene, take = _find_take(current, scene_id)
+    if current.recorded and scene.source == projects.TAKE_RECORDED:
+        # The scene's own take is the recorded one: the generated take is the other.
+        assert scene.other_take is not None  # a recorded project gives every take one
+        take = scene.other_take
     if take.blocked_reason is not None:
         raise SpeechSynthesisError(take.blocked_reason)
     job, _created = await _queue_take(session, project, scene, take, current.narrator)
+    if current.recorded:
+        use_generated_take(project, scene_id)
     await session.commit()
     return job
+
+
+async def set_take_source(
+    session: AsyncSession, project: Project, scene_id: str, source: str
+) -> None:
+    """Chooses which take of a scene of a recorded project goes into the video (REC-007), and
+    commits. Nothing is made and nothing is deleted. Raises SpeechSynthesisError.
+    """
+    if source not in projects.TAKE_SOURCES:
+        raise SpeechSynthesisError("The take must be recorded or generated.")
+    if not is_recorded(project):
+        raise SpeechSynthesisError(NOT_A_RECORDED_PROJECT)
+    current = await state(session, project)
+    _find_take(current, scene_id)
+    if source == projects.TAKE_GENERATED:
+        use_generated_take(project, scene_id)
+    else:
+        use_recorded_take(project, scene_id)
+    await session.commit()
 
 
 def _skip_reason(item: UnitEntry) -> str | None:
@@ -1021,14 +1116,27 @@ def _skip_reason(item: UnitEntry) -> str | None:
     return None
 
 
+def _recorded_skip_reason(recorded_take: TakeEntry) -> str | None:
+    """Why "Make all" leaves a scene that uses its recorded take alone, or None when the scene
+    has no usable recorded take and may be spoken by the speech model (REC-007).
+    """
+    if recorded_take.awaiting_recording:
+        return recorded_take.blocked_reason or "A full recording is about to give it a take."
+    if recorded_take.status in ("none", "out_of_date"):
+        return None
+    if recorded_take.status == "ready":
+        return "It has a recorded take."
+    return recorded_take.blocked_reason or "Its recorded take is being processed."
+
+
 async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     """Makes every unit that has no current audio and commits once (every scene's take for a
-    continuous explainer). The others are skipped, with the reason. Raises SpeechSynthesisError
-    when nothing can be made yet.
+    continuous explainer). The others are skipped, with the reason. In a recorded project
+    (REC-007) it makes only the scenes that have no usable recorded take (none, or out of date,
+    and no full recording is about to give them one), and switches them to the generated take.
+    Raises SpeechSynthesisError when nothing can be made yet.
     """
     current = await state(session, project)
-    if current.recorded:
-        raise SpeechSynthesisError(RECORDED_REFUSED)
     if current.blocked_reason is not None:
         raise SpeechSynthesisError(current.blocked_reason)
     job_ids: list[int] = []
@@ -1040,6 +1148,17 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
             take = scene.take
             if take is None:
                 continue
+            if scene.source == projects.TAKE_RECORDED:
+                recorded_reason = _recorded_skip_reason(take)
+                if recorded_reason is not None:
+                    skipped.append(Skipped(scene_id, None, recorded_reason))
+                    continue
+                assert scene.other_take is not None  # a recorded project gives every take one
+                take = scene.other_take
+                if take.status == "ready":
+                    # The scene was spoken before: it only needs to be switched back.
+                    use_generated_take(project, scene_id)
+                    continue
             reason = take.blocked_reason or (
                 "Already made and up to date." if take.status == "ready" else None
             )
@@ -1047,6 +1166,8 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
                 skipped.append(Skipped(scene_id, None, reason))
                 continue
             job, created = await _queue_take(session, project, scene, take, current.narrator)
+            if current.recorded:
+                use_generated_take(project, scene_id)
             if created:
                 job_ids.append(job.id)
             else:

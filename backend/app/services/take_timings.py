@@ -174,8 +174,9 @@ async def scene_clocks(session: AsyncSession, project: Project) -> dict[str, Tak
     audio_state = await speech_synthesis.state(session, project)
     timings = await word_timings.state(session, project)
     clocks: dict[str, TakeClock] = {}
-    recorded = audio_state.recorded
     for scene in audio_state.scenes:
+        # Whether this scene's take is recorded (REC-007: a recorded project can speak a scene).
+        recorded = scene.recorded
         take = scene.take
         if take is None:
             continue

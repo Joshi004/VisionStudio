@@ -132,6 +132,12 @@ class Project(Base):
     take_source: Mapped[str] = mapped_column(
         default="generated", server_default=text("'generated'")
     )
+    # REC-007. The ids of the scenes of a `recorded` project that use the generated take (the
+    # speech model, in the presenter's voice) instead of the recorded one. Only read while
+    # `take_source` is `recorded`. Both kinds of take are kept, so a scene can be switched back.
+    generated_take_scenes: Mapped[Any] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
 
 
 class Asset(Base):

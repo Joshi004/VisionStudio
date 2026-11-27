@@ -330,6 +330,8 @@ async def receive_scene_recording(
                 },
             )
             session.add(take)
+            # A scene that was spoken by the speech model uses its new recording (REC-007).
+            speech_synthesis.use_recorded_take(project, scene_id)
             await session.flush()
             # The word timing of a take is always made, and is saved with the take.
             job, _created = await word_timings.queue(session, take, commit=False)
@@ -523,6 +525,8 @@ async def receive_full_recording(
         )
         session.add(recording)
         try:
+            # The whole video was read: every scene uses a recorded take again (REC-007).
+            speech_synthesis.use_recorded_takes_everywhere(project)
             await session.flush()
             job, _created = await full_recordings.queue_timing(session, recording, commit=False)
             result = StoredFullRecording(

@@ -75,6 +75,8 @@ export function useSpeechAudio(projectId: number) {
         (scene) =>
           scene.take?.status === "in_progress" ||
           scene.take?.word_timing?.status === "in_progress" ||
+          scene.other_take?.status === "in_progress" ||
+          scene.other_take?.word_timing?.status === "in_progress" ||
           scene.units.some(
             (unit) =>
               unit.status === "in_progress" ||
@@ -173,6 +175,41 @@ export function useMakeSceneTake(projectId: number) {
         );
       }
       return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/**
+ * Switches one scene of a recorded explainer between its recorded take and its generated take
+ * (REC-007). Nothing is made and nothing is deleted.
+ */
+export function useSetSceneTakeSource(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      source: "generated" | "recorded";
+    }) => {
+      const { error, response } = await api.PUT(
+        "/api/projects/{project_id}/speech-audio/{scene_id}/take/source",
+        {
+          params: {
+            path: { project_id: projectId, scene_id: input.sceneId },
+          },
+          body: { source: input.source },
+        },
+      );
+      // The answer has no body (204), so success is the status and not `data`.
+      if (!response.ok) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not switch the take (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
     },
     onSettled: () => refreshAfterRun(queryClient, projectId),
   });
