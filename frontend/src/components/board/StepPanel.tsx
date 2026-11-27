@@ -109,7 +109,7 @@ const GraphicThemePanel = lazyNamed(
   () => import("../story/GraphicThemePanel"),
   "GraphicThemePanel",
 );
-const EvidenceClaims = lazyNamed(() => import("../story/EvidenceClaims"), "EvidenceClaims");
+const StoryMarkup = lazyNamed(() => import("../story/StoryMarkup"), "StoryMarkup");
 const EvidencePanel = lazyNamed(() => import("../story/EvidencePanel"), "EvidencePanel");
 const GraphicBriefsPanel = lazyNamed(
   () => import("../story/GraphicBriefsPanel"),
@@ -223,7 +223,7 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <GraphicThemePanel projectId={projectId} />;
       case "evidence_claims":
         // The story box is on the Story text page, so no unsaved change is held here.
-        return <EvidenceClaims project={project} hasUnsavedStory={false} />;
+        return <StoryMarkup project={project} hasUnsavedStory={false} />;
       case "evidence":
         return <EvidencePanel project={project} />;
       case "callout_graphics":

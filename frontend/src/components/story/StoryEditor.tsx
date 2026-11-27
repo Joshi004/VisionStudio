@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Group, Paper, Stack, Text, Textarea, Title } from "@mantine/core";
+import { Alert, Button, Group, Paper, Stack, Tabs, Text, Textarea, Title } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useUpdateProject, type ProjectDetail } from "../../api/projects";
-import { EvidenceClaims } from "./EvidenceClaims";
-import { GraphicSuggestions } from "./GraphicSuggestions";
+import { StoryMarkup } from "./StoryMarkup";
 import { countWords, estimateSeconds, formatDuration } from "./storyLength";
 
 type DraftProps = {
@@ -92,17 +91,21 @@ function StoryDraft({
   );
 }
 
-/** The project's story text: paste it, save it, and see its estimated length. */
+/**
+ * The project's story text. Write: paste it, save it, and see its estimated length. Mark up:
+ * select words of the saved story and mark them as evidence, a graphic, or both.
+ */
 export function StoryEditor({ project }: { project: ProjectDetail }) {
   const update = useUpdateProject(project.id);
   const saved = project.script_text ?? "";
   const [hasUnsavedStory, setHasUnsavedStory] = useState(false);
   // How many suggested graphics the last save could no longer find in the changed story.
   const [droppedSuggestions, setDroppedSuggestions] = useState(0);
-  // Only a continuous explainer with graphics on plans graphic shots from the owner's hints.
-  const suggestsGraphics = project.voice_track === "continuous" && project.graphics;
-  // Only a continuous explainer with evidence on has claims that need proof.
-  const marksEvidence = project.voice_track === "continuous" && project.evidence;
+  // Only a continuous explainer with graphics or evidence on has words to mark.
+  const marksUp =
+    project.voice_track === "continuous" && (project.graphics || project.evidence);
+  // A saved story opens on Mark up; a new project starts on Write.
+  const [tab, setTab] = useState<string>(project.script_text !== null && marksUp ? "markup" : "write");
 
   function save(text: string) {
     const before = project.graphic_suggestions.length;
@@ -115,40 +118,56 @@ export function StoryEditor({ project }: { project: ProjectDetail }) {
     );
   }
 
+  const draft = (
+    <StoryDraft
+      key={saved}
+      saved={saved}
+      wordsPerMinute={project.story_length.words_per_minute}
+      limitSeconds={project.story_length.limit_seconds}
+      isSaving={update.isPending}
+      isSaved={update.isSuccess}
+      error={update.isError ? describeError(update.error) : null}
+      onEdit={() => {
+        update.reset();
+        setDroppedSuggestions(0);
+      }}
+      onSave={save}
+      onUnsavedChange={setHasUnsavedStory}
+    />
+  );
+
   return (
-    <Stack gap="md">
-      <Paper withBorder p="md" radius="md">
-        <Stack gap="sm">
-          <Title order={4}>Story</Title>
-          <StoryDraft
-            key={saved}
-            saved={saved}
-            wordsPerMinute={project.story_length.words_per_minute}
-            limitSeconds={project.story_length.limit_seconds}
-            isSaving={update.isPending}
-            isSaved={update.isSuccess}
-            error={update.isError ? describeError(update.error) : null}
-            onEdit={() => {
-              update.reset();
-              setDroppedSuggestions(0);
-            }}
-            onSave={save}
-            onUnsavedChange={setHasUnsavedStory}
-          />
-          {droppedSuggestions > 0 && (
-            <Alert color="yellow" title="Some graphic suggestions were removed">
-              {droppedSuggestions === 1
-                ? "1 graphic suggestion"
-                : `${droppedSuggestions} graphic suggestions`}{" "}
-              no longer matched the changed story and were removed.
-            </Alert>
-          )}
-        </Stack>
-      </Paper>
-      {suggestsGraphics && (
-        <GraphicSuggestions project={project} hasUnsavedStory={hasUnsavedStory} />
-      )}
-      {marksEvidence && <EvidenceClaims project={project} hasUnsavedStory={hasUnsavedStory} />}
-    </Stack>
+    <Paper withBorder p="md" radius="md">
+      <Stack gap="sm">
+        <Title order={4}>Story</Title>
+        {marksUp ? (
+          // Both panels stay mounted, so a draft is not lost when the reader switches tabs.
+          <Tabs value={tab} onChange={(value) => setTab(value ?? "write")} keepMounted>
+            <Tabs.List mb="sm">
+              <Tabs.Tab value="write">Write</Tabs.Tab>
+              <Tabs.Tab value="markup">Mark up</Tabs.Tab>
+            </Tabs.List>
+            <Tabs.Panel value="write">{draft}</Tabs.Panel>
+            <Tabs.Panel value="markup">
+              <StoryMarkup
+                project={project}
+                hasUnsavedStory={hasUnsavedStory}
+                onGoToWrite={() => setTab("write")}
+              />
+            </Tabs.Panel>
+          </Tabs>
+        ) : (
+          draft
+        )}
+        {droppedSuggestions > 0 && (
+          <Alert color="yellow" title="Some graphic suggestions were removed">
+            {droppedSuggestions === 1
+              ? "1 graphic suggestion"
+              : `${droppedSuggestions} graphic suggestions`}{" "}
+            no longer matched the changed story and were removed.
+          </Alert>
+        )}
+      </Stack>
+    </Paper>
   );
 }
