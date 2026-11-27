@@ -123,6 +123,11 @@ class Project(Base):
     # off for every project that existed. Only a continuous explainer can have it on. Independent
     # of `music_enabled`. Can be changed at any time: switching it off deletes nothing.
     sound_effects: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # FTG-001 (FT-3). Whether a continuous explainer has footage: real pictures shown full screen
+    # while the narrator talks. On by default for a continuous explainer on the create form, off
+    # for every project that existed. Only a continuous explainer can have it on. Can be changed
+    # at any time: switching it off deletes nothing, the footage is only ignored.
+    footage: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # SCN-002. The scene the owner pushed to the front of the GPU server's queue (its id in the
     # scene discovery). Its clips are sent with the most urgent priority. NULL: none is pushed.
     pushed_scene_id: Mapped[str | None] = mapped_column(default=None)
@@ -203,7 +208,7 @@ class Job(Base):
         # callout component jobs, since revision 0090, and the two YouTube jobs, since revision
         # 0096, and the four evidence jobs, since revision 0098, and the transcription of a
         # sound bite clip, since revision 0100, and the writing of a sound effect's prompt, since
-        # revision 0104.
+        # revision 0104, and the five footage jobs, since revision 0106.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -232,7 +237,9 @@ class Job(Base):
             "'splice_voice_recording', 'write_chat_reply', "
             "'write_youtube_draft', 'publish_youtube', "
             "'suggest_evidence_claims', 'write_evidence_brief', 'import_evidence', "
-            "'render_evidence_clip', 'transcribe_evidence_clip', 'write_sound_effect')",
+            "'render_evidence_clip', 'transcribe_evidence_clip', 'write_sound_effect', "
+            "'suggest_footage_marks', 'write_footage_brief', 'import_footage', "
+            "'prepare_footage_file', 'render_footage_clip')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -3777,6 +3784,244 @@ class EvidenceClip(Base):
     )
     scene_id: Mapped[str | None] = mapped_column(default=None)
     shot_id: Mapped[str | None] = mapped_column(default=None)
+    # The shot plan row the clip was made for. NULL for a preview, or when that row was deleted.
+    shot_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None
+    )
+    attempt: Mapped[int] = mapped_column(default=1, server_default=text("1"))
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    media_path: Mapped[str | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class FootageMarkList(Base):
+    """One version of a project's footage marks (FTG-001, revision 0106).
+
+    Follows the artifact provenance convention: every change is a new row with the next
+    `version`, and a stored row is never changed. `source` is `manual` for the owner's marks and
+    keep or drop choices and `ai` for GLM's proposals (`job_id` is that job). `inputs` holds the
+    hash of the script the version was made against and the version it was based on, so "out of
+    date" is worked out on read. `content` is `{next_id, marks}`; a mark is `{id, origin, start,
+    end, text, note, kind_hint, reason, kept}`. `origin` is `owner` or `glm`, and `kept` is true
+    for an owner's mark, NULL for a GLM proposal the owner has not decided on and false for a
+    dropped one.
+    """
+
+    __tablename__ = "footage_mark_list"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_footage_mark_list_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class FootageRound(Base):
+    """One research brief written for one mark list version (FTG-001, revision 0106).
+
+    The round's id in the brief is `r<round_no>`. `folder` is the round folder, relative to the
+    files folder (`footage/<project_id>/r<round_no>`). `brief` is exactly the `footage.json`
+    written, and `brief_sha256` its hash. Whether the round is imported or reviewed is worked out
+    from the import and decision rows, never stored here.
+    """
+
+    __tablename__ = "footage_round"
+    __table_args__ = (
+        UniqueConstraint("project_id", "round_no"),
+        Index("idx_footage_round_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    round_no: Mapped[int]
+    mark_list_id: Mapped[int] = mapped_column(
+        ForeignKey("footage_mark_list.id", ondelete="CASCADE")
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    folder: Mapped[str]
+    brief: Mapped[Any] = mapped_column(JSON)
+    brief_sha256: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class FootageImport(Base):
+    """One import of one footage round's results (FTG-001, revision 0106).
+
+    `version` counts the imports of the round from 1, and a stored row is never changed.
+    `results` holds each mark's `{status, summary, attempts, problems}` (`status` is NULL when the
+    mark has no usable result) and `report` the counts by status.
+    """
+
+    __tablename__ = "footage_import"
+    __table_args__ = (
+        UniqueConstraint("round_id", "version"),
+        Index("idx_footage_import_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    round_id: Mapped[int] = mapped_column(ForeignKey("footage_round.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    results: Mapped[Any] = mapped_column(JSON)
+    report: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class FootageItem(Base):
+    """One piece of footage (FTG-001, revision 0106).
+
+    `origin` is `agent` for a piece of an import (`import_id` set) and `owner` for a file the
+    owner added to a mark (`import_id` NULL, and `piece_id` made by the app). `item_key` tells an
+    item that is unchanged from one import to the next (the owner's decisions refer to it, not to
+    the row id). `kind`, `tier`, `same_event` and `on_screen_text` are NULL when the agent wrote
+    a value the contract does not allow; such an item is stored with `usable` false and its
+    reasons in `checks`. The file columns hold paths relative to the media folder, each with its
+    SHA-256, and are NULL for a file the piece does not have or that was not copied. `upload_*`
+    is the owner's original video, read by the job that makes the stored copy. `cuts` is the cut
+    times in seconds of the stored video. `credit` is the owner's own credit line, if any.
+    """
+
+    __tablename__ = "footage_item"
+    __table_args__ = (
+        CheckConstraint("origin IN ('agent', 'owner')", name="origin_valid"),
+        CheckConstraint(
+            "(origin = 'agent' AND import_id IS NOT NULL) "
+            "OR (origin = 'owner' AND import_id IS NULL)",
+            name="import_matches_origin",
+        ),
+        CheckConstraint(
+            "kind IS NULL OR kind IN ('video', 'image', 'page', 'pdf')", name="kind_valid"
+        ),
+        CheckConstraint(
+            "tier IS NULL OR tier IN ('official', 'press', 'commons', 'news', 'creator', 'other')",
+            name="tier_valid",
+        ),
+        CheckConstraint(
+            "same_event IS NULL OR same_event IN ('yes', 'no', 'unknown')",
+            name="same_event_valid",
+        ),
+        CheckConstraint(
+            "on_screen_text IS NULL OR on_screen_text IN ('none', 'small', 'large')",
+            name="on_screen_text_valid",
+        ),
+        UniqueConstraint("import_id", "mark_id", "piece_id"),
+        Index("idx_footage_item_import", "import_id"),
+        Index("idx_footage_item_project_key", "project_id", "item_key"),
+        Index("idx_footage_item_project_mark", "project_id", "mark_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    import_id: Mapped[int | None] = mapped_column(
+        ForeignKey("footage_import.id", ondelete="CASCADE"), default=None
+    )
+    mark_id: Mapped[str]
+    piece_id: Mapped[str]
+    item_key: Mapped[str]
+    origin: Mapped[str]
+    kind: Mapped[str | None] = mapped_column(default=None)
+    tier: Mapped[str | None] = mapped_column(default=None)
+    source: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    what_it_shows: Mapped[str | None] = mapped_column(default=None)
+    same_event: Mapped[str | None] = mapped_column(default=None)
+    event_date: Mapped[str | None] = mapped_column(default=None)
+    on_screen_text: Mapped[str | None] = mapped_column(default=None)
+    credit: Mapped[str | None] = mapped_column(default=None)
+    agent_notes: Mapped[str | None] = mapped_column(default=None)
+    capture: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    video_path: Mapped[str | None] = mapped_column(default=None)
+    video_sha256: Mapped[str | None] = mapped_column(default=None)
+    strip_path: Mapped[str | None] = mapped_column(default=None)
+    strip_sha256: Mapped[str | None] = mapped_column(default=None)
+    image_path: Mapped[str | None] = mapped_column(default=None)
+    image_sha256: Mapped[str | None] = mapped_column(default=None)
+    text_path: Mapped[str | None] = mapped_column(default=None)
+    text_sha256: Mapped[str | None] = mapped_column(default=None)
+    pdf_path: Mapped[str | None] = mapped_column(default=None)
+    pdf_sha256: Mapped[str | None] = mapped_column(default=None)
+    upload_path: Mapped[str | None] = mapped_column(default=None)
+    upload_sha256: Mapped[str | None] = mapped_column(default=None)
+    cuts: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The `prepare_footage_file` job that made the stored copy of an owner's video.
+    prepare_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    usable: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    checks: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class FootageDecision(Base):
+    """One version of the owner's footage decisions for the whole project (FTG-001, 0106).
+
+    Every change is a new row with the next `version`, and a stored row is never changed. Every
+    version is the owner's, so there is no `source`. One list covers the project, not one round,
+    because an owner's own file has no round. `inputs` is `{decision_version}` of the version it
+    was based on. `content` is `{marks: [{mark_id, items: [{item_key, verdict}], shown, use,
+    framing, no_footage}], reviewed_rounds}` with `verdict` `accepted` or `rejected`, `shown`
+    the item keys to show in order, `use` the moved start and end of a clip by item key, `framing`
+    the portrait choice and `no_footage` the owner's "no footage here". A decision names an item
+    by `item_key`, so a new import keeps the decisions for unchanged items.
+    """
+
+    __tablename__ = "footage_decision"
+    __table_args__ = (UniqueConstraint("project_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class FootageClip(Base):
+    """One rendered footage video (FTG-001, revision 0106).
+
+    `purpose` is `preview` (from the mark card or the review, with no scene) or `piece` (a placed
+    piece drawn at its exact length; `placed_key` is `{run}:{item_key}`). A clip shows exactly
+    one item. The row is made when its render is queued, so the video columns are NULL until the
+    render has written them, like `EvidenceClip`.
+    """
+
+    __tablename__ = "footage_clip"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('preview', 'piece')", name="purpose_valid"),
+        Index("idx_footage_clip_project_scene", "project_id", "scene_id"),
+        Index("idx_footage_clip_item", "item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    purpose: Mapped[str]
+    item_id: Mapped[int] = mapped_column(ForeignKey("footage_item.id", ondelete="CASCADE"))
+    scene_id: Mapped[str | None] = mapped_column(default=None)
+    placed_key: Mapped[str | None] = mapped_column(default=None)
     # The shot plan row the clip was made for. NULL for a preview, or when that row was deleted.
     shot_plan_id: Mapped[int | None] = mapped_column(
         ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None

@@ -285,6 +285,16 @@ export function ProjectSettingsForm({
                     Switching sound effects off deletes nothing: the sounds that were made are kept,
                     and used again when you switch it back on.
                   </Text>
+                  <Switch
+                    label="Footage"
+                    description="Real pictures shown full screen while the narrator talks."
+                    checked={draft.footage}
+                    onChange={(event) => edit("footage", event.currentTarget.checked)}
+                  />
+                  <Text size="xs" c="dimmed">
+                    Switching footage off deletes nothing: what was marked, researched and reviewed
+                    is kept, and counts again when you switch it back on.
+                  </Text>
                 </>
               )}
             </Stack>

@@ -203,6 +203,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [graphics, setGraphics] = useState(initial.graphics);
   const [evidence, setEvidence] = useState(initial.evidence);
   const [soundEffects, setSoundEffects] = useState(initial.soundEffects);
+  const [footage, setFootage] = useState(initial.footage);
   const [name, setName] = useState("");
 
   // A saved outfit is only kept while it is still one of the presenter's saved outfits.
@@ -234,6 +235,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
     setGraphics(settings.graphics);
     setEvidence(settings.evidence);
     setSoundEffects(settings.soundEffects);
+    setFootage(settings.footage);
   }
 
   function resetToDefaults() {
@@ -285,6 +287,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         evidence: explainer && voiceTrack === "continuous" ? evidence : undefined,
         // Only a continuous explainer can have sound effects; any other project leaves it out.
         sound_effects: explainer && voiceTrack === "continuous" ? soundEffects : undefined,
+        // Only a continuous explainer can have footage; any other project leaves it out.
+        footage: explainer && voiceTrack === "continuous" ? footage : undefined,
       },
       {
         onSuccess: (project) => {
@@ -303,6 +307,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
             graphics,
             evidence,
             soundEffects,
+            footage,
             captionMode,
             callouts,
             calloutStyle,
@@ -525,6 +530,14 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
                 description="Proof on screen for the claims that can be checked: a price, a figure from a report, something a person said. You mark the claims, research them with Cursor or Claude, and review every piece of evidence. You can change it later in the project settings."
                 checked={evidence}
                 onChange={(event) => setEvidence(event.currentTarget.checked)}
+              />
+            )}
+            {voiceTrack === "continuous" && (
+              <Switch
+                label="Footage"
+                description="Real pictures shown full screen while the narrator talks: a few seconds of an event from an official channel, a press photo, a web page, or a file of your own. You mark the words and say what to show, research them with Cursor or Claude, and review every piece. You can change it later in the project settings."
+                checked={footage}
+                onChange={(event) => setFootage(event.currentTarget.checked)}
               />
             )}
             {voiceTrack === "continuous" && (

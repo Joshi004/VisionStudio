@@ -89,6 +89,8 @@ EVIDENCE_ONLY_MESSAGE: Final = "Evidence is only for an explainer with a continu
 SOUND_EFFECTS_ONLY_MESSAGE: Final = (
     "Sound effects are only for an explainer with a continuous voice."
 )
+# FTG-001: footage exists only in an explainer with a continuous voice (FT-3).
+FOOTAGE_ONLY_MESSAGE: Final = "Footage is only for an explainer with a continuous voice."
 
 # What the event and shot prompts branch on (EXPLAINER-004): the project's speech mode, or
 # `explainer` for an explainer project (whose speech mode is always `both`). It is never stored
@@ -153,6 +155,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "presenter_named_look_id": "Presenter saved outfit",
     "evidence": "Evidence",
     "sound_effects": "Sound effects",
+    "footage": "Footage",
 }
 _NULLABLE_FIELDS: Final = frozenset(
     (
@@ -277,6 +280,10 @@ def validate_project(project: Project) -> None:
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
         raise ProjectValidationError(SOUND_EFFECTS_ONLY_MESSAGE)
+    if project.footage and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(FOOTAGE_ONLY_MESSAGE)
     if project.callout_style not in CALLOUT_STYLES:
         raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
     # Written out here: `graphic_theme.wanted` says the same, but that module imports this one.
@@ -337,6 +344,7 @@ async def create_project(
     take_source: str | None = None,
     evidence: bool | None = None,
     sound_effects: bool | None = None,
+    footage: bool | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -364,7 +372,7 @@ async def create_project(
     `evidence` (EVD-001) follows the same rule: on by default for a continuous explainer, off for
     every other project, and refused on any other project when asked for.
 
-    `sound_effects` (EXM-006) follows the same rule again.
+    `sound_effects` (EXM-006) and `footage` (FTG-001) follow the same rule again.
 
     An explainer (EXPLAINER-002) needs a presenter from the Character Lab and may have a set
     from the Environment Lab. Both go into the project's cast as `as_is`, in the same commit as
@@ -416,6 +424,10 @@ async def create_project(
         raise ProjectValidationError(SOUND_EFFECTS_ONLY_MESSAGE)
     if sound_effects is None:
         sound_effects = continuous_explainer
+    if footage and not continuous_explainer:
+        raise ProjectValidationError(FOOTAGE_ONLY_MESSAGE)
+    if footage is None:
+        footage = continuous_explainer
     if kind == KIND_EXPLAINER:
         speech_mode = SPEECH_BOTH
         if presenter_character_id is None:
@@ -456,6 +468,7 @@ async def create_project(
         graphics=graphics,
         evidence=evidence,
         sound_effects=sound_effects,
+        footage=footage,
     )
     validate_project(project)
     session.add(project)
@@ -560,6 +573,10 @@ async def update_project(
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
         raise ProjectValidationError(SOUND_EFFECTS_ONLY_MESSAGE)
+    if "footage" in changes and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(FOOTAGE_ONLY_MESSAGE)
     if "presenter_staging" in changes and project.kind != KIND_EXPLAINER:
         raise ProjectValidationError(STAGING_ONLY_MESSAGE)
     if "presenter_outfit" in changes and project.kind != KIND_EXPLAINER:
@@ -656,6 +673,8 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError("Evidence must be on or off.")
     if field == "sound_effects" and not isinstance(value, bool):
         raise ProjectValidationError("Sound effects must be on or off.")
+    if field == "footage" and not isinstance(value, bool):
+        raise ProjectValidationError("Footage must be on or off.")
     if field == "take_source" and value not in TAKE_SOURCES:
         raise ProjectValidationError(TAKE_SOURCE_MESSAGE)
     return value

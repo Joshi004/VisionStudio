@@ -239,6 +239,10 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (EXM-007 sound effects in the render, 2026-11-27):** no migration, no new column, no new table, no new job type. (1) **The frozen timeline** (`story_render.inputs`, `scene_render.inputs`; `version` stays 6) may have the key `sound_effects`, written only when the project has the switch on and needs a sound (`sound_effects.wanted`), so every other timeline is byte for byte as before: `{level_db, takes: {role: selected take id or null}, entries: [{id ("{kind}:{ref}"), role, kind (graphic_shot, graphic_overlay, evidence_shot, evidence_card), scene_id, take_id, path, start_sample, in_sample, length_samples, gain_db, fade_in, fade_out}], skipped: [{id, reason}]}`. Samples are at 48 kHz on the render's own timeline. A sound is placed so that its loudest moment (the check's `loudest_moment_s`) lands on the first frame of the graphic shot, graphic overlay, evidence shot or evidence card; the head of a sound that would start before the render (or the scene) is cut (`in_sample`). A moment is left out (`skipped`) when its sound would overlap a sound bite or starts less than `constants.sound_effect_min_spacing_s` (1.5) after the previous sound effect; the evidence sound goes first on the same frame. `constants` gains `sound_effect_min_spacing_s` and `sound_effect_fade_s` (0.005) on such a timeline only. (2) **One new setting**, `sound_effect_level_db` (Section 6). `gain_db` is the narration target loudness plus that level minus the sound's measured loudness, boosted by at most `max_boost_db`. (3) **A missing sound** (no selected take, no file, or no measured length or loudest moment) refuses a full render with a message that names the sound, and gives the warning `sound_effect_missing` in a scene render, which leaves the sound out. (4) **The render job** places the entries as one more WAV layer (`placing the sound effects`, between the music layers and the mix) that nothing ducks, and mixes it with the other lanes (`amix normalize=0`). `story_render.levels` and `scene_render.levels` gain `sound_effects: {placed, skipped, level_db, takes}` on such a render. (5) **Out of date:** a render is out of date when the switch was turned on or off since, a sound has another selected take, or the level setting changed. A render made with the switch already on before this phase has no key, so it reads as out of date once. Scene renders play the sounds too. A story and a `lines` explainer are unchanged.
 
+**Update (REC-007 scenes that use the generated voice, 2026-11-27):** migration `0105` (head revision is now `0105`). **`project.generated_take_scenes`** (JSON, NOT NULL, default `[]`; Section 4.1): the ids of the scenes (in the scene discovery) of a project with `take_source` `recorded` that use the generated take, in the presenter's voice, instead of the recorded one. Every project that exists reads `[]`. It is only read while `take_source` is `recorded`. Both kinds of take are kept, so a scene can be switched back at any time. No new table, job type or setting.
+
+**Update (FTG-001 footage foundation, 2026-11-28):** migration `0106` (`Footage_broll_implementation_phases.md`; the head revision is now `0106`). **Everything footage stores, so the later footage phases add no migration; nothing is written yet.** (1) **`project.footage`** (BOOLEAN, NOT NULL, default `0`; Section 4.1): on by default for a new continuous explainer, off for every other project and every project made before. Only an explainer with `voice_track = continuous` can have it on (`validate_project`, with its own sentence, `FOOTAGE_ONLY_MESSAGE`; `POST` and `PATCH` refuse it elsewhere). `PATCH /api/projects/{id}` may change it at any time; switching it off deletes nothing. (2) **Six new tables**, written as new rows and never changed, so what is out of date, imported or reviewed is worked out on read: `footage_mark_list` (4.100), `footage_round` (4.101), `footage_import` (4.102), `footage_item` (4.103), `footage_decision` (4.104) and `footage_clip` (4.105). **The owner's decisions are one version list for the whole project** (`footage_decision`), not one per round, because an owner's own file has no round; the rounds reviewed are recorded inside `content`. **An item stores each file as a path column and a SHA-256 column**, as `evidence_item` does. (3) **`job.type` gains `suggest_footage_marks`, `write_footage_brief`, `import_footage`, `prepare_footage_file` and `render_footage_clip`**: the CHECK is rebuilt in batch mode as in `0104` and no row changes; the downgrade deletes the rows of those five types. They are registered in the CHECK and in the API's job types with no handler yet. `suggest_footage_marks` is a paid language-model call (`provider='llm'`, restart rule `never_rerun`); the other four are `provider='local'` with restart rule `start_again`. The downgrade drops the six tables and `project.footage`; files in `media/` and the round folders are left where they are.
+
 **Update (EVD-017 evidence links in the YouTube description, 2026-11-20):** no migration, no new column, no new table, no new job type, no new route. **The YouTube draft's description ends with a "Sources" section, built by code from the owner's accepted evidence.** (1) The `write_youtube_draft` job input gains `sources` (Section 5): the accepted pieces of the newest review, frozen when the draft is queued; a job queued before this reads it as `[]`. (2) `youtube_draft.inputs` gains `evidence_review`: `{id, version}` of the newest `evidence_review` row of the current round, or null when evidence does not apply (migration-free: an older version without the key reads as null). A draft is out of date ("The evidence review changed since this draft was made.") when that record is no longer the newest. (3) The handler adds the section (`youtube_draft_writer.with_sources`) after the model's answer is checked, inside YouTube's 5,000-byte limit with the hashtags counted; claims that do not fit are left out and the section says how many sources are not listed. The model is told not to write links, and an answer with a link is refused (the owner's own edit may keep any link). Only `accepted` and usable pieces are listed, whether or not they are shown on video; the text comes only from `evidence_item.source` and the claim's words.
 
 **Update (EVD-011 evidence cards, EVD-012 source lines, EVD-016 split evidence shots, 2026-11-17):** migration `0099`. (1) **`evidence_clip.purpose` gains `card`** (the head revision is now `0099`): the CHECK `ck_evidence_clip_purpose_valid` is rebuilt in batch mode as `purpose IN ('preview', 'shot', 'card')`; the downgrade deletes the `card` rows first. (2) **A card clip is an `evidence_clip` with `purpose='card'`**: `item_id` the piece, `scene_id` set, `shot_id` the first shot the card covers, `shot_plan_id` the plan it was placed from; `inputs` as for a shot plus `card_id` (`{claim_id}.{piece}`), `box` (`[x, y, width, height]` of the card on the frame) and `frame` (`[width, height]` of the output); `width`, `height` and `frames` are the card's own. The file is a transparent ProRes 4444 `.mov`. Its `render_evidence_clip` job has `input` `{"evidence_clip_id": 5, "card_clip_ref": "scene_2/c3.1"}`. **Which cards exist, and where, is worked out on read** from the newest plan and the words of the scene's take (`shot_plans.SceneEntry.cards`), and so are the source lines; nothing is stored for them. (3) **`evidence_clip.inputs` of a shot clip may have `layout: "split"`, `panel: [x, y, width, height]` and `callouts: [...]`** when a callout lands in the shot (EVD-016); a clip with no `layout` is a full-frame clip. They are compared as part of the clip's look: a clip is out of date when its shot is split now and the clip is not, or the other way round. (4) **The frozen render timeline** (`story_render.inputs`, `scene_render.inputs`) gets the optional keys `evidence_cards` (`id`, `scene_id`, `claim_id`, `item_key`, `start_ms`, `end_ms`, `start_frame`, `frames`, `clip_id`, `path`, `clip_frames`, `x`, `y`, `width`, `height`) and `source_lines` (`scene_id`, `claim_id`, `item_key`, `start_ms`, `end_ms`, `text`), and an evidence shot's `evidence` entry may have `layout: "split"`; a render of a project without evidence has none of them. The timeline version is unchanged. (5) Render warnings gain the codes `card_without_clip` and `evidence_split_empty`.
@@ -744,6 +748,8 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `graphics` | BOOLEAN | NOT NULL | `0` | EXG-001. Whether a continuous explainer gets graphic shots (charts, diagrams and text cards drawn by code). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. Only an explainer with `voice_track = continuous` can have it on (`validate_project`). A new continuous explainer defaults to on; every other project, and every project made before this column, is off. Off, the project gets exactly the instructions, jobs and FFmpeg commands it got before |
 | `evidence` | BOOLEAN | NOT NULL | `0` | Migration `0098` (EVD-001). Whether a continuous explainer has the evidence layer (proof shown on screen for claims that can be checked). A new continuous explainer defaults to on (the create form shows the switch, on); every other project, and every project made before this column, is off. Only an explainer with `voice_track = continuous` can have it on (`validate_project`; `POST` and `PATCH` refuse it elsewhere). `PATCH /api/projects/{id}` may change it at any time; switching it off deletes nothing, the evidence is kept and ignored, and counts again when it is switched back on. Nothing reads it yet in this phase |
 | `sound_effects` | BOOLEAN | NOT NULL | `0` | Migration `0104` (EXM-006). Whether a continuous explainer has its own graphic and evidence sound effects, made once for the project (`sound_effect_take`, Section 4.99). A new continuous explainer defaults to on (the create form shows the switch, on); every other project, and every project made before this column, is off. Only an explainer with `voice_track = continuous` can have it on (`validate_project`; `POST` and `PATCH` refuse it elsewhere). `PATCH /api/projects/{id}` may change it at any time; switching it off deletes nothing, the sounds are kept and ignored |
+| `footage` | BOOLEAN | NOT NULL | `0` | Migration `0106` (FTG-001). Whether a continuous explainer has footage (real pictures shown full screen while the narrator talks; the tables are Sections 4.100 to 4.105). A new continuous explainer defaults to on (the create form shows the switch, on); every other project, and every project made before this column, is off. Only an explainer with `voice_track = continuous` can have it on (`validate_project`; `POST` and `PATCH` refuse it elsewhere). `PATCH /api/projects/{id}` may change it at any time; switching it off deletes nothing, the footage is kept and ignored. Nothing reads it yet |
+| `generated_take_scenes` | JSON | NOT NULL | `'[]'` | Migration `0105` (REC-007). The ids of the scenes (in the scene discovery) of a project with `take_source = recorded` that use the generated take instead of the recorded one. Only read while `take_source` is `recorded`. Both kinds of take are kept, so a scene can be switched back |
 | `take_source` | TEXT | NOT NULL | `'generated'` | Migration `0092` (REC-002). Where a continuous explainer's takes come from, `CHECK (take_source IN ('generated', 'recorded'))`: `generated` (the speech model, as before) or `recorded` (a person records the script). `recorded` is allowed only for an explainer with `voice_track = continuous` (`validate_project`). `PATCH /api/projects/{id}` may change it at any time for such a project; switching deletes nothing, and the other kind's takes stop counting until it is switched back. Every project made before this column is `generated` |
 | `pushed_scene_id` | TEXT | NULL | — | Migration `0084` (SCN-002). The id, in the scene discovery, of the scene the owner pushed to the front of the GPU server's queue. Its clips are sent with priority 1 and the ones already waiting on the server are moved up. NULL means none is pushed. Set by the push and by "Generate scene", cleared by "Stop pushing" or by pushing another scene |
 
@@ -840,7 +846,7 @@ Every unit of background work. This is where running-job information lives, so a
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` \| `define_shot` \| `check_shot_continuity` \| `repair_shot_cut` \| `compile_shot_prompt` \| `generate_shot` \| `render_story` \| `check_shot_takes` \| `story_pipeline` \| `check_take_dialogue` \| `write_music_bible` (`write_music_plan`: MUSIC-008, the language model's music plan for the whole story, the four critics' notes and the revisions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0067`) \| `write_music_cue` (`write_music_cue`: MUSIC-009, the language model's detail and prompt wordings for one cue of the music plan, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `cue_id`, so the cues run side by side; migration `0068`) \| `audit_music_cues` (`audit_music_cues`: MUSIC-009, the language model's check of every cue's prompts against the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0068`) \| `rewrite_music_prompt` (`rewrite_music_prompt`: MUSIC-010, the language model's new prompt for a music take the owner rejected, from the owner's note, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `item_key`, so an item is rewritten once at a time; migration `0069`) \| `write_music_bible` (`write_music_bible`: MUSIC-006, the language model's four score directions, its choice and the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; the CHECK in migration `0065` lists every type) \| `write_music_theme_prompt` (`write_music_theme_prompt`: MUSIC-007, the language model's ACE-Step fields for one music theme's recording, or the captions of the missing emotional versions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `theme_id`, so a theme is written once at a time and themes run side by side; migration `0066`) \| `select_shot_references` (`select_shot_references`: PHASE-033, the language model's choice of one shot's reference pictures, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `shot_key`, so a shot is chosen once at a time and shots run side by side; `check_take_dialogue`: PHASE-031, the speech-recognition check of one take whose shot carries dialogue, a job of the project, `provider='gpu'`, restart rule `resume`, deduped by `take_id`, so a take is checked once at a time; `story_pipeline`: PHASE-030, one run of the whole story pipeline from the story's text to the rendered video, a job of the project, `provider='local'`, restart rule `resume`; it writes no story rows of its own and queues the stages' own jobs, its progress being its `output`; `check_shot_takes`: PHASE-029, the technical check of the takes that have none, a job of the project, `provider='local'`; `render_scene`: SCN-003, one scene's own video made by FFmpeg from its selected clips (a placeholder for a shot with none) and its narration, a job of the project, `provider='local'`, restart rule `start_again`, deduped by `scene_id`; `render_story`: PHASE-028, the story's finished video made by FFmpeg from the selected clips and the narration, a job of the project, `provider='local'`; `generate_shot`: PHASE-027, one take of one shot's clip made by MiniMax H3, a job of the project, `provider='gpu'`; `compile_shot_prompt`: PHASE-026, the compiled H3 prompt of one shot, a job of the project, `provider='llm'`; `repair_shot_cut`: PHASE-023 (cut repair), the repair of one cut between two shots of a story scene, a job of the project, `provider='llm'`; `check_shot_continuity`: PHASE-023, the continuity check of one story scene's shots, a job of the project, `provider='llm'`; `define_shot`: PHASE-022, the definition of one planned shot, a job of the project, `provider='llm'`; `plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows Migration `0098` (EVD-001) added `suggest_evidence_claims`, `write_evidence_brief`, `import_evidence` and `render_evidence_clip` (Sections 4.93 to 4.98 and 5). Migration `0104` (EXM-006) added `write_sound_effect` (Sections 4.99 and 5). |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` \| `define_shot` \| `check_shot_continuity` \| `repair_shot_cut` \| `compile_shot_prompt` \| `generate_shot` \| `render_story` \| `check_shot_takes` \| `story_pipeline` \| `check_take_dialogue` \| `write_music_bible` (`write_music_plan`: MUSIC-008, the language model's music plan for the whole story, the four critics' notes and the revisions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0067`) \| `write_music_cue` (`write_music_cue`: MUSIC-009, the language model's detail and prompt wordings for one cue of the music plan, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `cue_id`, so the cues run side by side; migration `0068`) \| `audit_music_cues` (`audit_music_cues`: MUSIC-009, the language model's check of every cue's prompts against the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; migration `0068`) \| `rewrite_music_prompt` (`rewrite_music_prompt`: MUSIC-010, the language model's new prompt for a music take the owner rejected, from the owner's note, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `item_key`, so an item is rewritten once at a time; migration `0069`) \| `write_music_bible` (`write_music_bible`: MUSIC-006, the language model's four score directions, its choice and the Music Bible, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped per project; the CHECK in migration `0065` lists every type) \| `write_music_theme_prompt` (`write_music_theme_prompt`: MUSIC-007, the language model's ACE-Step fields for one music theme's recording, or the captions of the missing emotional versions, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `theme_id`, so a theme is written once at a time and themes run side by side; migration `0066`) \| `select_shot_references` (`select_shot_references`: PHASE-033, the language model's choice of one shot's reference pictures, a job of the project, `provider='llm'`, restart rule `never_rerun`, deduped by `shot_key`, so a shot is chosen once at a time and shots run side by side; `check_take_dialogue`: PHASE-031, the speech-recognition check of one take whose shot carries dialogue, a job of the project, `provider='gpu'`, restart rule `resume`, deduped by `take_id`, so a take is checked once at a time; `story_pipeline`: PHASE-030, one run of the whole story pipeline from the story's text to the rendered video, a job of the project, `provider='local'`, restart rule `resume`; it writes no story rows of its own and queues the stages' own jobs, its progress being its `output`; `check_shot_takes`: PHASE-029, the technical check of the takes that have none, a job of the project, `provider='local'`; `render_scene`: SCN-003, one scene's own video made by FFmpeg from its selected clips (a placeholder for a shot with none) and its narration, a job of the project, `provider='local'`, restart rule `start_again`, deduped by `scene_id`; `render_story`: PHASE-028, the story's finished video made by FFmpeg from the selected clips and the narration, a job of the project, `provider='local'`; `generate_shot`: PHASE-027, one take of one shot's clip made by MiniMax H3, a job of the project, `provider='gpu'`; `compile_shot_prompt`: PHASE-026, the compiled H3 prompt of one shot, a job of the project, `provider='llm'`; `repair_shot_cut`: PHASE-023 (cut repair), the repair of one cut between two shots of a story scene, a job of the project, `provider='llm'`; `check_shot_continuity`: PHASE-023, the continuity check of one story scene's shots, a job of the project, `provider='llm'`; `define_shot`: PHASE-022, the definition of one planned shot, a job of the project, `provider='llm'`; `plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows Migration `0098` (EVD-001) added `suggest_evidence_claims`, `write_evidence_brief`, `import_evidence` and `render_evidence_clip` (Sections 4.93 to 4.98 and 5). Migration `0104` (EXM-006) added `write_sound_effect` (Sections 4.99 and 5). Migration `0106` (FTG-001) added `suggest_footage_marks`, `write_footage_brief`, `import_footage`, `prepare_footage_file` and `render_footage_clip` (Sections 4.100 to 4.105). |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -4728,6 +4734,295 @@ CREATE INDEX idx_sound_effect_take_role ON sound_effect_take (project_id, role);
 CREATE INDEX idx_sound_effect_take_run ON sound_effect_take (lab_run_id);
 ```
 
+### 4.100 `footage_mark_list`
+
+*Added for footage (migration `0106`; written from FTG-002).* One version of a project's footage marks: the owner's marks, GLM's proposals and the owner's keep or drop choices. It follows the provenance convention of Section 2.1: every change is a new row with the next `version`, and a stored row is never changed. `source` is `manual` for the owner's marks and choices and `ai` for GLM's proposals. Out of date is worked out on read from `inputs`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per project. `UNIQUE (project_id, version)` |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `suggest_footage_marks` job that wrote it. NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | `{script_sha256, based_on_version}` |
+| `content` | JSON | NOT NULL | — | `{next_id, marks}`; a mark is `{id, origin, start, end, text, note, kind_hint, reason, kept}` (`origin` `owner` or `glm`; `kind_hint` `any`, `video`, `photo` or `page`; `kept` true for an owner's mark, NULL for a proposal not decided and false for a dropped one) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE footage_mark_list (
+    id         INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    version    INTEGER NOT NULL,
+    source     TEXT NOT NULL,
+    job_id     INTEGER,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_footage_mark_list PRIMARY KEY (id),
+    CONSTRAINT ck_footage_mark_list_source_valid CHECK (source IN ('ai', 'manual')),
+    CONSTRAINT fk_footage_mark_list_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_mark_list_job_id_job
+        FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_footage_mark_list_project_id UNIQUE (project_id, version)
+);
+CREATE INDEX idx_footage_mark_list_project ON footage_mark_list (project_id);
+```
+
+### 4.101 `footage_round`
+
+*Added for footage (migration `0106`; written from FTG-007 by the `write_footage_brief` job).* One research brief written for one mark list version. The round's id in the brief is `r<round_no>`. `folder` is relative to the files folder (`footage/<project_id>/r<round_no>`). Whether the round is imported or reviewed is worked out from the import and decision rows, never stored here.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `round_no` | INTEGER | NOT NULL | — | From 1 per project. `UNIQUE (project_id, round_no)` |
+| `mark_list_id` | INTEGER, FK → `footage_mark_list.id` | NOT NULL | — | The version the brief was written for. `ON DELETE CASCADE` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_footage_brief` job. `ON DELETE SET NULL` |
+| `folder` | TEXT | NOT NULL | — | The round folder |
+| `brief` | JSON | NOT NULL | — | Exactly the `brief/footage.json` written |
+| `brief_sha256` | TEXT | NOT NULL | — | Its hash |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE footage_round (
+    id           INTEGER NOT NULL,
+    project_id   INTEGER NOT NULL,
+    round_no     INTEGER NOT NULL,
+    mark_list_id INTEGER NOT NULL,
+    job_id       INTEGER,
+    folder       TEXT NOT NULL,
+    brief        JSON NOT NULL,
+    brief_sha256 TEXT NOT NULL,
+    created_at   DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_footage_round PRIMARY KEY (id),
+    CONSTRAINT fk_footage_round_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_round_mark_list_id_footage_mark_list
+        FOREIGN KEY (mark_list_id) REFERENCES footage_mark_list (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_round_job_id_job
+        FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_footage_round_project_id UNIQUE (project_id, round_no)
+);
+CREATE INDEX idx_footage_round_project ON footage_round (project_id);
+```
+
+### 4.102 `footage_import`
+
+*Added for footage (migration `0106`; written from FTG-011 by the `import_footage` job).* One import of one round's results. `version` counts the imports of the round from 1, and a stored row is never changed. `results` holds each mark's `{status, summary, attempts, problems}` (`status` is NULL when the mark has no usable result) and `report` the counts by status.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `round_id` | INTEGER, FK → `footage_round.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per round. `UNIQUE (round_id, version)` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `import_footage` job. `ON DELETE SET NULL` |
+| `results` | JSON | NOT NULL | — | Per mark |
+| `report` | JSON | NOT NULL | — | Counts by status, pieces and usable pieces |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE footage_import (
+    id         INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    round_id   INTEGER NOT NULL,
+    version    INTEGER NOT NULL,
+    job_id     INTEGER,
+    results    JSON NOT NULL,
+    report     JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_footage_import PRIMARY KEY (id),
+    CONSTRAINT fk_footage_import_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_import_round_id_footage_round
+        FOREIGN KEY (round_id) REFERENCES footage_round (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_import_job_id_job
+        FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_footage_import_round_id UNIQUE (round_id, version)
+);
+CREATE INDEX idx_footage_import_project ON footage_import (project_id);
+```
+
+### 4.103 `footage_item`
+
+*Added for footage (migration `0106`; written from FTG-003 for the owner's files and FTG-011 for the agent's pieces).* One piece of footage. `origin` is `agent` for a piece of an import (`import_id` set) and `owner` for a file the owner added to a mark (`import_id` NULL; the app makes the `piece_id`); a `CHECK` ties the two together. `item_key` tells an item that is unchanged from one import to the next: the owner's decisions refer to it, not to the row id. `kind`, `tier`, `same_event` and `on_screen_text` are NULL when the agent wrote a value the contract does not allow; such an item is stored with `usable` false and its reasons in `checks`. The file columns hold paths relative to the media folder, each with its SHA-256, and are NULL for a file the piece does not have or that was not copied.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `import_id` | INTEGER, FK → `footage_import.id` | NULL | — | NULL for an owner's file. `ON DELETE CASCADE` |
+| `mark_id` | TEXT | NOT NULL | — | The mark (`f3`) |
+| `piece_id` | TEXT | NOT NULL | — | The piece in the result (`p1` to `p9`), or the app's own id for an owner's file. `UNIQUE (import_id, mark_id, piece_id)` |
+| `item_key` | TEXT | NOT NULL | — | Stable from one import to the next while the piece is unchanged |
+| `origin` | TEXT | NOT NULL | — | `agent` or `owner` (`CHECK`) |
+| `kind` | TEXT | NULL | — | `video`, `image`, `page` or `pdf` (`CHECK`) |
+| `tier` | TEXT | NULL | — | `official`, `press`, `commons`, `news`, `creator` or `other` (`CHECK`) |
+| `source` | JSON | NULL | — | `{url, final_url, publisher, title, published, retrieved_at, licence, licence_url}` |
+| `what_it_shows` | TEXT | NULL | — | The agent's words on what the picture shows |
+| `same_event` | TEXT | NULL | — | `yes`, `no` (file footage) or `unknown` (`CHECK`) |
+| `event_date` | TEXT | NULL | — | The date of the event shown |
+| `on_screen_text` | TEXT | NULL | — | `none`, `small` or `large` (`CHECK`) |
+| `credit` | TEXT | NULL | — | The owner's own credit line (at most 120 characters), for an owner's file |
+| `agent_notes` | TEXT | NULL | — | |
+| `capture` | JSON | NULL | — | What the capture tool wrote (the contract's `capture`) |
+| `video_path`, `video_sha256` | TEXT | NULL | — | The stored video, with no sound |
+| `strip_path`, `strip_sha256` | TEXT | NULL | — | The strip of frames 0.5 s apart |
+| `image_path`, `image_sha256` | TEXT | NULL | — | An image, or the page's picture |
+| `text_path`, `text_sha256` | TEXT | NULL | — | The page's text |
+| `pdf_path`, `pdf_sha256` | TEXT | NULL | — | The PDF |
+| `upload_path`, `upload_sha256` | TEXT | NULL | — | The owner's original video, kept for `prepare_footage_file` |
+| `cuts` | JSON | NULL | — | The cut times, in seconds of the stored video |
+| `prepare_job_id` | INTEGER, FK → `job.id` | NULL | — | The `prepare_footage_file` job that made the stored copy. `ON DELETE SET NULL` |
+| `usable` | BOOLEAN | NOT NULL | `0` | Whether the checks passed |
+| `checks` | JSON | NULL | — | The reasons a piece is unusable |
+| `warnings` | JSON | NULL | — | Shown on the review card, never a refusal |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE footage_item (
+    id             INTEGER NOT NULL,
+    project_id     INTEGER NOT NULL,
+    import_id      INTEGER,
+    mark_id        TEXT NOT NULL,
+    piece_id       TEXT NOT NULL,
+    item_key       TEXT NOT NULL,
+    origin         TEXT NOT NULL,
+    kind           TEXT,
+    tier           TEXT,
+    source         JSON,
+    what_it_shows  TEXT,
+    same_event     TEXT,
+    event_date     TEXT,
+    on_screen_text TEXT,
+    credit         TEXT,
+    agent_notes    TEXT,
+    capture        JSON,
+    video_path     TEXT, video_sha256  TEXT,
+    strip_path     TEXT, strip_sha256  TEXT,
+    image_path     TEXT, image_sha256  TEXT,
+    text_path      TEXT, text_sha256   TEXT,
+    pdf_path       TEXT, pdf_sha256    TEXT,
+    upload_path    TEXT, upload_sha256 TEXT,
+    cuts           JSON,
+    prepare_job_id INTEGER,
+    usable         BOOLEAN NOT NULL DEFAULT 0,
+    checks         JSON,
+    warnings       JSON,
+    created_at     DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_footage_item PRIMARY KEY (id),
+    CONSTRAINT ck_footage_item_origin_valid CHECK (origin IN ('agent', 'owner')),
+    CONSTRAINT ck_footage_item_import_matches_origin CHECK (
+        (origin = 'agent' AND import_id IS NOT NULL) OR (origin = 'owner' AND import_id IS NULL)),
+    CONSTRAINT ck_footage_item_kind_valid CHECK (kind IS NULL OR kind IN ('video', 'image', 'page', 'pdf')),
+    CONSTRAINT ck_footage_item_tier_valid CHECK (
+        tier IS NULL OR tier IN ('official', 'press', 'commons', 'news', 'creator', 'other')),
+    CONSTRAINT ck_footage_item_same_event_valid CHECK (
+        same_event IS NULL OR same_event IN ('yes', 'no', 'unknown')),
+    CONSTRAINT ck_footage_item_on_screen_text_valid CHECK (
+        on_screen_text IS NULL OR on_screen_text IN ('none', 'small', 'large')),
+    CONSTRAINT fk_footage_item_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_item_import_id_footage_import
+        FOREIGN KEY (import_id) REFERENCES footage_import (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_item_prepare_job_id_job
+        FOREIGN KEY (prepare_job_id) REFERENCES job (id) ON DELETE SET NULL,
+    CONSTRAINT uq_footage_item_import_id UNIQUE (import_id, mark_id, piece_id)
+);
+CREATE INDEX idx_footage_item_import ON footage_item (import_id);
+CREATE INDEX idx_footage_item_project_key ON footage_item (project_id, item_key);
+CREATE INDEX idx_footage_item_project_mark ON footage_item (project_id, mark_id);
+```
+
+### 4.104 `footage_decision`
+
+*Added for footage (migration `0106`; written from FTG-003 and FTG-012).* One version of the owner's footage decisions for the **whole project**, not for one round, because an owner's own file has no round. Every change is a new row with the next `version`, and a stored row is never changed. Every version is the owner's, so there is no `source`. A decision names an item by `item_key`, so a new import keeps the decisions for unchanged items.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | From 1 per project. `UNIQUE (project_id, version)` |
+| `inputs` | JSON | NOT NULL | — | `{based_on_version}` |
+| `content` | JSON | NOT NULL | — | `{marks: [{mark_id, items: [{item_key, verdict}], shown, use, framing, no_footage}], reviewed_rounds}`: `verdict` is `accepted` or `rejected`; `shown` the item keys to show, in order; `use` a moved start and end by item key; `framing` the portrait choice (`blur`, `left`, `centre` or `right`); `no_footage` the owner's "no footage here"; `reviewed_rounds` the round numbers marked reviewed |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE footage_decision (
+    id         INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    version    INTEGER NOT NULL,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_footage_decision PRIMARY KEY (id),
+    CONSTRAINT fk_footage_decision_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT uq_footage_decision_project_id UNIQUE (project_id, version)
+);
+```
+
+### 4.105 `footage_clip`
+
+*Added for footage (migration `0106`; written from FTG-005 by the `render_footage_clip` job).* One rendered footage video: `purpose` is `preview` (from the mark card or the review, with no scene) or `piece` (a placed piece drawn at its exact length; `placed_key` is `{run}:{item_key}`). A clip shows exactly one item. The row is made when its render is queued, so the video columns are NULL until the render has written them, like `evidence_clip`. Whether a clip is current is worked out on read from `inputs`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `purpose` | TEXT | NOT NULL | — | `preview` or `piece` (`CHECK`) |
+| `item_id` | INTEGER, FK → `footage_item.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NULL | — | NULL for a preview |
+| `placed_key` | TEXT | NULL | — | `{scene_id}/{first}-{last}:{item_key}`; NULL for a preview |
+| `shot_plan_id` | INTEGER, FK → `shot_plan.id` | NULL | — | The plan the clip was placed from. `ON DELETE SET NULL` |
+| `attempt` | INTEGER | NOT NULL | `1` | |
+| `render_job_id` | INTEGER, FK → `job.id` | NULL | — | The `render_footage_clip` job. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | The clip's look |
+| `media_path` | TEXT | NULL | — | |
+| `sha256` | TEXT | NULL | — | |
+| `frame_count` | INTEGER | NULL | — | |
+| `metrics` | JSON | NULL | — | |
+| `warnings` | JSON | NULL | — | |
+| `last_error` | TEXT | NULL | — | |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE footage_clip (
+    id            INTEGER NOT NULL,
+    project_id    INTEGER NOT NULL,
+    purpose       TEXT NOT NULL,
+    item_id       INTEGER NOT NULL,
+    scene_id      TEXT,
+    placed_key    TEXT,
+    shot_plan_id  INTEGER,
+    attempt       INTEGER NOT NULL DEFAULT 1,
+    render_job_id INTEGER,
+    inputs        JSON NOT NULL,
+    media_path    TEXT,
+    sha256        TEXT,
+    frame_count   INTEGER,
+    metrics       JSON,
+    warnings      JSON,
+    last_error    TEXT,
+    created_at    DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CONSTRAINT pk_footage_clip PRIMARY KEY (id),
+    CONSTRAINT ck_footage_clip_purpose_valid CHECK (purpose IN ('preview', 'piece')),
+    CONSTRAINT fk_footage_clip_project_id_project
+        FOREIGN KEY (project_id) REFERENCES project (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_clip_item_id_footage_item
+        FOREIGN KEY (item_id) REFERENCES footage_item (id) ON DELETE CASCADE,
+    CONSTRAINT fk_footage_clip_shot_plan_id_shot_plan
+        FOREIGN KEY (shot_plan_id) REFERENCES shot_plan (id) ON DELETE SET NULL,
+    CONSTRAINT fk_footage_clip_render_job_id_job
+        FOREIGN KEY (render_job_id) REFERENCES job (id) ON DELETE SET NULL
+);
+CREATE INDEX idx_footage_clip_project_scene ON footage_clip (project_id, scene_id);
+CREATE INDEX idx_footage_clip_item ON footage_clip (item_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -6181,6 +6476,8 @@ Migration `0098`. Only `evidence_claim_list` is written so far (EVD-002; `words_
 `evidence_clip.inputs` (EVD-008, for a preview): `{"items": ["<item_key>"], "item_ids": [12], "orientation": "landscape", "length_s": 6.0, "width": 1920, "height": 1080, "fps": 24, "frames": 144, "accent": "#FFD60A", "accent_source": "graphic_theme" | "callout_plan" | "default", "clip_version": 1}`; EVD-009 adds the keys of a shot clip (its `length_s` is the shot's). `width`, `height`, `fps`, `frames`, `accent` and `clip_version` are the keys a preview is compared by to tell whether it is out of date. `metrics`: `{"engine": "evidence_clip", "composition": "Evidence", "text_height_px": 54.0, "min_text_height_px": 37.8, "zoom": 1.07, "picture_bytes": 2415870, "context_sent": false, "render_s": 11.2, "job_s": 14.0, "size_bytes": 410233, "frames": 144, "width": 1920, "height": 1080, "fps": 24, "codec": "h264", "pix_fmt": "yuv420p", "checks": {...}, "encoding": {...}, "versions": {...}}`; `warnings`: `[{"code": "small_text", "message": "a sentence"}]` (only `small_text`, when `text_height_px` is below `min_text_height_px`).
 
 The four job types: `suggest_evidence_claims` (EVD-002) is a paid language-model call with the rules of `jobs/llm_call.py`, `provider='llm'`, restart rule `never_rerun`. `write_evidence_brief` (EVD-003), `import_evidence` (EVD-006) and `render_evidence_clip` (EVD-008, EVD-009) are `provider='local'` with restart rule `start_again`. `suggest_evidence_claims` (EVD-002), `write_evidence_brief` (EVD-003) and `import_evidence` (EVD-006) have their handlers (below); `render_evidence_clip` has its handler too (EVD-008, below; EVD-009 uses it for shot clips). **A fifth, `transcribe_evidence_clip` (SB-001, migration `0100`)**, transcribes the audio of one `video` piece with Parakeet (`provider='gpu'`, like `time_speech_words`); it is registered in the CHECK and the API's job types and has its handler since SB-006 (`jobs/transcribe_evidence_clip.py`): `provider='gpu'`, restart rule `resume`, input `{requested, evidence_item_id}`, output `{evidence_item_id, processing_time, reused, fidelity, words, flags}`; the result is written on the item in the transaction that finishes the job (see the SB-006 update at the top).
+
+The five footage job types (FTG-001, migration `0106`) are registered in the `job.type` CHECK and in the API's job types, and have **no handler yet** (each phase adds its own): `suggest_footage_marks` (FTG-002) is a paid language-model call with the rules of `jobs/llm_call.py`, `provider='llm'`, restart rule `never_rerun`, on the story model. `write_footage_brief` (FTG-007), `import_footage` (FTG-011), `prepare_footage_file` (FTG-003; makes the stored H.264 copy without sound, its strip and its cut times from an owner's video) and `render_footage_clip` (FTG-005; the motion service for an image, a page or a PDF, FFmpeg for a video) are `provider='local'` with restart rule `start_again`.
 
 ### `job.input` and `job.output` for a `suggest_evidence_claims` job (EVD-002)
 

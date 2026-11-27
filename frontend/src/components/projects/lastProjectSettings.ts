@@ -29,6 +29,7 @@ export type NewProjectSettings = {
   graphics: boolean;
   evidence: boolean;
   soundEffects: boolean;
+  footage: boolean;
   captionMode: CaptionMode;
   callouts: boolean;
   calloutStyle: CalloutStyle;
@@ -49,6 +50,7 @@ export const DEFAULT_SETTINGS: NewProjectSettings = {
   graphics: true,
   evidence: true,
   soundEffects: true,
+  footage: true,
   captionMode: "burned",
   callouts: true,
   calloutStyle: "boxes",
@@ -125,6 +127,7 @@ export function readLastSettings(): NewProjectSettings {
     graphics: flag(stored.graphics, defaults.graphics),
     evidence: flag(stored.evidence, defaults.evidence),
     soundEffects: flag(stored.soundEffects, defaults.soundEffects),
+    footage: flag(stored.footage, defaults.footage),
     captionMode: choice(stored.captionMode, isCaptionMode, defaults.captionMode),
     callouts: flag(stored.callouts, defaults.callouts),
     calloutStyle: choice(stored.calloutStyle, isCalloutStyle, defaults.calloutStyle),
