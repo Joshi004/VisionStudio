@@ -222,6 +222,7 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
       case "graphic_theme":
         return <GraphicThemePanel projectId={projectId} />;
       case "evidence_claims":
+      case "footage_marks":
         // The story box is on the Story text page, so no unsaved change is held here.
         return <StoryMarkup project={project} hasUnsavedStory={false} />;
       case "evidence":

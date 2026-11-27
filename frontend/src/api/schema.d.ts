@@ -849,6 +849,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/footage-marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Footage Marks */
+        get: operations["get_footage_marks_api_projects__project_id__footage_marks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-marks/marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Footage
+         * @description Marks words of the saved story as footage, as a new version written by the owner.
+         */
+        post: operations["mark_footage_api_projects__project_id__footage_marks_marks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-marks/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Footage Marks
+         * @description Starts the job that asks GLM for more footage marks. If one is already waiting or running
+         *     for the project, its id is returned and no second job is made.
+         */
+        post: operations["suggest_footage_marks_api_projects__project_id__footage_marks_suggest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-marks/{mark_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Footage Mark
+         * @description Removes one of the owner's marks. A proposal of GLM is dropped instead (PATCH).
+         */
+        delete: operations["remove_footage_mark_api_projects__project_id__footage_marks__mark_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit Footage Mark
+         * @description Changes a mark's note or kind, or keeps or drops a proposal of GLM.
+         */
+        patch: operations["edit_footage_mark_api_projects__project_id__footage_marks__mark_id__patch"];
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -9752,6 +9834,96 @@ export interface components {
             };
             /** Warnings */
             warnings: string[];
+        };
+        /** FootageMarkEditIn */
+        FootageMarkEditIn: {
+            /** Note */
+            note?: string | null;
+            /** Kind Hint */
+            kind_hint?: ("any" | "video" | "photo" | "page") | null;
+            /** Kept */
+            kept?: boolean | null;
+        };
+        /** FootageMarkIn */
+        FootageMarkIn: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Kind Hint */
+            kind_hint?: ("any" | "video" | "photo" | "page") | null;
+        };
+        /** FootageMarkOut */
+        FootageMarkOut: {
+            /** Id */
+            id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "owner" | "glm";
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /** Note */
+            note: string;
+            /**
+             * Kind Hint
+             * @enum {string}
+             */
+            kind_hint: "any" | "video" | "photo" | "page";
+            /** Reason */
+            reason: string;
+            /** Kept */
+            kept: boolean | null;
+            /** Words Changed */
+            words_changed: boolean;
+        };
+        /**
+         * FootageMarksJobOut
+         * @description The newest `suggest_footage_marks` job of the project, whatever its status.
+         */
+        FootageMarksJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** FootageMarksRun */
+        FootageMarksRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** FootageMarksState */
+        FootageMarksState: {
+            /** Version */
+            version: number | null;
+            /** Marks */
+            marks: components["schemas"]["FootageMarkOut"][];
+            job: components["schemas"]["FootageMarksJobOut"] | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+            /** Has Ai Version */
+            has_ai_version: boolean;
         };
         /** FullRecordingOut */
         FullRecordingOut: {
@@ -22752,6 +22924,252 @@ export interface operations {
                 };
             };
             /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_footage_marks_api_projects__project_id__footage_marks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageMarksState"];
+                };
+            };
+            /** @description No such project or footage mark. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_footage_api_projects__project_id__footage_marks_marks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageMarkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageMarksState"];
+                };
+            };
+            /** @description No such project or footage mark. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing footage. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    suggest_footage_marks_api_projects__project_id__footage_marks_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageMarksRun"];
+                };
+            };
+            /** @description No such project or footage mark. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing footage. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_footage_mark_api_projects__project_id__footage_marks__mark_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageMarksState"];
+                };
+            };
+            /** @description No such project or footage mark. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing footage. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    edit_footage_mark_api_projects__project_id__footage_marks__mark_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageMarkEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageMarksState"];
+                };
+            };
+            /** @description No such project or footage mark. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description GLM is proposing footage. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the story is not saved, or the request breaks a rule. */
             422: {
                 headers: {
                     [name: string]: unknown;

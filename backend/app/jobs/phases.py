@@ -174,6 +174,10 @@ SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
 # `suggest_evidence_claims` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_EVIDENCE_CLAIMS: Final = "saving the evidence claims"
 
+# --- Running: the footage marks of an explainer (FTG-002) --------------------------------
+# `suggest_footage_marks` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_FOOTAGE_MARKS: Final = "saving the footage marks"
+
 # --- Running: the research brief of the evidence layer (EVD-003) -------------------------
 # `write_evidence_brief` is a local job: it writes the round's folder and files, then the row.
 WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"

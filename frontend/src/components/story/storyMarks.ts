@@ -101,13 +101,14 @@ export type MarkRange = { id: string; start: number; end: number };
 
 /**
  * A piece of the story with the same marks on all of it. `start` is a unit position. A piece
- * has at most one claim and one graphic; a piece with neither is plain text.
+ * has at most one claim, one graphic and one footage mark; a piece with none is plain text.
  */
 export type LayeredSegment = {
   start: number;
   text: string;
   claimId: string | null;
   graphicId: string | null;
+  footageId: string | null;
 };
 
 type UnitRange = { id: string; start: number; end: number };
@@ -130,19 +131,22 @@ function idAt(ranges: UnitRange[], from: number, to: number): string | null {
 }
 
 /**
- * The story cut at every start and end of a claim and of a graphic, so words that carry both
- * marks are one piece with both. Neighbouring pieces with the same marks are joined.
+ * The story cut at every start and end of a claim, a graphic and a footage mark, so words that
+ * carry several marks are one piece with all of them. Neighbouring pieces with the same marks
+ * are joined.
  */
 export function buildLayeredSegments(
   text: string,
   graphics: MarkRange[],
   claims: MarkRange[],
+  footage: MarkRange[],
   positions: Positions,
 ): LayeredSegment[] {
   const graphicRanges = toUnitRanges(graphics, positions);
   const claimRanges = toUnitRanges(claims, positions);
+  const footageRanges = toUnitRanges(footage, positions);
   const cuts = new Set<number>([0, text.length]);
-  for (const range of [...graphicRanges, ...claimRanges]) {
+  for (const range of [...graphicRanges, ...claimRanges, ...footageRanges]) {
     cuts.add(range.start);
     cuts.add(range.end);
   }
@@ -154,11 +158,17 @@ export function buildLayeredSegments(
     const to = ordered[index + 1];
     const claimId = idAt(claimRanges, from, to);
     const graphicId = idAt(graphicRanges, from, to);
+    const footageId = idAt(footageRanges, from, to);
     const last = segments[segments.length - 1];
-    if (last && last.claimId === claimId && last.graphicId === graphicId) {
+    if (
+      last &&
+      last.claimId === claimId &&
+      last.graphicId === graphicId &&
+      last.footageId === footageId
+    ) {
       last.text += text.slice(from, to);
     } else {
-      segments.push({ start: from, text: text.slice(from, to), claimId, graphicId });
+      segments.push({ start: from, text: text.slice(from, to), claimId, graphicId, footageId });
     }
   }
   return segments;

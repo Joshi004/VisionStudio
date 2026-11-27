@@ -183,6 +183,10 @@ STEPS: Final[tuple[Step, ...]] = (
     # been asked for the project. It reads the saved story alone. Skipped as complete for any
     # project that is not a continuous explainer with evidence on. The evidence step waits for it.
     Step("evidence_claims", "Propose the evidence claims"),
+    # FTG-002: GLM proposes places where real footage would help, once, when it has never been
+    # asked for the project. It reads the saved story and what already has proof or a graphic.
+    # Skipped as complete for any project that is not a continuous explainer with footage on.
+    Step("footage_marks", "Propose the footage"),
     # EVD-003: the research brief written for the claims, and the owner's own work outside the
     # app (the research, the import, the review). The step waits on the owner (`Target.awaiting`):
     # the run goes on with every step that does not need it, then waits (`waiting_for`) instead of

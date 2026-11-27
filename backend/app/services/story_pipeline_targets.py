@@ -47,6 +47,7 @@ from app.services import (
     evidence_clips,
     evidence_rounds,
     explainer,
+    footage_marks,
     generation_requests,
     graphic_theme,
     look_state_images,
@@ -1841,6 +1842,39 @@ async def _call_evidence_claims(
     return await evidence_claims.start_suggest(session, project)
 
 
+# --- The footage marks (FTG-002) --------------------------------------------------------------
+
+
+async def _evaluate_footage_marks(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with footage on has footage marks. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not footage_marks.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await footage_marks.state(session, project)
+    # GLM is asked once by a run, when it has never answered for the project. Asking again is the
+    # owner's click, because it is a paid call. The owner's marks are never replaced here.
+    done = state.has_ai_version
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                last_error=_failure(state.job),
+            )
+        ]
+    )
+
+
+async def _call_footage_marks(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await footage_marks.start_suggest(session, project)
+
+
 # --- The evidence (EVD-003) -------------------------------------------------------------------
 
 
@@ -2969,6 +3003,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
     "evidence_claims": Adapter(_evaluate_evidence_claims, _project_start(_call_evidence_claims)),
+    "footage_marks": Adapter(_evaluate_footage_marks, _project_start(_call_footage_marks)),
     "evidence": Adapter(_evaluate_evidence, _project_start(_call_evidence)),
     "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),

@@ -101,9 +101,10 @@ export function StoryEditor({ project }: { project: ProjectDetail }) {
   const [hasUnsavedStory, setHasUnsavedStory] = useState(false);
   // How many suggested graphics the last save could no longer find in the changed story.
   const [droppedSuggestions, setDroppedSuggestions] = useState(0);
-  // Only a continuous explainer with graphics or evidence on has words to mark.
+  // Only a continuous explainer with graphics, evidence or footage on has words to mark.
   const marksUp =
-    project.voice_track === "continuous" && (project.graphics || project.evidence);
+    project.voice_track === "continuous" &&
+    (project.graphics || project.evidence || project.footage);
   // A saved story opens on Mark up; a new project starts on Write.
   const [tab, setTab] = useState<string>(project.script_text !== null && marksUp ? "markup" : "write");
 

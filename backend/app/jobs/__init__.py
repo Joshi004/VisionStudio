@@ -100,6 +100,7 @@ def register_handlers() -> None:
     from app.jobs.stage_scene import StageSceneHandler
     from app.jobs.story_pipeline import StoryPipelineHandler
     from app.jobs.suggest_evidence_claims import SuggestEvidenceClaimsHandler
+    from app.jobs.suggest_footage_marks import SuggestFootageMarksHandler
     from app.jobs.synthesize_speech_unit import SynthesizeSpeechUnitHandler
     from app.jobs.time_lab_graphic_words import TimeLabGraphicWordsHandler
     from app.jobs.time_lab_speech_words import TimeLabSpeechWordsHandler
@@ -201,6 +202,7 @@ def register_handlers() -> None:
     handlers.register(WriteShotGraphicSceneHandler())
     handlers.register(RenderShotGraphicHandler())
     handlers.register(SuggestEvidenceClaimsHandler())
+    handlers.register(SuggestFootageMarksHandler())
     handlers.register(WriteEvidenceBriefHandler())
     handlers.register(ImportEvidenceHandler())
     handlers.register(RenderEvidenceClipHandler())

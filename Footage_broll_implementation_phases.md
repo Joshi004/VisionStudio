@@ -395,7 +395,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | Id | Title | Kind | Hard dependencies | Status |
 |----|-------|------|-------------------|--------|
 | FTG-001 | Footage switch, tables and job types | Code | — | Completed |
-| FTG-002 | Marking footage and GLM's proposals | Code | FTG-001 | Not Started |
+| FTG-002 | Marking footage and GLM's proposals | Code | FTG-001 | Completed |
 | FTG-003 | The owner's own files on a mark | Code | FTG-002 | Not Started |
 | FTG-004 | Placing footage over the shots | Code | — | Not Started |
 | FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 1 completed (FTG-001, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 2 completed (FTG-001 and FTG-002, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -475,7 +475,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-002 — Marking footage and GLM's proposals
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28)
 
 **Objective.** The owner marks words as footage with a note, GLM proposes more, and the owner keeps or drops them.
 
@@ -503,13 +503,27 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Mark list and API
-- [ ] Story box action, filter and card
-- [ ] GLM proposals and code checks
-- [ ] Step and board
-- [ ] Standard checks
+- [x] Mark list and API
+- [x] Story box action, filter and card
+- [x] GLM proposals and code checks
+- [x] Step and board
+- [x] Standard checks
 
-**Completion notes.** —
+**Completion notes.**
+- **Backend** (no migration; the table is `footage_mark_list` of `0106`):
+  - `services/footage_marks.py` holds the mark list: `wanted`, `reanchor_marks`, `counting`, `add_mark`, `update_mark`, `remove_mark`, `start_suggest`, `save_ai_version` and the memoized `state`. Footage marks never overlap each other; one over a claim, a graphic or a sound bite is accepted; an owner's mark drops a GLM proposal it covers. At most 100 owner marks; a note is one line of at most 300 characters. Changes are refused with 409 while the job runs.
+  - `services/footage_marks_writer.py`: the prompt, `build_request`, `check_answer` (needs `{"marks": [...]}`, each with a phrase, a note and a reason) and `locate_proposals`. A proposal is left out, with a reason, when it is not in the story, too long, dropped before, repeated, over footage that counts, over a sound bite, or over the limit of one for every 60 words (`proposal_limit`, at least one; the model gives the strongest first).
+  - `jobs/suggest_footage_marks.py` (story model, `never_rerun`), `SAVING_FOOTAGE_MARKS` and the handler registered. API `api/footage_marks.py` under `/api/projects/{id}/footage-marks` (read, `marks`, `suggest`, edit, remove).
+  - Step `footage_marks` ("Propose the footage") after `evidence_claims`, with its adapter; the board shows it `off` through `FOOTAGE_STEPS` (later footage steps are added there) and groups it with `story`.
+- **Frontend:** `api/footageMarks.ts` (and `schema.d.ts`, regenerated), `FootageMarkCard.tsx`, a footage layer in `storyMarks.ts` and `StoryMarkup.tsx` (an orange line above the words: solid for kept marks, dashed for a proposal not yet decided; a `Footage` filter and legend; a details section; "Ask GLM for footage"), and `SelectionToolbar.tsx`. The step panel `footage_marks` and the Mark up tab show the story box when footage is on.
+- **Planning decided:**
+  - The toolbar's Footage button (key F) opens a second row with the kind, the note and "Mark footage" (Enter saves); "Both" stays evidence plus graphic.
+  - GLM sees as context the evidence claims that count, the sound bite quotes and the graphic suggestions, so it keeps footage off words that already have something shown.
+  - A proposal in a sound bite quote is left out when it overlaps the quote (stricter than "inside": footage never covers a sound bite, FT-12).
+  - The layer colour is orange. The owner's marks default to kind `any`.
+- **Checked** on a throwaway backend and database (the real app on port 5480 was not touched; no GLM call was made): marks move with edits elsewhere and show `words_changed` when their own words change; an overlapping mark is refused and a mark over a claim is accepted; keep, drop, remove, and the wrong-origin refusals; 404 for an unknown mark; 409 while a job is active; a story project and a project with footage off read `wanted` false, refuse marks with 422 and show `footage_marks` as `off` on the board. `check_answer` and `locate_proposals` were run with stand-in answers (malformed, missing note, note over 300 characters, phrase not in the story, repeat, sound bite, dropped before, over the limit). `start_suggest` and `save_ai_version` were run without the dispatcher, including the refusal when the story or the list changed. `ruff check`, `ruff format --check`, `npm run lint` and `npm run typecheck` pass.
+- **Not checked in a browser:** the story box was typechecked and linted but not clicked through; the owner should try marking, the Footage row and the filter once.
+- **No deviation** from Scope.
 
 ### FTG-003 — The owner's own files on a mark
 
@@ -1000,3 +1014,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 |------|-------|--------|
 | 2026-11-28 | — | Document written. |
 | 2026-11-28 | FTG-001 | Completed: migration `0106` (`project.footage`, six footage tables, five job types), models, the switch on the API and both forms, `DATABASE_STRUCTURE.md` (with `0105`). |
+| 2026-11-28 | FTG-002 | Completed: footage marks (service, API, GLM proposals job), the `footage_marks` step and board entry, and the story box layer, toolbar row and card. No migration. |

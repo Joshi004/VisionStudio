@@ -41,6 +41,7 @@ from app.services import (
     callout_look,
     callout_plan,
     evidence_claims,
+    footage_marks,
     graphic_theme,
     music_bible,
     music_themes,
@@ -109,6 +110,10 @@ EVIDENCE_CLAIMS_STEP: Final = "evidence_claims"
 # (EVD-002, EVD-003, EVD-009).
 EVIDENCE_STEPS: Final = (EVIDENCE_CLAIMS_STEP, "evidence", "evidence_clips")
 
+# The steps that are switched off for every project but a continuous explainer with footage on
+# (FTG-002). Later footage phases add their steps here.
+FOOTAGE_STEPS: Final = ("footage_marks",)
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -132,6 +137,7 @@ GROUPS: Final[dict[str, str]] = {
     "word_timings": "speech",
     "callout_plan": "speech",
     "evidence_claims": "story",
+    "footage_marks": "story",
     "evidence": "story",
     "evidence_clips": "graphics",
     "graphic_theme": "graphics",
@@ -351,6 +357,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
             or (step.key == CALLOUT_GRAPHICS_STEP and not callout_look.wanted(project))
             or (step.key in EVIDENCE_STEPS and not evidence_claims.wanted(project))
+            or (step.key in FOOTAGE_STEPS and not footage_marks.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts = StepCounts()
