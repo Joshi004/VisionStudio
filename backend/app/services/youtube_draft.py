@@ -57,6 +57,7 @@ from app.services import (
     discovery,
     evidence_review,
     evidence_rounds,
+    explainer,
     provenance,
     story_bible,
     story_renders,
@@ -66,6 +67,7 @@ from app.services import (
     youtube_auth,
     youtube_sources,
 )
+from app.services import youtube_chapters_writer as chapters_writer
 from app.services import youtube_draft_writer as writer
 
 _logger = logging.getLogger(__name__)
@@ -190,6 +192,9 @@ class _Target:
     duration_s: float | None
     width: int | None
     height: int | None
+    # The frozen caption track of the render or of the render job's timeline, as stored (the
+    # chapters are made from it), or None.
+    captions: Any = None
 
 
 def _render_target(render: StoryRender) -> _Target:
@@ -199,6 +204,7 @@ def _render_target(render: StoryRender) -> _Target:
         duration_s=render.duration_s,
         width=render.width,
         height=render.height,
+        captions=story_renders.recorded_captions(render),
     )
 
 
@@ -220,7 +226,14 @@ def _job_target(job: Job) -> _Target:
     width, height = _whole(timeline.get("width")), _whole(timeline.get("height"))
     if frames is None or fps is None or width is None or height is None:
         raise YouTubeDraftError(BAD_TIMELINE_MESSAGE)
-    return _Target(render=None, job=job, duration_s=frames / fps, width=width, height=height)
+    return _Target(
+        render=None,
+        job=job,
+        duration_s=frames / fps,
+        width=width,
+        height=height,
+        captions=timeline.get("captions"),
+    )
 
 
 async def _target_of(session: AsyncSession, project_id: int, render_number: int | None) -> _Target:
@@ -328,6 +341,8 @@ def _feedback_on(text: str, newest: YouTubeDraft | None) -> user_feedback.Feedba
         key: newest.content.get(key, [] if key == "tags" else "")
         for key in ("title", "description", "hashtags", "tags")
     }
+    # The chapters and the sources are added by a program, so the model is shown only its text.
+    previous["description"] = writer.without_added_blocks(str(previous["description"]))
     return user_feedback.Feedback(text=note, previous=previous, base_version=newest.version)
 
 
@@ -431,6 +446,23 @@ async def _start_thumbnail(session: AsyncSession, project: Project) -> str | Non
     return None
 
 
+# --- The chapters ----------------------------------------------------------------------------
+
+
+def _chapter_lines(project: Project, target: _Target, short: bool) -> list[dict[str, Any]]:
+    """The numbered spoken sentences the chapters are chosen from, or `[]` when the video gets no
+    chapters: only an explainer has them, a Short has none, the video must be at least
+    `MIN_VIDEO_S` long, and its caption track must be readable with enough sentences.
+    """
+    duration = target.duration_s
+    if not explainer.is_explainer(project) or short or duration is None:
+        return []
+    if duration < chapters_writer.MIN_VIDEO_S:
+        return []
+    lines = chapters_writer.timed_lines(target.captions)
+    return lines if len(lines) >= chapters_writer.CHAPTERS_MIN else []
+
+
 # --- Starting a run --------------------------------------------------------------------------
 
 
@@ -453,6 +485,7 @@ async def _queue_draft(
     script = project.script_text or ""
     scenes = await _scenes_row(session, project_id)
     cast = await thumbnail_concepts.cast_options(session, project)
+    short = writer.is_short(target.width, target.height, target.duration_s)
     context = writer.context_for_model(
         bible.content,
         script,
@@ -461,7 +494,7 @@ async def _queue_draft(
         kind=project.kind,
         orientation=project.orientation,
         duration_s=target.duration_s,
-        short=writer.is_short(target.width, target.height, target.duration_s),
+        short=short,
     )
     review = await _evidence_review_row(session, project)
     job_input: dict[str, Any] = {
@@ -474,6 +507,14 @@ async def _queue_draft(
     }
     if note is not None:
         job_input["feedback"] = note.for_job()
+    lines = _chapter_lines(project, target, short)
+    if lines:
+        job_input["chapter_lines"] = lines
+        job_input["chapter_duration_s"] = target.duration_s
+        if note is not None:
+            earlier = await latest(session, project_id)
+            description = str(earlier.content.get("description", "")) if earlier else ""
+            job_input["previous_chapters"] = chapters_writer.titles_of(description)
     job, created = await store.create_job(
         session, project_id=project_id, type=JOB_TYPE, provider="llm", input=job_input
     )

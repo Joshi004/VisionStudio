@@ -6,7 +6,9 @@ Pure functions, no I/O.
 One call reads the whole script (the main source), the Story Bible, the scene titles, the names
 of the people in the video and what the render is (story or explainer, orientation, length,
 whether YouTube will show it as a Short), and answers the title,
-the description (without hashtags), the hashtags (lowercase) and the tags. The two declarations
+the description (without hashtags), a note on what the evidence was checked against (used by
+`with_sources`, never stored), the hashtags (lowercase) and the tags. The chapters are a second
+call (`youtube_chapters_writer`). The two declarations
 ("made for kids", "contains realistic AI content") are not drafted: the panel has fixed defaults
 (YTF-002).
 
@@ -51,9 +53,12 @@ REASONING_EFFORT: Final = "high"
 
 # What the description should aim for, so it stays far under the byte limit.
 DESCRIPTION_TARGET_CHARS: Final = 1500
+# The longest "sources_note" the model may write (a sentence or two about what was checked).
+SOURCES_NOTE_MAX_CHARS: Final = 300
 
 LIMIT_NAMES: Final = {
     "title": TITLE_MAX_CHARS,
+    "sources_note": SOURCES_NOTE_MAX_CHARS,
     "tags[]": TAG_MAX_CHARS,
 }
 
@@ -65,15 +70,15 @@ _LINK = re.compile(r"https?://", re.IGNORECASE)
 
 _RULES: Final = """\
 You write the YouTube upload text for one finished video. You are given the script of the \
-video, the Story Bible, the titles of its scenes, the names of the people in it, and facts about \
-the video. The owner reads and edits everything you write before it goes anywhere. Write in \
-English.
+video, the Story Bible, the titles of its scenes, the names of the people in it, facts about \
+the video and, when it has evidence, the sources it uses. The owner reads and edits everything \
+you write before it goes anywhere. Write in English.
 
 THE SOURCE
 - The script is the main source of what the video is about: the title and the description must \
 say what the script says. The Story Bible gives the genre, tone and style, the scene titles give \
-the order, and "people" gives the names of who is in the video. Do not invent anything that none \
-of them says.
+the order, and "people" gives the names of who is in the video (it is empty for an explainer, \
+whose presenter is never named). Do not invent anything that none of them says.
 
 THE TITLE
 - "title" is the title viewers see. It is at most {title_max} characters, with no "<" or ">". \
@@ -83,11 +88,28 @@ Do not put hashtags in the title.
 
 THE DESCRIPTION
 - "description" is plain text, with no "<" or ">" and no hashtags (they are added after it by a \
-program). It starts with one or two sentences that say what the video is about, because those \
-are what viewers see first, and then says a little more. Aim for under {description_target} \
-characters. Do not invent facts, links, credits, timestamps or calls to subscribe that the \
-inputs do not give. Do not write any link, any list of sources or a "Sources" heading: when the \
-video has evidence, a program adds the sources with their links after your text.
+program). It is the channel talking to a viewer, not a transcript and not a technical document.
+- Start with one or two fresh sentences, under about 150 characters, that tell the viewer what \
+they will learn or see, with the main subject in the first words. These are what viewers see \
+first. Never begin with, quote or closely paraphrase the opening lines of the script, and do not \
+copy sentences from it.
+- Then add one short paragraph that says a little more. Aim for under {description_target} \
+characters in all.
+- Write as the channel: use "we" for the video ("we compare", "we look at", "we check") and \
+"you" for the viewer. Never name the person who speaks or presents, and never write "the \
+presenter", "the narrator" or "in this video, <name> explains". Names of other people, \
+companies and products that the video is about are fine.
+- Keep a conversational tone with short sentences. No headings, no bullet lists, no all capitals.
+- Do not invent facts, links, credits or calls to subscribe that the inputs do not give. Do not \
+write timestamps or chapters, any link, any list of sources or a "Sources" heading: a program \
+adds the chapters and the sources after your text.
+
+THE SOURCES NOTE
+- "sources_note" is one or two sentences in the same "we" voice that say, in general, what we \
+checked the claims of the video against, for example "We checked the benchmark numbers against \
+both model cards and two independent test suites." It must not list claims one by one. It may \
+name a publisher that appears in SOURCES, never a link, and is at most {note_max} characters, \
+with no "<" or ">". When SOURCES is empty or missing, "sources_note" is an empty string.
 
 THE HASHTAGS
 - "hashtags" is a list of {min_tags} to {max_tags} words, each one word of letters, digits or \
@@ -112,10 +134,11 @@ and punchy, and keep the description brief.
 {length_rule}"""
 
 _SHAPE: Final = """{"title": "The Day the Lighthouse Went Dark", "description": "A keeper \
-finds the lamp has failed on the night of the worst storm in fifty years. A short story about \
-duty and fear.", "hashtags": ["shortstory", "lighthouse", "storm"], "tags": ["short story", \
-"lighthouse keeper", "storm at sea", "suspense", "duty and fear"]} (the values here only show \
-the form, never copy them)"""
+finds the lamp has failed on the night of the worst storm in fifty years. We follow the night \
+hour by hour, and you see what duty costs when you are afraid.", "sources_note": "We checked \
+the storm records against the coastguard's logs.", "hashtags": ["shortstory", "lighthouse", \
+"storm"], "tags": ["short story", "lighthouse keeper", "storm at sea", "suspense", "duty and \
+fear"]} (the values here only show the form, never copy them)"""
 
 
 def _instructions() -> str:
@@ -123,6 +146,7 @@ def _instructions() -> str:
         _RULES.format(
             title_max=TITLE_MAX_CHARS,
             description_target=DESCRIPTION_TARGET_CHARS,
+            note_max=SOURCES_NOTE_MAX_CHARS,
             min_tags=HASHTAGS_MIN_AI,
             max_tags=HASHTAGS_MAX,
             min_tag_count=TAGS_MIN_AI,
@@ -166,10 +190,18 @@ def context_for_model(
         "orientation": orientation,
         "duration_s": round(duration_s) if duration_s is not None else None,
         "is_short": short,
-        "people": people,
+        # An explainer's only person is its presenter, who is never named in the text.
+        "people": [] if kind == KIND_EXPLAINER else people,
         "scenes": scene_titles,
         "script": script_text.strip(),
     }
+
+
+def source_names(entries: object) -> list[dict[str, str]]:
+    """What the model is told about the sources: the publisher and title of each one, once, with
+    no address. Reads the entries stored on the job (`youtube_sources.entries_from_review`).
+    """
+    return youtube_sources.names(entries)
 
 
 def build_request(
@@ -177,12 +209,15 @@ def build_request(
     *,
     model: str,
     feedback: user_feedback.Feedback | None = None,
+    sources: object = None,
 ) -> dict[str, Any]:
-    """The exact request body of the one call. It is stored on the job."""
+    """The exact request body of the one call. It is stored on the job. `sources` are the
+    entries of the Sources section, of which the model sees only the publisher and title."""
     facts = {key: value for key, value in context.items() if key not in ("script", "scenes")}
     parts = [
         "THE VIDEO (JSON):\n" + json.dumps(facts, ensure_ascii=False, indent=1),
         "SCENE TITLES (JSON):\n" + json.dumps(context.get("scenes", []), ensure_ascii=False),
+        "SOURCES (JSON):\n" + json.dumps(source_names(sources), ensure_ascii=False),
         "SCRIPT:\n" + str(context.get("script", "")),
     ]
     if feedback is not None:
@@ -381,24 +416,87 @@ def check_content(answer: dict[str, Any], *, min_hashtags: int = HASHTAGS_MIN_AI
         maximum=TAGS_MAX_AI,
         max_chars=TAGS_MAX_CHARS_AI,
     )
-    return {"title": title, "description": description, "hashtags": hashtags, "tags": tags}
+    return {
+        "title": title,
+        "description": description,
+        "sources_note": _sources_note(answer.get("sources_note")),
+        "hashtags": hashtags,
+        "tags": tags,
+    }
+
+
+def _sources_note(value: object) -> str:
+    """The model's note on what was checked. Empty is allowed (a video with no evidence)."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError('The "sources_note" was not text.')
+    text = " ".join(value.split())
+    if len(text) > SOURCES_NOTE_MAX_CHARS:
+        raise ValueError(
+            f'The "sources_note" was {len(text)} characters; the most allowed is '
+            f"{SOURCES_NOTE_MAX_CHARS}."
+        )
+    if "<" in text or ">" in text:
+        raise ValueError('The "sources_note" cannot hold the characters < or >.')
+    if _has_bad_control(text):
+        raise ValueError('The "sources_note" has a character that cannot be sent to YouTube.')
+    if _LINK.search(text):
+        raise ValueError('The "sources_note" holds a link. Do not write links.')
+    return text
+
+
+# The headings of the two blocks a program adds after the model's description.
+_ADDED_HEADINGS: Final = ("\n\nChapters\n", "\n\nSources\n")
+
+
+def without_added_blocks(description: str) -> str:
+    """The description as the model wrote it: cut where the Chapters or the Sources block that
+    a program added begins. This is what the model is shown again as the earlier draft."""
+    cuts = [at for at in (description.find(h) for h in _ADDED_HEADINGS) if at >= 0]
+    return description[: min(cuts)].rstrip() if cuts else description
+
+
+def with_chapters(content: dict[str, Any], chapters_block: str) -> dict[str, Any]:
+    """The content with the Chapters block added to the end of its description. `content` is
+    returned as it is when the block is empty or the result would break a check (YouTube's
+    byte limit with the hashtags counted).
+    """
+    if not chapters_block:
+        return content
+    joined = f"{content['description']}\n\n{chapters_block}"
+    try:
+        check_fields(
+            content["title"],
+            joined,
+            content["hashtags"],
+            min_hashtags=0,
+            allow_empty_description=False,
+        )
+    except ValueError:
+        return content
+    return {**content, "description": joined}
 
 
 def with_sources(content: dict[str, Any], entries: object) -> dict[str, Any]:
     """The content with the Sources section added to the end of its description (before the
-    hashtags, which are added when the text is sent). The section takes only the bytes that are
-    left under YouTube's limit with the hashtags counted. `content` is returned as it is when there
+    hashtags, which are added when the text is sent): the heading, the model's note on what was
+    checked, and the list of sources. The section takes only the bytes that are left under
+    YouTube's limit with the hashtags counted. The note is not stored: the returned content has
+    only `{title, description, hashtags, tags}`. The description is returned as it is when there
     are no entries or nothing fits. Raises ValueError if the result breaks a check, which the
     budget should make impossible.
     """
-    description = content["description"]
-    hashtags = content["hashtags"]
+    note = content.get("sources_note", "")
+    stored = {key: value for key, value in content.items() if key != "sources_note"}
+    description = stored["description"]
+    hashtags = stored["hashtags"]
     used = utf8_bytes(description_with_hashtags(description, hashtags))
     # Two bytes for the empty line between the description and the section.
     room = DESCRIPTION_MAX_BYTES - used - 2
-    section = youtube_sources.block(entries, room)
+    section = youtube_sources.block(entries, room, note if isinstance(note, str) else "")
     if not section:
-        return content
+        return stored
     joined = f"{description}\n\n{section}"
-    check_fields(content["title"], joined, hashtags, min_hashtags=0, allow_empty_description=False)
-    return {**content, "description": joined}
+    check_fields(stored["title"], joined, hashtags, min_hashtags=0, allow_empty_description=False)
+    return {**stored, "description": joined}

@@ -1,5 +1,7 @@
-"""The "Sources" section of the YouTube description: a link for every piece of evidence the owner
-accepted, with the words of the script it is evidence for.
+"""The "Sources" section of the YouTube description: a short note on what was checked, then a
+plain list of the sources the owner accepted, each address once (publisher, title, link). The
+claims they back and how each one relates to a claim stay in the stored entries but are not
+written in the description.
 
 The section is built by code from stored data only. The model never writes a link, a publisher or a
 title. Two steps, both pure (no I/O):
@@ -11,7 +13,8 @@ title. Two steps, both pure (no I/O):
         "pieces": [{"publisher", "title", "published", "page", "relation", "url",
                     "archive_url"}]}]
 
-- `block` turns the entries into the text, within the number of UTF-8 bytes there is room for.
+- `block` turns the entries and the model's note into the text, within the number of UTF-8 bytes
+  there is room for. `names` gives the model the publisher and title of each source.
 
 The agent's text is untrusted (EV-7). Everything that is shown is cleaned here: no `<` or `>`
 (YouTube refuses them), no control characters, and only http or https addresses.
@@ -166,60 +169,65 @@ def _read_piece(piece: object) -> dict[str, Any] | None:
 
 
 def _piece_line(piece: dict[str, Any]) -> str:
-    """`- Publisher, "Title" (PDF, page 12, 2025-10-08, partly supports): https://...`"""
+    """`- Publisher, "Title": https://...` (a piece with neither is `- Source: https://...`)."""
     name = ", ".join(
         part
         for part in (piece["publisher"], f'"{piece["title"]}"' if piece["title"] else None)
         if part
     )
-    details: list[str] = []
-    if piece["pdf"]:
-        details.append("PDF")
-    if piece["page"] is not None:
-        details.append(f"page {piece['page']}")
-    if piece["published"]:
-        details.append(piece["published"])
-    if piece["relation"]:
-        details.append(_RELATION_LABELS[piece["relation"]])
-    head = name or "Source"
-    if details:
-        head += f" ({', '.join(details)})"
-    line = f"- {head}: {piece['url']}"
-    if piece["archive_url"]:
-        line += f" (archived: {piece['archive_url']})"
-    return line
+    return f"- {name or 'Source'}: {piece['url']}"
 
 
-def _chunks(entries: object) -> list[tuple[str, int]]:
-    """One text per claim, with the number of pieces in it."""
-    chunks: list[tuple[str, int]] = []
+def _unique_pieces(entries: object) -> list[dict[str, Any]]:
+    """The usable pieces of every claim as one list, in the review's order, each address once."""
+    pieces: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for entry in entries if isinstance(entries, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        claim = _clean(entry.get("claim"), CLAIM_MAX_CHARS)
-        raw = entry.get("pieces")
-        read = [_read_piece(piece) for piece in raw] if isinstance(raw, list) else []
-        pieces = [piece for piece in read if piece is not None]
-        if claim is None or not pieces:
-            continue
-        lines = [f'"{claim}"'] + [_piece_line(piece) for piece in pieces]
-        chunks.append(("\n".join(lines), len(pieces)))
-    return chunks
+        raw = entry.get("pieces") if isinstance(entry, dict) else None
+        for item in raw if isinstance(raw, list) else []:
+            piece = _read_piece(item)
+            if piece is None or piece["url"] in seen:
+                continue
+            seen.add(piece["url"])
+            pieces.append(piece)
+    return pieces
 
 
-def block(entries: object, budget_bytes: int) -> str:
-    """The Sources section, or "" when there is nothing to list or not even the first claim fits in
-    `budget_bytes` (UTF-8 bytes). Claims are added whole, in order. When some are left out the
-    section ends with a sentence that says how many sources are not listed.
+def names(entries: object) -> list[dict[str, str]]:
+    """The publisher and title of each source, once, without an address: what the model is told
+    so that its note on the sources is about the sources the video really has.
     """
-    chunks = _chunks(entries)
-    for count in range(len(chunks), 0, -1):
-        parts = [HEADING] + [text for text, _ in chunks[:count]]
-        left_out = sum(pieces for _, pieces in chunks[count:])
-        if left_out:
-            noun = "source is" if left_out == 1 else "sources are"
-            parts.append(f"{left_out} more {noun} not listed here for length.")
-        text = "\n\n".join(parts)
-        if _utf8_bytes(text) <= budget_bytes:
-            return text
+    found: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for piece in _unique_pieces(entries):
+        key = (piece["publisher"] or "", piece["title"] or "")
+        if key == ("", "") or key in seen:
+            continue
+        seen.add(key)
+        found.append({"publisher": key[0], "title": key[1]})
+    return found
+
+
+def block(entries: object, budget_bytes: int, note: str = "") -> str:
+    """The Sources section: the heading, the `note` (a sentence or two on what was checked, may be
+    empty) and one line for every source, each address once. "" when there is no source to list
+    or not even the first one fits in `budget_bytes` (UTF-8 bytes). Sources are added in order;
+    when some are left out the section ends with a sentence that says how many are not listed.
+    When the note is what stops it from fitting, the note is left out.
+    """
+    pieces = _unique_pieces(entries)
+    clean_note = _clean(note, 400) or ""
+    for with_note in (True, False) if clean_note else (False,):
+        for count in range(len(pieces), 0, -1):
+            parts = [HEADING]
+            if with_note:
+                parts.append(clean_note)
+            parts.append("\n".join(_piece_line(piece) for piece in pieces[:count]))
+            left_out = len(pieces) - count
+            if left_out:
+                noun = "source is" if left_out == 1 else "sources are"
+                parts.append(f"{left_out} more {noun} not listed here for length.")
+            text = parts[0] + "\n" + "\n\n".join(parts[1:])
+            if _utf8_bytes(text) <= budget_bytes:
+                return text
     return ""

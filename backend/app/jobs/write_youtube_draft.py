@@ -8,7 +8,14 @@ render still being made, when the draft was started with it, YTF-004), `context`
 told about the video), `saved_inputs` (the provenance the version will carry) and the owner's note
 with the earlier draft when there is one.
 
-There is one call. Its request is built in `services/youtube_draft_writer.py`, and its answer is
+The first call writes the title, the description, the hashtags and the tags. For an explainer
+that is long enough (`chapter_lines` on the job input), a second call chooses the chapters from
+the numbered spoken sentences (`services/youtube_chapters_writer.py`); code turns the sentence
+numbers into exact times. A chapters call that fails does not fail the job: the draft is saved
+without chapters and `output.chapters_failure` says why. Code then adds the Chapters block and
+the Sources section to the description.
+
+The request of the first call is built in `services/youtube_draft_writer.py`, and its answer is
 checked there: an answer that breaks a check (a title over 100 characters, a hashtag with a space,
 a description over YouTube's limit) makes the answer unusable, and the corrected retry of
 `jobs/llm_call.py` tells the model what was wrong. The result is saved as the project's next
@@ -34,6 +41,7 @@ from app.jobs import llm_call, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import llm_target, user_feedback, youtube_draft
+from app.services import youtube_chapters_writer as chapters_writer
 from app.services import youtube_draft_writer as writer
 from app.services.llm_target import STORY_MODEL_KEY
 
@@ -60,10 +68,33 @@ class _Task:
     # The accepted evidence for the Sources section (`youtube_sources`). Empty for a job queued
     # before the section existed, or for a project without evidence.
     sources: list[Any]
+    # The numbered spoken sentences the chapters are chosen from, the video's length, and the
+    # titles of the chapters of the draft a note is about. Empty for a video with no chapters
+    # (a story, a Short, a short video) and for a job queued before chapters existed.
+    chapter_lines: list[dict[str, Any]]
+    duration_s: float | None
+    previous_chapters: list[str]
 
 
 def _is_id(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _read_chapter_lines(value: object) -> list[dict[str, Any]]:
+    """The job's `chapter_lines` as they are, or `[]` when they are missing or not well formed
+    (the draft is then written without chapters)."""
+    if not isinstance(value, list):
+        return []
+    for position, line in enumerate(value, start=1):
+        if (
+            not isinstance(line, dict)
+            or line.get("n") != position
+            or not _is_id(line.get("start_ms"))
+            or not isinstance(line.get("text"), str)
+            or not isinstance(line.get("clip"), bool)
+        ):
+            return []
+    return value
 
 
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
@@ -86,12 +117,23 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     sources = job_input.get("sources", [])
     if not isinstance(sources, list):
         return None
+    duration = job_input.get("chapter_duration_s")
+    chapter_lines = _read_chapter_lines(job_input.get("chapter_lines"))
+    if isinstance(duration, bool) or not isinstance(duration, int | float) or duration <= 0:
+        chapter_lines, duration = [], None
+    earlier = job_input.get("previous_chapters")
+    previous_chapters = (
+        [title for title in earlier if isinstance(title, str)] if isinstance(earlier, list) else []
+    )
     return _Task(
         render_id=render_id,
         context=context,
         saved_inputs=saved_inputs,
         feedback=feedback,
         sources=sources,
+        chapter_lines=chapter_lines,
+        duration_s=float(duration) if duration is not None else None,
+        previous_chapters=previous_chapters,
     )
 
 
@@ -107,6 +149,22 @@ def _draft_reader() -> llm_call.ReadAnswer:
         except ValueError as exc:
             return str(exc), None
         return None, content
+
+    return read
+
+
+def _chapters_reader(lines: list[dict[str, Any]], duration_s: float) -> llm_call.ReadAnswer:
+    """Reads the model's chapters: the stored list, or why the answer cannot be used."""
+
+    def read(result: llm.ChatResult) -> tuple[str | None, list[dict[str, Any]] | None]:
+        if result.finish_reason == "length":
+            return _TOO_LONG, None
+        try:
+            answer = chapters_writer.parse_answer(result.content)
+            chapters = chapters_writer.check_chapters(answer, lines, duration_s)
+        except ValueError as exc:
+            return str(exc), None
+        return None, chapters
 
     return read
 
@@ -135,7 +193,9 @@ class WriteYouTubeDraftHandler(JobHandler):
             return
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = writer.build_request(task.context, model=target.model, feedback=task.feedback)
+        body = writer.build_request(
+            task.context, model=target.model, feedback=task.feedback, sources=task.sources
+        )
         job_input.update(
             server_url=docker_mapped(target.base_url),
             endpoint=llm_target.endpoint(target),
@@ -160,6 +220,24 @@ class WriteYouTubeDraftHandler(JobHandler):
         if content is None:
             await self._fail(job_id, f"The YouTube draft could not be written: {outcome.failure}")
             return
+        calls: dict[str, Any] = {"draft": outcome.record()}
+        usage: dict[str, int] = dict(outcome.usage or {})
+        chapters_failure: str | None = None
+        if task.chapter_lines and task.duration_s is not None:
+            chapters_outcome = await self._ask_chapters(
+                job_id, target, task, task.duration_s, job_input, calls
+            )
+            calls["chapters"] = chapters_outcome.record()
+            for key, count in (chapters_outcome.usage or {}).items():
+                usage[key] = usage.get(key, 0) + count
+            if chapters_outcome.value is not None:
+                content = writer.with_chapters(
+                    content, chapters_writer.block(chapters_outcome.value, task.duration_s)
+                )
+            else:
+                # The draft is still good: it goes out without chapters, and the owner can ask
+                # again. The reason is on the job.
+                chapters_failure = chapters_outcome.failure
         try:
             content = writer.with_sources(content, task.sources)
         except ValueError as exc:
@@ -177,10 +255,11 @@ class WriteYouTubeDraftHandler(JobHandler):
                 content=content,
             )
             output = {
-                "calls": {"draft": outcome.record()},
-                "usage": outcome.usage or {},
+                "calls": calls,
+                "usage": usage,
                 "youtube_draft_id": row.id,
                 "version": row.version,
+                "chapters_failure": chapters_failure,
                 "seconds": round(time.monotonic() - started, 1),
             }
             if not await store.finish_job(session, job_id, output):
@@ -194,7 +273,42 @@ class WriteYouTubeDraftHandler(JobHandler):
             job_id,
             row.version,
             project_id,
-            outcome.usage,
+            usage,
+        )
+
+    async def _ask_chapters(
+        self,
+        job_id: int,
+        target: llm_target.LlmTarget,
+        task: _Task,
+        duration_s: float,
+        job_input: dict[str, Any],
+        calls: dict[str, Any],
+    ) -> llm_call.Outcome:
+        """The second call: the chapters. Its request is recorded on the job before it is sent,
+        and the paid answer of the first call is kept on the job while this one runs."""
+        body = chapters_writer.build_request(
+            task.chapter_lines,
+            duration_s,
+            model=target.model,
+            feedback=task.feedback,
+            previous_titles=task.previous_chapters,
+        )
+        sent = dict(job_input["calls_sent"])
+        sent["chapters"] = {
+            "instructions_sha256": llm_call.instructions_sha256(body),
+            "request": body,
+        }
+        job_input["calls_sent"] = sent
+        async with SessionLocal() as session:
+            await store.update_input(session, job_id, job_input)
+        return await llm_call.ask_model(
+            job_id,
+            target,
+            body,
+            _chapters_reader(task.chapter_lines, duration_s),
+            timeout_s=REQUEST_TIMEOUT_S,
+            keep={"calls": dict(calls)},
         )
 
     # --- Small helpers ------------------------------------------------------------------
