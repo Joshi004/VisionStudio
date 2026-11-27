@@ -147,6 +147,8 @@ class _Context:
     overlays: dict[tuple[str, str], shot_graphics.ShotEntry]
     # The evidence beside the graphic overlays now (OVL-007), by `(scene id, segment id)`.
     splits: dict[tuple[str, str], evidence_clips.SplitClipEntry]
+    # The sound effects the next render would use (EXM-007), or None for a render without them.
+    sound_effects: story_render_plan.SoundEffectSource | None = None
 
 
 async def _context(session: AsyncSession, project: Project, *, place: bool) -> _Context:
@@ -183,6 +185,7 @@ async def _context(session: AsyncSession, project: Project, *, place: bool) -> _
         sources=sources,
         overlays=await story_renders.overlay_videos(session, project),
         splits=await story_renders.split_clips_now(session, project),
+        sound_effects=await story_renders.sound_effect_gate(session, project),
     )
 
 
@@ -223,6 +226,7 @@ def _plan_scene(context: _Context, scene: story_render_plan.SceneSource) -> _Sce
             captions=captions,
             captions_burned=story_renders.captions_burned(project),
             callouts=callouts,
+            sound_effects=context.sound_effects,
         )
 
     source = context.music.source
@@ -422,6 +426,7 @@ def _scene_reasons(
     reasons.extend(story_renders.overlay_reasons(recorded, context.overlays, str(entry.item["id"])))
     reasons.extend(story_renders.split_reasons(recorded, context.splits, str(entry.item["id"])))
     reasons.extend(_music_reasons(recorded, context))
+    reasons.extend(story_renders.sound_effect_reasons(recorded, context.sound_effects))
     reasons.extend(story_renders.caption_reasons(recorded, context.project))
     reasons.extend(
         story_renders.callout_reasons(

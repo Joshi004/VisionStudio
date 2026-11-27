@@ -334,6 +334,8 @@ PLACING_VOICE: Final = "placing the voice"
 # MUSIC-012: the music layers, the mix of everything into the pre-master, its loudness, and the
 # loudness of the finished video. `preview_music_mix` uses the same phases.
 PLACING_MUSIC_LAYERS: Final = "placing the music layers"
+# EXM-007: only for a project with sound effects.
+PLACING_SOUND_EFFECTS: Final = "placing the sound effects"
 MIXING_SOUND: Final = "mixing the sound"
 MEASURING_MIX: Final = "measuring the mix"
 # EXPLAINER-008, 010: only for an explainer with burned captions or callouts, before the final

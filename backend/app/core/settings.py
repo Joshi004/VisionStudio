@@ -147,6 +147,8 @@ MUSIC_CUE_PUSHBACK_ROUNDS_KEY = "music_cue_pushback_rounds"
 MUSIC_TAKE_MAX_RETRIES_KEY = "music_take_max_retries"
 # How many takes (each with its own seed) one prompt of a project's sound effect gets (EXM-006).
 SOUND_EFFECT_TAKES_KEY = "sound_effect_takes"
+# How far under the voice a project's sound effects play in the render (EXM-007), in dB.
+SOUND_EFFECT_LEVEL_KEY = "sound_effect_level_db"
 # How exact music placement is (MUSIC-011, QM-11). Whole milliseconds and percent, because
 # settings are whole numbers.
 MUSIC_PLACE_TIGHT_KEY = "music_place_tight_ms"
@@ -946,6 +948,21 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=3,
         min_value=1,
         max_value=6,
+    ),
+    SettingSpec(
+        key=SOUND_EFFECT_LEVEL_KEY,
+        group=GROUP_MUSIC,
+        label="Sound effects: level under the voice (dB)",
+        help=(
+            "How loud the graphic sound and the evidence sound of a continuous explainer play "
+            "in the render, compared with the voice. A negative number of decibels: -14 is "
+            "well under the voice, -6 is close to it. It applies the next time the video is "
+            "rendered."
+        ),
+        value_type="integer",
+        default=-14,
+        min_value=-30,
+        max_value=-3,
     ),
     SettingSpec(
         key=MUSIC_PLACE_TIGHT_KEY,

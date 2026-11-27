@@ -369,7 +369,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXM-007 — Sound effects in the render
 
-**Status:** Not started
+**Status:** Code done, live run pending
 
 **Objective.** Play the project's graphic sound at every graphic shot and its evidence sound at every evidence shot and card, subtly, placed by code.
 
@@ -407,9 +407,25 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Render plan entries and rules
-- [ ] Render job mix and the refusal for a missing sound
-- [ ] Docs, standard checks
+- [x] Render plan entries and rules
+- [x] Render job mix and the refusal for a missing sound
+- [x] Docs, standard checks
+
+**Completion notes.** Code done 2026-11-27, **live run pending** (the running containers still serve the old code until `docker compose up --build -d`). No migration. Nothing here calls a model.
+
+- **Planning decided.**
+  - *Timeline:* a new optional top-level key `sound_effects`, written only when `sound_effects.wanted(project)`; the version stays 6. With the switch off there is no key and no new constant, so the timeline and the FFmpeg commands are as before.
+  - *Moments:* the first frame of every graphic shot **and graphic overlay** (decided with the owner: overlays were added to the project after this phase was written) gets the graphic sound; the first frame of every evidence shot and evidence card gets the evidence sound. A placeholder gets none. A graphic or evidence shot that directly follows the other gets its own sound, unless the spacing rule leaves it out; on the same frame the evidence sound goes first.
+  - *Level and spacing (starting values, to tune by ear):* setting `sound_effect_level_db` (-14, from -30 to -3): gain is the narration target loudness plus the level minus the sound's measured loudness, boosted by at most `MAX_BOOST_DB`. Spacing `SOUND_EFFECT_MIN_SPACING_S` 1.5 s between the first frames of two kept sounds, fade `SOUND_EFFECT_FADE_S` 5 ms at each end.
+  - *Sound bites:* a sound whose played span overlaps any sound bite span is left out (stricter than "inside": the tail of a whoosh never runs into a real person's clip). Every left-out moment is listed in `skipped` with its reason.
+  - *Scene renders:* they play the sounds too (decided with the owner). A missing sound gives the warning `sound_effect_missing` there, not a refusal.
+- **Plan.** `story_render_plan`: `SoundEffectSource`, `SoundEffectTakeSource` (peak, length and loudness read from the take's check facts), `_sound_moments`, `_sound_effects_entry`, `sound_effect_constants`; `build_plan`, `build_scene_plan` and `_build` take `sound_effects`; `_shift_timeline` moves the entries. Each entry's `start_sample` is the moment minus the sound's loudest moment; a head that would start before the render (or the scene's window) is cut with `in_sample`.
+- **Gate.** `render_sound_effects.gate` reads `sound_effects.state` (reads only, no settling) and returns the selected take of each role, or `None` for a role with no selected take. A selected take without a measured length or loudest moment gets a `problem` and counts as missing. `story_renders.sound_effect_gate` imports it lazily, as `music_gate` does.
+- **Refusal.** A role that a moment needs but that has no selected take, no file or no measurement refuses a full render (the message names the sound and says to make it in the Sound effects step or switch sound effects off). A role no moment needs does not block.
+- **Out of date.** `story_renders.sound_effect_reasons`, used by story and scene renders: the switch turned on or off, another selected take of a role, a changed level setting. This is the reason EXM-006 moved here. A render of a project that already had the switch on has no key, so it reads as out of date once.
+- **Render job.** `render_story`: `SoundEffect`, `SoundEffects`, `_parse_sound_effects` (a missing key means none, a malformed one is refused), `probe_sound_effect`, `build_sound_effects_lane` (one `music_lane_args` WAV with gain and fades only; nothing ducks or dips it), mixed in with the other lanes by `mix_sound`; phase `placing the sound effects`; `levels.sound_effects` on the record. The scene job inherits all of it.
+- **Checked.** A script with stand-in data (not kept) against a copy of `HEAD`: a story's timeline (switch off) is byte-for-byte the same. With the switch on: the graphic and evidence sounds land with their loudest moment on the first frame of a graphic shot, an evidence shot, a card and an overlay; the gain is as computed; a card and an overlay one second after another sound are left out; a graphic whose sound would overlap a sound bite is left out; a missing take or file refuses a full render; a scene render gives a warning and its entries equal the full render's shifted by the scene start; a head that would start before the video is cut. `_parse_sound_effects` was run on the plan's output and refuses bad entries; `music_lane_args` builds the lane graph. `sound_effect_reasons` gives the right sentences. `ruff check` and `ruff format` pass.
+- **Not checked.** `mypy` is not installed in the project's environment. `render_story`'s `_render` was not run (no containers, no FFmpeg run of the new lane). The owner's listen is open: after a rebuild, render project 94 with sound effects on and judge them subtle and on time, then tune `sound_effect_level_db`, the spacing and the fade by ear.
 
 ### EXM-008 — One explainer end to end (owner, not done)
 
@@ -449,5 +465,5 @@ Make a new continuous explainer (for example a short version of project 94's scr
 | EXM-004 | Code done, live run pending | Explainer plan (score and silence only, `posts`, 120 s cue limit, four explainer critic lenses), cue detail without hits (`swell_in_gaps` from posts), palette in every wording, explainer audit and rewrite. Flag `explainer: true` in the four job inputs. No migration. |
 | EXM-005 | Code done, live run pending | Explainer mix: one duck setting (-22 dB) held through gaps under 4 s, a partial rise (+8 dB, setting) inside each planned post, optional `rises` key per sound in the render timeline (version stays 6). Settings `explainer_music_duck_db`, `explainer_music_post_rise_db`. No migration. |
 | EXM-006 | Code done, live run pending | Project switch `sound_effects` (migration `0104`), table `sound_effect_take`, job `write_sound_effect`, setting `sound_effect_takes`, step `sound_effects` with a target per role, check and first-passing selection, owner actions and panel, deleted with the project. The render-out-of-date reason for the switch moves to EXM-007. |
-| EXM-007 | Not started | |
+| EXM-007 | Code done, live run pending | Sound effects in the render: optional timeline key `sound_effects` (version stays 6), graphic sound on graphic shots and overlays, evidence sound on evidence shots and cards, loudest moment on the first frame, skipped inside or near a sound bite and too close to the previous one, one extra lane in the render job, refusal for a missing sound (a warning in a scene render), out-of-date reasons. Setting `sound_effect_level_db`. No migration. |
 | EXM-008 | Not started | Owner end-to-end check. |

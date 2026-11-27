@@ -84,6 +84,15 @@ size), and the optional key `split_evidence` holds the evidence side: each entry
 opaque video (the evidence drawn in its half, the other half empty) laid at (0, 0) under the
 overlays. The version stays 6.
 
+**Sound effects** (EXM-007). A project with `sound_effects` on and a selected take for its graphic
+and evidence sounds (`SoundEffectSource`) may have the optional key `sound_effects`: the graphic
+sound at the first frame of every graphic shot and graphic overlay, the evidence sound at the first
+frame of every evidence shot and evidence card, each placed so that the sound's loudest moment
+lands on that frame. Code places them, never a model. A sound that would play over a sound bite,
+or that starts less than `SOUND_EFFECT_MIN_SPACING_S` after the one before, is left out (listed in
+`skipped`). The render job mixes them as one more lane that nothing ducks. A timeline without the
+key renders as before, so the version stays 6.
+
 `master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
@@ -135,6 +144,15 @@ MUSIC_GAP_HOLD_S: Final = 4.0
 EXPLAINER_MUSIC_HOLD_GAP_S: Final = 4.0
 # The ramps of a planned post's rise, shortened to half the pause when the pause is shorter.
 EXPLAINER_POST_RAMP_S: Final = 0.15
+# --- The sound effects of a continuous explainer (EXM-007). Starting values, to be tuned. ------
+# A sound effect that would start less than this long after the one before is left out.
+SOUND_EFFECT_MIN_SPACING_S: Final = 1.5
+# The fade at each end of a sound effect, so it never clicks.
+SOUND_EFFECT_FADE_S: Final = 0.005
+# The take's length is a rounded measurement: the last bit is never played.
+SOUND_EFFECT_TAIL_MARGIN_S: Final = 0.01
+ROLE_GRAPHIC: Final = "graphic"
+ROLE_EVIDENCE: Final = "evidence"
 # A short dip around a sound the scene depends on: from DIP_BEFORE_S before to DIP_AFTER_S after.
 DIP_DB: Final = -6.0
 DIP_BEFORE_S: Final = 0.15
@@ -202,6 +220,8 @@ SHOT_PLACEHOLDER: Final = "shot_placeholder"
 SOUNDBITE_CAPTIONS_DROPPED: Final = "soundbite_captions_dropped"
 # Too many sound bites switch the music off for the length of the story (SB-009).
 SOUNDBITE_MUSIC_DROPS: Final = "soundbite_music_drops"
+# A sound effect (EXM-007) has no selected take or no file: a scene render leaves it out.
+SOUND_EFFECT_MISSING: Final = "sound_effect_missing"
 DIALOGUE_NOT_HEARD: Final = "dialogue_not_heard"
 SCENE_START_UNKNOWN: Final = "scene_start_unknown"
 
@@ -557,6 +577,35 @@ class MusicSource:
 
 
 @dataclass(frozen=True)
+class SoundEffectTakeSource:
+    """The selected take of one sound effect (EXM-006), with what its measurement says."""
+
+    role: str
+    take_id: int
+    path: str
+    file_exists: bool
+    # Where the loudest moment is in the sound, and how long the sound is, in seconds.
+    peak_s: float
+    length_s: float
+    # The integrated loudness of the sound, or None when it could not be measured.
+    lufs: float | None = None
+    # Set when the take cannot be placed (for example it was not measured): a sentence for the
+    # owner. The render then refuses, or leaves the sound out of a scene render.
+    problem: str | None = None
+
+
+@dataclass(frozen=True)
+class SoundEffectSource:
+    """The sound effects a render of a project with the switch on is made with (EXM-007):
+    `level_db` is how far under the voice they play, and `takes` has one entry for each sound the
+    project needs, `None` while it has no selected take.
+    """
+
+    level_db: int
+    takes: dict[str, SoundEffectTakeSource | None]
+
+
+@dataclass(frozen=True)
 class RenderPlan:
     timeline: dict[str, Any]
     warnings: list[dict[str, Any]] = field(default_factory=list)
@@ -753,6 +802,171 @@ def bite_constants() -> dict[str, float]:
         "bite_drop_db": BITE_DROP_DB,
         "bite_drop_attack_s": BITE_DROP_ATTACK_S,
         "bite_drop_release_s": BITE_DROP_RELEASE_S,
+    }
+
+
+def sound_effect_constants() -> dict[str, float]:
+    """The values of the sound effects (EXM-007), recorded only on a timeline that has the key,
+    so every other timeline's recorded constants do not change."""
+    return {
+        "sound_effect_min_spacing_s": SOUND_EFFECT_MIN_SPACING_S,
+        "sound_effect_fade_s": SOUND_EFFECT_FADE_S,
+    }
+
+
+# One moment a sound effect may be placed at: its first frame (on the story), a rank that puts the
+# evidence sound before the graphic sound on the same frame, the role, the kind of moment, its
+# reference and its scene.
+_SoundMoment = tuple[int, int, str, str, str, str]
+
+
+def _sound_moments(
+    shots: list[dict[str, Any]],
+    card_entries: list[dict[str, Any]],
+    overlay_entries: list[dict[str, Any]],
+) -> list[_SoundMoment]:
+    """Where the graphic and evidence sounds may play (EXM-007): the first frame of every graphic
+    shot and graphic overlay, and of every evidence shot and evidence card. A placeholder shot has
+    neither key, so it has no moment.
+    """
+    moments: list[_SoundMoment] = []
+    for shot in shots:
+        ref = f"{shot['scene_id']}/{shot['shot_id']}"
+        if isinstance(shot.get("evidence"), dict):
+            moments.append(
+                (shot["start_frame"], 0, ROLE_EVIDENCE, "evidence_shot", ref, shot["scene_id"])
+            )
+        elif isinstance(shot.get("graphic"), dict):
+            moments.append(
+                (shot["start_frame"], 1, ROLE_GRAPHIC, "graphic_shot", ref, shot["scene_id"])
+            )
+    moments.extend(
+        (card["start_frame"], 0, ROLE_EVIDENCE, "evidence_card", card["id"], card["scene_id"])
+        for card in card_entries
+    )
+    moments.extend(
+        (
+            overlay["start_frame"],
+            1,
+            ROLE_GRAPHIC,
+            "graphic_overlay",
+            overlay["id"],
+            overlay["scene_id"],
+        )
+        for overlay in overlay_entries
+    )
+    return sorted(moments)
+
+
+def _sound_effects_entry(
+    source: SoundEffectSource,
+    moments: list[_SoundMoment],
+    *,
+    bite_spans: Sequence[tuple[int, int]],
+    fps: int,
+    window_start: int,
+    window_end: int,
+    placeholders: bool,
+    warnings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The `sound_effects` part of the timeline (EXM-007). `window_start` and `window_end` are the
+    samples of the story this render covers (the whole story, or one scene's window); a sound
+    whose start falls before the window is cut at its edge. A moment whose role has no usable take
+    refuses a full render and is left out of a scene render with a warning.
+    """
+    rate = render_commands.SAMPLE_RATE
+    usable: dict[str, SoundEffectTakeSource] = {}
+    problems: dict[str, str] = {}
+    wanted_roles = {moment[2] for moment in moments if moment[2] in source.takes}
+    for role in sorted(wanted_roles):
+        take = source.takes[role]
+        if take is None:
+            problems[role] = f"The {role} sound effect has no selected take yet."
+        elif not take.file_exists:
+            problems[role] = f"The file of the {role} sound effect is missing. Make it again."
+        elif take.problem is not None:
+            problems[role] = take.problem
+        else:
+            usable[role] = take
+    if problems:
+        way_out = (
+            " Make it in the Sound effects step, or switch sound effects off in the project's "
+            "settings."
+        )
+        if not placeholders:
+            raise RenderPlanError(" ".join(problems.values()) + way_out)
+        warnings.extend(
+            {
+                "code": SOUND_EFFECT_MISSING,
+                "scene_id": None,
+                "shot_id": None,
+                "message": f"{message} Its moments in this render have no sound.",
+            }
+            for message in problems.values()
+        )
+
+    samples_per_ms = rate // _MS_PER_S
+    entries: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    last_moment_s: float | None = None
+    for frame, _rank, role, kind, ref, scene_id in moments:
+        take = usable.get(role)
+        if take is None:
+            continue
+        ident = f"{kind}:{ref}"
+        moment = render_commands.sample_count(frame, fps)
+        start = moment - round(take.peak_s * rate)
+        in_sample = 0
+        if start < window_start:
+            in_sample = window_start - start
+            start = window_start
+        take_samples = max(0, math.floor((take.length_s - SOUND_EFFECT_TAIL_MARGIN_S) * rate))
+        length = min(take_samples - in_sample, window_end - start)
+        if length < 1:
+            skipped.append({"id": ident, "reason": "outside the video"})
+            continue
+        end = start + length
+        if any(
+            bite_start * samples_per_ms < end and bite_end * samples_per_ms > start
+            for bite_start, bite_end in bite_spans
+        ):
+            skipped.append({"id": ident, "reason": "inside a sound bite"})
+            continue
+        moment_s = moment / rate
+        if last_moment_s is not None and moment_s - last_moment_s < SOUND_EFFECT_MIN_SPACING_S:
+            skipped.append({"id": ident, "reason": "too close to the previous sound effect"})
+            continue
+        last_moment_s = moment_s
+        gain = (
+            float(source.level_db)
+            if take.lufs is None
+            else min(MAX_BOOST_DB, NARRATION_TARGET_LUFS + source.level_db - take.lufs)
+        )
+        fade = min(round(SOUND_EFFECT_FADE_S * rate), length // 2)
+        entries.append(
+            {
+                "id": ident,
+                "role": role,
+                "kind": kind,
+                "scene_id": scene_id,
+                "take_id": take.take_id,
+                "path": take.path,
+                "start_sample": start,
+                "in_sample": in_sample,
+                "length_samples": length,
+                "gain_db": round(gain, 2),
+                "fade_in": _cut_fade(fade),
+                "fade_out": _cut_fade(fade),
+            }
+        )
+    return {
+        "level_db": float(source.level_db),
+        "takes": {
+            role: (take.take_id if take is not None else None)
+            for role, take in source.takes.items()
+        },
+        "entries": entries,
+        "skipped": skipped,
     }
 
 
@@ -1323,9 +1537,11 @@ def build_plan(
     captions_burned: bool = True,
     callouts: callout_render.CalloutSource | None = None,
     measure: callout_render.Measure | None = None,
+    sound_effects: SoundEffectSource | None = None,
 ) -> RenderPlan:
     """The frozen timeline of a render and its warnings. Raises RenderPlanError with the reason
-    when the story cannot be rendered now. `music` is None for a render without music, and
+    when the story cannot be rendered now. `sound_effects` is None for a render without them
+    (EXM-007). `music` is None for a render without music, and
     `captions` is None for a render without a caption track (a story), `captions_burned` says
     whether the render draws the track on the picture (CAP-001), and `callouts` is None for a
     render without callouts. `measure` measures a callout's text (the bundled font's by default).
@@ -1343,6 +1559,7 @@ def build_plan(
         measure=measure,
         placeholders=False,
         first_frame=0,
+        sound_effects=sound_effects,
     )
 
 
@@ -1659,6 +1876,7 @@ def _build(
     placeholders: bool,
     first_frame: int,
     short_clips_as_placeholders: bool = False,
+    sound_effects: SoundEffectSource | None = None,
 ) -> RenderPlan:
     """What `build_plan` and `build_scene_plan` share. With `placeholders` (a scene render), a shot
     without a clip or graphic gets a placeholder instead of refusing the plan, and a line of
@@ -2226,6 +2444,20 @@ def _build(
     warnings.extend(_overlay_evidence_warnings(overlay_entries, card_entries, shots))
     source_line_entries = _source_line_entries(scenes)
 
+    # The sound effects (EXM-007): by code, on the first frame of each graphic and evidence moment.
+    sound_effects_entry: dict[str, Any] | None = None
+    if sound_effects is not None:
+        sound_effects_entry = _sound_effects_entry(
+            sound_effects,
+            _sound_moments(shots, card_entries, overlay_entries),
+            bite_spans=bite_spans,
+            fps=fps,
+            window_start=render_commands.sample_count(first_frame, fps),
+            window_end=render_commands.sample_count(cursor, fps),
+            placeholders=placeholders,
+            warnings=warnings,
+        )
+
     total_ms = _ms(cursor / fps)
     callouts_entry: dict[str, Any] | None = None
     hidden: list[tuple[int, int]] = []
@@ -2300,11 +2532,14 @@ def _build(
         **({"graphic_overlays": overlay_entries} if overlay_entries else {}),
         # Only a render with evidence beside a graphic has this key (OVL-007).
         **({"split_evidence": split_entries} if split_entries else {}),
+        # Only a render of a project with sound effects has this key (EXM-007).
+        **({"sound_effects": sound_effects_entry} if sound_effects_entry is not None else {}),
         "master": master(mix),
         "constants": {
             **constants(mix),
             **(bite_constants() if bite_windows_story else {}),
             **(explainer_constants(mix) if continuous and music_entry is not None else {}),
+            **(sound_effect_constants() if sound_effects_entry is not None else {}),
         },
         "warnings": warnings,
     }
@@ -2411,6 +2646,15 @@ def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> Non
                 sound["length_samples"], total_samples - sound["start_sample"]
             )
 
+    effects = timeline.get("sound_effects")
+    if effects is not None:
+        for effect in effects["entries"]:
+            effect["start_sample"] = max(0, effect["start_sample"] - samples)
+            effect["length_samples"] = min(
+                effect["length_samples"], total_samples - effect["start_sample"]
+            )
+        effects["entries"] = [e for e in effects["entries"] if e["length_samples"] >= 1]
+
     captions = timeline["captions"]
     for group in (captions or {}).get("groups", []):
         group["start_ms"] = earlier(group["start_ms"])
@@ -2456,6 +2700,7 @@ def build_scene_plan(
     captions_burned: bool = True,
     callouts: callout_render.CalloutSource | None = None,
     measure: callout_render.Measure | None = None,
+    sound_effects: SoundEffectSource | None = None,
 ) -> RenderPlan:
     """The frozen timeline of one scene's render, on the same timeline builder as the whole story
     (S-5): every shot, line, caption and callout is placed exactly as in the full render and the
@@ -2505,6 +2750,7 @@ def build_scene_plan(
         measure=measure,
         placeholders=True,
         first_frame=first_frame,
+        sound_effects=sound_effects,
     )
     _shift_timeline(plan.timeline, first_frame, fps)
     plan.warnings.extend(extra)

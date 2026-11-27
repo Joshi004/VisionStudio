@@ -869,6 +869,17 @@ async def music_gate(session: AsyncSession, project: Project) -> Any:
     return await render_music.gate(session, project)
 
 
+async def sound_effect_gate(
+    session: AsyncSession, project: Project
+) -> story_render_plan.SoundEffectSource | None:
+    """The sound effects the next render uses (`render_sound_effects.gate`, EXM-007), or None for a
+    render without them. Imported here, as `music_gate` imports its module.
+    """
+    from app.services import render_sound_effects
+
+    return await render_sound_effects.gate(session, project)
+
+
 def _plan_of(
     project: Project,
     scenes: list[story_render_plan.SceneSource],
@@ -876,6 +887,7 @@ def _plan_of(
     music: story_render_plan.MusicSource | None = None,
     captions: bool = True,
     callouts: callout_render.CalloutSource | None = None,
+    sound_effects: story_render_plan.SoundEffectSource | None = None,
 ) -> tuple[story_render_plan.RenderPlan | None, str | None]:
     """The plan of the next render, or the reason it cannot be made. `captions` is False for a
     plan that only needs where things sit (the music placement): the scenes then need no word
@@ -898,6 +910,7 @@ def _plan_of(
             ),
             captions_burned=captions_burned(project),
             callouts=callouts,
+            sound_effects=sound_effects,
         )
     except story_render_plan.RenderPlanError as exc:
         return None, str(exc)
@@ -1082,6 +1095,33 @@ def mix_constant_reasons(
     return []
 
 
+def sound_effect_reasons(
+    recorded: dict[str, Any], source: story_render_plan.SoundEffectSource | None
+) -> list[str]:
+    """Why the sound effects of a render (EXM-007) no longer match: the switch was turned on or
+    off, a sound has another selected take now, or the level setting changed. `source` is what the
+    next render would use, or None when it would have none.
+    """
+    used = (
+        recorded.get("sound_effects") if isinstance(recorded.get("sound_effects"), dict) else None
+    )
+    if used is None and source is None:
+        return []
+    if used is None:
+        return ["Sound effects have been switched on since this video was made."]
+    if source is None:
+        return ["Sound effects have been switched off since this video was made."]
+    reasons: list[str] = []
+    then = used.get("takes") if isinstance(used.get("takes"), dict) else {}
+    now = {role: take.take_id if take is not None else None for role, take in source.takes.items()}
+    for role in sorted({*then, *now}):
+        if then.get(role) != now.get(role):
+            reasons.append(f"The {role} sound effect changed since this video was made.")
+    if used.get("level_db") != float(source.level_db):
+        reasons.append("The level of the sound effects changed since this video was made.")
+    return reasons
+
+
 def _render_reasons(
     row: StoryRender,
     plans: shot_plans.ShotPlansState,
@@ -1097,6 +1137,7 @@ def _render_reasons(
     soundbites: dict[tuple[str, str], evidence_clips.SoundbiteClipEntry] | None = None,
     overlays: dict[tuple[str, str], shot_graphics.ShotEntry] | None = None,
     splits: dict[tuple[str, str], evidence_clips.SplitClipEntry] | None = None,
+    sound_effects: story_render_plan.SoundEffectSource | None = None,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
@@ -1182,6 +1223,7 @@ def _render_reasons(
     reasons.extend(overlay_reasons(recorded, overlays or {}))
     reasons.extend(split_reasons(recorded, splits or {}))
     reasons.extend(music_reasons(recorded, *music))
+    reasons.extend(sound_effect_reasons(recorded, sound_effects))
     reasons.extend(caption_reasons(recorded, music[0]))
     reasons.extend(callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
     return reasons
@@ -1470,6 +1512,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
 
     mix = await mix_settings(session)
     gate = await music_gate(session, project)
+    sound_effects = await sound_effect_gate(session, project)
     callouts = await callout_gate(session, project)
     switched = await shot_voice_sources.clip_shots(session, project)
     graphics = await graphic_videos(session, project)
@@ -1490,6 +1533,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             mix,
             gate.source,
             callouts=callouts.source,
+            sound_effects=sound_effects,
         )
     if blocked is None and gate.blocked_reason is not None:
         plan, blocked = None, gate.blocked_reason
@@ -1511,6 +1555,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             soundbites,
             overlays,
             splits,
+            sound_effects,
         )
         entries.append(
             RenderEntry(
@@ -1614,6 +1659,7 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
     if blocked is not None:
         raise StoryRendersError(blocked)
     gate = await music_gate(session, project)
+    sound_effects = await sound_effect_gate(session, project)
     callouts = await callout_gate(session, project)
     if callouts.blocked_reason is not None:
         raise StoryRendersError(callouts.blocked_reason)
@@ -1625,6 +1671,7 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
         await mix_settings(session),
         gate.source,
         callouts=callouts.source,
+        sound_effects=sound_effects,
     )
     if plan is None:
         raise StoryRendersError(blocked or "The story cannot be rendered now.")

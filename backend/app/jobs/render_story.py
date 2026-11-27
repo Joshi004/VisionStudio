@@ -25,6 +25,9 @@ The steps, which are also the phases the page shows:
 4. *placing the music layers* (MUSIC-012, only with music): the score, the ambience beds and the
    sounds (hits and point sounds), each one WAV of the whole story's length, with every placed
    sound at its own sample, its fades, its ducks under the voice, its dips and its swells;
+   *placing the sound effects* (EXM-007, only for a project with them): the graphic and evidence
+   sounds, each at its own sample with a short fade at both ends, as one more layer that nothing
+   ducks and that nothing dips under;
 5. *trimming shot i of n* (stage 1): each clip becomes a MOV with exactly its frame count, at the
    output size, with its sound at 48 kHz stereo, at its gain and lowered where narration plays
    (and under an ambience bed, when that setting is on);
@@ -280,6 +283,34 @@ class Music:
 
 
 @dataclass(frozen=True)
+class SoundEffect:
+    """A placed sound effect (EXM-007), as `story_render_plan` recorded it."""
+
+    effect_id: str
+    role: str
+    path: str
+    start_sample: int
+    in_sample: int
+    length_samples: int
+    gain_db: float
+    fade_in_samples: int
+    fade_in_shape: str
+    fade_out_samples: int
+    fade_out_shape: str
+
+
+@dataclass(frozen=True)
+class SoundEffects:
+    """The `sound_effects` key of a timeline: every placed sound, and how many moments were left
+    out. A timeline made without sound effects has no such key."""
+
+    level_db: float
+    takes: dict[str, int | None]
+    entries: tuple[SoundEffect, ...]
+    skipped: int
+
+
+@dataclass(frozen=True)
 class EvidenceCard:
     """An evidence card (EVD-011) laid over the shots it spans: its clip (ProRes 4444 with
     alpha), the story frame it starts at, and where it sits in the picture.
@@ -368,6 +399,8 @@ class Timeline:
     # that is older than the phase has none either: they read as the plan's own values.
     bite_max_boost_db: float = story_render_plan.BITE_MAX_BOOST_DB
     bite_clip_fade_s: float = story_render_plan.BITE_CLIP_FADE_S
+    # The sound effects (EXM-007), or None for a timeline made without them.
+    sound_effects: SoundEffects | None = None
 
     @property
     def total_samples(self) -> int:
@@ -564,6 +597,68 @@ def _parse_music(raw: object) -> Music | None:
         total_samples=total,
         sounds=[_parse_sound(entry) for entry in sounds],
         left_out=len(left_out),
+    )
+
+
+def _parse_sound_effects(raw: object, total_samples: int) -> SoundEffects | None:
+    """The sound effects of a timeline, or None when it has none (the key is missing). A key that
+    is there must be well formed, and every sound must start inside the video.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    level, entries, skipped = _number(raw.get("level_db")), raw.get("entries"), raw.get("skipped")
+    takes = raw.get("takes")
+    if (
+        level is None
+        or not isinstance(entries, list)
+        or not isinstance(skipped, list)
+        or not isinstance(takes, dict)
+        or any(take is not None and _whole(take) is None for take in takes.values())
+    ):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    parsed: list[SoundEffect] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        effect_id, role, path = entry.get("id"), entry.get("role"), entry.get("path")
+        start, source_in = _whole(entry.get("start_sample")), _whole(entry.get("in_sample"))
+        length, gain = _whole(entry.get("length_samples")), _number(entry.get("gain_db"))
+        if (
+            not isinstance(effect_id, str)
+            or not isinstance(role, str)
+            or not isinstance(path, str)
+            or start is None
+            or not 0 <= start < total_samples
+            or source_in is None
+            or source_in < 0
+            or length is None
+            or length < 1
+            or gain is None
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        fade_in, fade_out = _fade(entry.get("fade_in")), _fade(entry.get("fade_out"))
+        parsed.append(
+            SoundEffect(
+                effect_id=effect_id,
+                role=role,
+                path=path,
+                start_sample=start,
+                in_sample=source_in,
+                length_samples=length,
+                gain_db=gain,
+                fade_in_samples=fade_in[0],
+                fade_in_shape=fade_in[1],
+                fade_out_samples=fade_out[0],
+                fade_out_shape=fade_out[1],
+            )
+        )
+    return SoundEffects(
+        level_db=level,
+        takes={str(role): take for role, take in takes.items()},
+        entries=tuple(parsed),
+        skipped=len(skipped),
     )
 
 
@@ -1019,6 +1114,9 @@ def parse_timeline(recorded: object) -> Timeline:
         cards=_parse_cards(raw, total),
         graphic_overlays=_parse_graphic_overlays(raw, total),
         split_evidence=_parse_split_evidence(raw, total),
+        sound_effects=_parse_sound_effects(
+            raw.get("sound_effects"), render_commands.sample_count(total, fps)
+        ),
         source_lines=_parse_source_lines(raw),
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
@@ -1107,6 +1205,15 @@ class RenderStoryHandler(JobHandler):
             else []
         )
 
+        effect_files = (
+            [
+                (effect, *await probe_sound_effect(storage, effect))
+                for effect in timeline.sound_effects.entries
+            ]
+            if timeline.sound_effects is not None
+            else []
+        )
+
         # Motion callouts (CMO-005): drawn now, laid over the shots in stage 1. A render of boxes
         # has no such step. (Imported here: the module needs this one for `RenderFailed`.)
         shot_overlays: list[list[render_commands.Overlay]] = [[] for _ in timeline.shots]
@@ -1189,6 +1296,13 @@ class RenderStoryHandler(JobHandler):
         if music_files:
             await self._phase(job_id, phases.PLACING_MUSIC_LAYERS)
             lanes = await build_lanes(storage, timeline, music_files, temp_paths)
+        # The sound effects (EXM-007): one more layer, mixed in as it is.
+        effects_lane: Path | None = None
+        if effect_files:
+            await self._phase(job_id, phases.PLACING_SOUND_EFFECTS)
+            effects_lane = await build_sound_effects_lane(
+                storage, timeline, effect_files, temp_paths
+            )
 
         # Stage 1: each clip, trimmed to its shot, at its gain, ducked under the narration.
         started = time.monotonic()
@@ -1275,7 +1389,7 @@ class RenderStoryHandler(JobHandler):
             listing,
             narration_path,
             narration_gain,
-            [path for _, path in lanes],
+            [*(path for _, path in lanes), *([effects_lane] if effects_lane is not None else [])],
             temp_paths,
         )
         await self._phase(job_id, phases.MEASURING_MIX)
@@ -1420,6 +1534,11 @@ class RenderStoryHandler(JobHandler):
             ),
             "voice": voice,
             "music": music,
+            **(
+                {"sound_effects": _sound_effects_record(timeline.sound_effects)}
+                if timeline.sound_effects is not None
+                else {}
+            ),
             "master": master,
             **({"callouts": drawn.levels()} if drawn is not None else {}),
         }
@@ -1712,6 +1831,21 @@ async def probe_music(storage: Storage, sound: MusicSound) -> tuple[Path, int | 
     return path, probed.audio_streams[0].channels
 
 
+async def probe_sound_effect(storage: Storage, effect: SoundEffect) -> tuple[Path, int | None]:
+    """A placed sound effect's file and its channel count."""
+    try:
+        path = storage.get_path(effect.path)
+    except StorageError as exc:
+        raise RenderFailed("A file of this render could not be found on disk.") from exc
+    probed = await ffmpeg.probe(path)
+    if probed is None or not probed.audio_streams:
+        raise RenderFailed(
+            f"The {effect.role} sound effect could not be read. Make it again in the Sound "
+            "effects step."
+        )
+    return path, probed.audio_streams[0].channels
+
+
 async def measure_shot(shot: Shot, source: Source, fps: int) -> float | None:
     """The loudness (LUFS) of a clip's sound over the part its shot uses. A clip with no sound is
     not measured. The sound is measured after the same conversion to stereo the render does, so a
@@ -1991,6 +2125,40 @@ async def build_lanes(
     return lanes
 
 
+async def build_sound_effects_lane(
+    storage: Storage,
+    timeline: Timeline,
+    files: Sequence[tuple[SoundEffect, Path, int | None]],
+    temp_paths: list[Path],
+) -> Path:
+    """The sound effects layer (EXM-007): one WAV of the story's length with every sound at its own
+    sample, at its gain, with its fades. Nothing ducks or dips it, so it is heard as placed.
+    """
+    members = [
+        render_commands.LaneSound(
+            path=path,
+            channels=channels,
+            start_sample=effect.start_sample,
+            in_sample=effect.in_sample,
+            length_samples=effect.length_samples,
+            gain_db=effect.gain_db,
+            fade_in_samples=effect.fade_in_samples,
+            fade_in_shape=effect.fade_in_shape,
+            fade_out_samples=effect.fade_out_samples,
+            fade_out_shape=effect.fade_out_shape,
+        )
+        for effect, path, channels in files
+    ]
+    dest = storage.new_temp_path("wav")
+    temp_paths.append(dest)
+    await run_ffmpeg(
+        render_commands.music_lane_args(members, dest, total_samples=timeline.total_samples),
+        LANE_TIMEOUT_S,
+        "placing the sound effects",
+    )
+    return dest
+
+
 async def mix_sound(
     storage: Storage,
     listing: Path,
@@ -2101,6 +2269,16 @@ def _music_record(timeline: Timeline, lanes: list[tuple[str, Path]]) -> dict[str
         "sounds": len(music.sounds),
         "left_out": music.left_out,
         "lanes": {lane: counts[lane] for lane, _ in lanes},
+    }
+
+
+def _sound_effects_record(effects: SoundEffects) -> dict[str, Any]:
+    """What the render's record says about the sound effects."""
+    return {
+        "placed": len(effects.entries),
+        "skipped": effects.skipped,
+        "level_db": effects.level_db,
+        "takes": effects.takes,
     }
 
 
