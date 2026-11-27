@@ -54,6 +54,8 @@ from app.services import (
     evidence_review,
     evidence_rounds,
     evidence_source_lines,
+    footage_decisions,
+    footage_placement,
     graphic_overlays,
     graphic_suggestions,
     h3_lengths,
@@ -175,6 +177,13 @@ class SceneEntry:
     # takes in are no longer in `cards`, and its evidence shots are not in `splits`.
     stretches: tuple[split_stretches.Stretch, ...] = ()
     refused_stretches: tuple[split_stretches.Refused, ...] = ()
+    # The footage over this scene's shots (FTG-004): each piece the owner chose to show on a
+    # footage mark, placed on the scene's timeline; the marks that got none; and the pieces left
+    # out or cut short. Worked out on read from the marks, the pieces shown, the take and the
+    # timeline; empty unless the plan is current and the scene has footage to show.
+    footage: tuple[footage_placement.PlacedPiece, ...] = ()
+    unplaced_footage: tuple[footage_placement.Unplaced, ...] = ()
+    footage_notes: tuple[footage_placement.PieceNote, ...] = ()
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -256,6 +265,9 @@ class _Loaded:
     # The sound bite clips the owner accepted and chose to show (SB-008), in story order. Empty
     # unless the project has evidence on and its newest round is reviewed.
     soundbites: list[evidence_review.ShownSoundbite] = field(default_factory=list)
+    # The footage marks that have pieces to show (FTG-004), in story order. Empty unless the
+    # project has footage on. A plan never depends on them: they are placed on read.
+    footage: list[footage_decisions.ShownFootageMark] = field(default_factory=list)
 
 
 EVIDENCE_FIRST_MESSAGE: Final = (
@@ -330,6 +342,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         evidence_problem=evidence_problem,
         callouts=callouts,
         soundbites=soundbites,
+        footage=await footage_decisions.shown_marks(session, project),
     )
 
 
@@ -1407,6 +1420,115 @@ def _graphic_overlays(
     return placement.overlays, tuple(unplaced) + placement.unplaced
 
 
+def _footage(
+    loaded: _Loaded,
+    item: dict[str, Any],
+    row: ShotPlan | None,
+    timeline: scene_timeline.SceneTimeline | None,
+    clock: take_timings.TakeClock | None,
+    overlays: tuple[graphic_overlays.Overlay, ...],
+    stretches: tuple[split_stretches.Stretch, ...],
+) -> footage_placement.Placement:
+    """The footage of a scene with a current cut plan (FTG-004): where each piece the owner chose
+    to show on a footage mark goes on the scene's timeline, the marks that got none, and the pieces
+    left out or cut short. Each run of words of a mark that no sound bite replaces is placed by
+    `footage_placement.place_footage`, from the cut times of its words, the way the shots are.
+    Nothing for any other scene, and nothing without footage to show.
+    """
+    nothing = footage_placement.Placement(pieces=(), unplaced=(), notes=())
+    if not loaded.footage or row is None or timeline is None or clock is None:
+        return nothing
+    words = clock.words
+    take_map = timeline.take_map
+    if not words or take_map is None or not cut_planning_writer.is_cut_plan(row.content):
+        return nothing
+    bites = _soundbite_words(loaded, item, words)
+    marks = {mark.id: mark for mark in loaded.footage}
+    entries = [
+        {"id": mark.id, "start": mark.start, "end": mark.end, "text": mark.text}
+        for mark in loaded.footage
+    ]
+    found = graphic_suggestions.scene_suggestions(loaded.story, item, words, entries, bites)
+    scene_id = str(item["id"])
+    wanted: list[footage_placement.Wanted] = []
+    unplaced: list[footage_placement.Unplaced] = []
+    for suggestion in found:
+        mark = marks[str(suggestion["id"])]
+        if suggestion.get("reason"):
+            unplaced.append(
+                footage_placement.Unplaced(
+                    scene_id, mark.id, mark.text, None, footage_placement.SOUNDBITE
+                )
+            )
+            continue
+        pieces = tuple(
+            footage_placement.Piece(piece.item_key, piece.kind, piece.length_s)
+            for piece in mark.pieces
+        )
+        positions = [position for position in suggestion["words"] if 0 <= position < len(words)]
+        for first, last in graphic_overlays.runs(positions, bites):
+            try:
+                # The first shot owns the lead-in; the last one runs on to the end of the scene.
+                start_s = (
+                    0.0
+                    if first == 0
+                    else take_map.to_scene(cut_planning_writer.cut_time(words, first + 1))
+                )
+                end_s = (
+                    timeline.total_s
+                    if last == len(words) - 1
+                    else take_map.to_scene(cut_planning_writer.cut_time(words, last + 2))
+                )
+                run_words = tuple(
+                    footage_placement.WordAt(
+                        position + 1,
+                        take_map.to_scene(float(words[position]["start"])),
+                        take_map.to_scene(float(words[position]["end"])),
+                    )
+                    for position in range(first, last + 1)
+                )
+            except (TakeMapError, KeyError, TypeError, ValueError):
+                continue  # a time is in a sound bite's clip or a word has no time
+            wanted.append(
+                footage_placement.Wanted(
+                    scene_id=scene_id,
+                    mark_id=mark.id,
+                    text=mark.text,
+                    pieces=pieces,
+                    words=run_words,
+                    start_s=start_s,
+                    end_s=end_s,
+                    trimmed=bool(suggestion.get("trimmed")),
+                )
+            )
+    types = {str(shot["id"]): str(shot.get("type")) for shot in row.content["shots"]}
+    slots = [
+        evidence_cards.Slot(
+            shot_id=span.shot_id,
+            type=types.get(span.shot_id, ""),
+            start_s=span.start_s,
+            end_s=span.end_s,
+        )
+        for span in timeline.shots
+    ]
+    # Footage never covers a graphic overlay or a split stretch (FT-12).
+    blocked = [(overlay.start_s, overlay.end_s) for overlay in overlays] + [
+        (stretch.start_s, stretch.end_s) for stretch in stretches
+    ]
+    pauses: list[float] = []
+    for number in range(2, len(words) + 1):
+        try:
+            pauses.append(take_map.to_scene(cut_planning_writer.cut_time(words, number)))
+        except (TakeMapError, KeyError, TypeError, ValueError):
+            continue  # a pause in a sound bite's clip, or a word without a time
+    placement = footage_placement.place_footage(wanted, slots, blocked, pauses, timeline.total_s)
+    return footage_placement.Placement(
+        pieces=placement.pieces,
+        unplaced=tuple(unplaced) + placement.unplaced,
+        notes=placement.notes,
+    )
+
+
 def _split_shots(
     loaded: _Loaded,
     item: dict[str, Any],
@@ -1852,6 +1974,19 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             stretched = {shot_id for stretch in found.stretches for shot_id in stretch.shot_ids}
             cards = tuple(card for card in cards if card.card_id not in absorbed)
             splits = {key: value for key, value in splits.items() if key not in stretched}
+        footage = (
+            _footage(
+                loaded,
+                item,
+                row,
+                timeline,
+                loaded.clocks.get(item["id"]),
+                overlays,
+                found.stretches,
+            )
+            if status == "planned"
+            else footage_placement.Placement(pieces=(), unplaced=(), notes=())
+        )
         entries.append(
             SceneEntry(
                 item=item,
@@ -1874,6 +2009,9 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                 unplaced_overlays=unplaced_overlays,
                 stretches=found.stretches,
                 refused_stretches=found.refused,
+                footage=footage.pieces,
+                unplaced_footage=footage.unplaced,
+                footage_notes=footage.notes,
             )
         )
     policy = loaded.policy

@@ -48,6 +48,7 @@ from app.services import (
     evidence_rounds,
     explainer,
     footage_marks,
+    footage_placement,
     generation_requests,
     graphic_theme,
     look_state_images,
@@ -1845,6 +1846,26 @@ async def _call_evidence_claims(
 # --- The footage marks (FTG-002) --------------------------------------------------------------
 
 
+def _footage_notes(plans: shot_plans.ShotPlansState) -> list[str]:
+    """One note for each footage mark that got no place over the shots, and one for each piece
+    left out or cut short (FTG-004): "Scene 2: 'the words' gets no footage: <reason>". Not a
+    failure of a step, so it is a note. Pure.
+    """
+    notes = [
+        f"{_scene_label(entry.item)}: '{missing.text}' gets no footage: {missing.message}"
+        for entry in plans.entries
+        for missing in entry.unplaced_footage
+    ]
+    notes.extend(
+        f"{_scene_label(entry.item)}: a piece of the footage for '{note.text}' is "
+        f"{'left out' if note.code == footage_placement.LEFT_OUT else 'cut short'}: "
+        f"{note.message}"
+        for entry in plans.entries
+        for note in entry.footage_notes
+    )
+    return notes
+
+
 async def _evaluate_footage_marks(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
@@ -1867,7 +1888,9 @@ async def _evaluate_footage_marks(
                 block=None if done or active else state.blocked_reason,
                 last_error=_failure(state.job),
             )
-        ]
+        ],
+        # FTG-004: notes on where footage got no room. FTG-005 moves them to `footage_clips`.
+        warnings=_footage_notes(await shot_plans.state(session, project)),
     )
 
 

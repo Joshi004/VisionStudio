@@ -32,12 +32,14 @@ checked by `services/footage_files.py`.
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from typing import Any, Final
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import FootageDecision, Project
+from app.db.models import FootageDecision, FootageItem, Project
+from app.services import footage_marks
 
 ACCEPTED: Final = "accepted"
 REJECTED: Final = "rejected"
@@ -231,3 +233,107 @@ async def set_use(
         entry["use"][item_key] = {"start_s": start_s, "end_s": end_s}
 
     await _edit(session, project, mark_id, change, commit=True)
+
+
+# --- What is shown now (FTG-004) -----------------------------------------------------------
+
+VIDEO_KIND: Final = "video"
+
+
+@dataclass(frozen=True)
+class ShownFootagePiece:
+    """One piece the owner chose to show on a mark. `length_s` is how long a video piece can play
+    (its `use`), and None for a still piece (image, page or PDF)."""
+
+    item_key: str
+    kind: str
+    length_s: float | None
+
+
+@dataclass(frozen=True)
+class ShownFootageMark:
+    """A footage mark that has pieces to show. `start` and `end` are code-point positions in
+    `script_text` (end not included), as for claims; `pieces` are in the owner's order and are
+    never empty."""
+
+    id: str
+    start: int
+    end: int
+    text: str
+    pieces: tuple[ShownFootagePiece, ...]
+
+
+def _use_length(decided: Any, capture: Any) -> float | None:
+    """The length of the part of a video that plays: the owner's moved `use` when there is one,
+    otherwise the one the capture recorded. None when neither gives a positive length."""
+    for use in (decided, capture.get("use") if isinstance(capture, dict) else None):
+        if not isinstance(use, dict):
+            continue
+        start, end = use.get("start_s"), use.get("end_s")
+        if (
+            isinstance(start, int | float)
+            and isinstance(end, int | float)
+            and not isinstance(start, bool)
+            and not isinstance(end, bool)
+            and end > start
+        ):
+            return round(float(end) - float(start), 3)
+    return None
+
+
+async def shown_marks(session: AsyncSession, project: Project) -> list[ShownFootageMark]:
+    """The footage marks that have pieces to show, in story order (FTG-004).
+
+    A mark counts when it is not dropped and its words are in the story. A piece is shown when the
+    owner's newest decision lists it, its item is usable and its kind is known. A mark the owner
+    decided "no footage here" for shows nothing. A project without footage reads no tables.
+    """
+    if not footage_marks.wanted(project):
+        return []
+    marks = footage_marks.counting((await footage_marks.state(session, project)).marks)
+    if not marks:
+        return []
+    row = await latest(session, project.id)
+    entries = {entry["mark_id"]: entry for entry in marks_of(row.content if row else None)}
+    wanted = {
+        mark["id"]: list(entries[mark["id"]]["shown"])
+        for mark in marks
+        if mark["id"] in entries and not entries[mark["id"]]["no_footage"]
+    }
+    keys = {key for shown in wanted.values() for key in shown}
+    if not keys:
+        return []
+    statement = select(FootageItem).where(
+        FootageItem.project_id == project.id, FootageItem.item_key.in_(keys)
+    )
+    items = {
+        item.item_key: item
+        for item in (
+            await session.execute(statement.execution_options(populate_existing=True))
+        ).scalars()
+    }
+    found: list[ShownFootageMark] = []
+    for mark in marks:
+        pieces: list[ShownFootagePiece] = []
+        for key in wanted.get(mark["id"], []):
+            item = items.get(key)
+            if item is None or not item.usable or item.kind is None:
+                continue
+            length_s: float | None = None
+            if item.kind == VIDEO_KIND:
+                decided = entries[mark["id"]]["use"].get(key)
+                length_s = _use_length(decided, item.capture)
+                if length_s is None:
+                    continue
+            pieces.append(ShownFootagePiece(item_key=key, kind=item.kind, length_s=length_s))
+        if pieces:
+            found.append(
+                ShownFootageMark(
+                    id=mark["id"],
+                    start=mark["start"],
+                    end=mark["end"],
+                    text=mark["text"],
+                    pieces=tuple(pieces),
+                )
+            )
+    return found

@@ -397,7 +397,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-001 | Footage switch, tables and job types | Code | — | Completed |
 | FTG-002 | Marking footage and GLM's proposals | Code | FTG-001 | Completed |
 | FTG-003 | The owner's own files on a mark | Code | FTG-002 | Completed |
-| FTG-004 | Placing footage over the shots | Code | — | Not Started |
+| FTG-004 | Placing footage over the shots | Code | — | Completed |
 | FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Not Started |
 | FTG-006 | Footage in the render | Code | FTG-005 | Not Started |
 | FTG-007 | The research brief and the waiting step | Code | FTG-002 | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 3 completed (FTG-001, FTG-002 and FTG-003, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 4 completed (FTG-001, FTG-002, FTG-003 and FTG-004, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -589,7 +589,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-004 — Placing footage over the shots
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28)
 
 **Objective.** Code works out, on read, where each mark's pieces are shown on a scene's timeline (§4.9).
 
@@ -614,13 +614,33 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Placement module
-- [ ] `SceneEntry` fields
-- [ ] Board notes
-- [ ] Sample cases and identity check
-- [ ] Standard checks
+- [x] Placement module
+- [x] `SceneEntry` fields
+- [x] Board notes
+- [x] Sample cases and identity check (sample cases and a code-level identity argument; the snapshot comparison on the real database was not run, see below)
+- [x] Standard checks
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration.** Nothing is stored for the placement.
+- **Modules:**
+  - `services/footage_placement.py` (pure): `place_footage(wanted, slots, blocked, pauses, total_s)` gives `Placement(pieces, unplaced, notes)`. `PlacedPiece` has `run_key`, `item_key`, `kind`, `index`, `start_s`, `end_s`, `shot_ids`, with `key` = `{run_key}:{item_key}` and `run_key` = `{scene_id}/{first}-{last}`. Constants: `MIN_S` 2.0, `MAX_LEAD_S` 1.0, `MIN_PIECE_S` 1.5, `SNAP_S` 0.5, `STILL_MAX_S` 29.917. Reason codes: `no_room`, `covered`, `soundbite`, `one_word`, `too_short`; piece notes `left_out` and `cut_short`.
+  - `services/footage_decisions.py`: `shown_marks` (with `ShownFootageMark` and `ShownFootagePiece`) reads the counting marks, the newest decision version and the usable items. A project without footage reads no tables; a mark with `no_footage`, an unusable item or a video with no `use` shows nothing.
+  - `services/shot_plans.py`: `_Loaded.footage`, `_footage(...)` (modelled on `_graphic_overlays`) and the `SceneEntry` fields `footage`, `unplaced_footage` and `footage_notes`, worked out only for a planned scene whose plan is a cut plan.
+  - `services/story_pipeline_targets.py`: `_footage_notes`, returned as the warnings of the `footage_marks` step. FTG-005 moves them to `footage_clips`.
+- **Planning decided:**
+  - **Run cut by something footage may not cover:** the blocked time is the drawn shots (graphic, evidence, sound bite), graphic overlays and split stretches. Each part left is placed on its own, and a graphic overlay wins over footage on the same words.
+  - **Pieces across the parts of one mark in a scene:** a shared cursor. The next part starts at the piece after the last one shown and wraps; a new scene starts again from the first piece. A part shows only as many pieces as fit at 1.5 s each, and the rest get a `left_out` note.
+  - **Sharing a part's time:** water-filling (even shares, a video capped at its `use`, a still at `STILL_MAX_S`, unused time shared among the others). **Deviation from §4.9:** the section says the time a video cannot fill goes "to the still pieces after it"; water-filling gives it to every piece that can still use it, in any order. §4.9 should be read that way.
+  - **A still piece's cap** is 29.917 s (718 frames at 24 fps), not 30 s: the clip has one spare frame and rounding both ends to the frame grid may add one, and a drawn clip may not pass 720 frames.
+  - **Run of one word:** dropped (`one_word`) only when the mark lost its other words to a sound bite or to something footage may not cover. A one-word mark the owner chose is placed.
+  - **Boundaries between pieces** move to the nearest pause middle within 0.5 s when both pieces keep at least 1.5 s and stay within their caps.
+  - **Board notes** are on the `footage_marks` step for now.
+- **Checked** on throwaway code and a throwaway database (no paid call, the real app was not touched; the scripts were removed):
+  - `place_footage` sample cases: a run over presenter and B-roll shots; a run cut in two by an evidence shot (the second part continues with the next piece and wraps); a run entirely on a sound bite; a short run that grows after its words and one that starts early at the end of a scene; no room between graphic shots; a montage of two 3 s videos and an image over 10 s (second boundary moved to a pause, 5.95 s); a piece left out; a boundary moved to a pause; a mark across two scenes (each starts at the first piece); a 40 s run of one still (cut at 29.917 s with `cut_short`); one word left beside an overlay; an overlay covering all the words; two marks side by side.
+  - `shot_plans._footage` on a hand-made scene (take map, shots, words): the marked words were found in the take, placed over presenter and B-roll shots, and two pieces were shared out. With no footage it returns nothing.
+  - `shown_marks` on a migrated throwaway database: `[]` for a project with footage off and for one with no marks; an unusable video is skipped; a moved `use` changes the video's length; a removed file leaves the list; `shot_plans.state` ran for a project with footage on.
+  - `ruff check` and `ruff format --check` pass.
+- **Not done:** the snapshot comparison on the real database (`SceneEntry` values before and after for every project without footage) needs the owner's go-ahead. By construction a project without footage reads no footage tables, `_footage` returns at once, and the new fields default to empty. `npm run typecheck` was not run: no frontend or API file changed.
 
 ### FTG-005 — The footage clip and its preview
 
@@ -1042,3 +1062,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-001 | Completed: migration `0106` (`project.footage`, six footage tables, five job types), models, the switch on the API and both forms, `DATABASE_STRUCTURE.md` (with `0105`). |
 | 2026-11-28 | FTG-002 | Completed: footage marks (service, API, GLM proposals job), the `footage_marks` step and board entry, and the story box layer, toolbar row and card. No migration. |
 | 2026-11-28 | FTG-003 | Completed: the owner's photos and videos on a mark (upload API, `prepare_footage_file` job, decision versions, files section on the mark card). No migration. |
+| 2026-11-28 | FTG-004 | Completed: footage placed on read (`services/footage_placement.py`, `footage_decisions.shown_marks`, three new `SceneEntry` fields, notes on the `footage_marks` step). No migration, no API or UI change. |
