@@ -1,0 +1,137 @@
+A team of AI researchers got on a plane. They put a MacBook in airplane mode, no internet, nothing, and asked an AI running on that laptop to build them a flight simulator. A few minutes later, they were flying it.
+
+That AI is called Inkling 2 Mini. It came out on November 20th, it's free to download, and its makers say it leads every open model of its size at coding.
+
+And that's a problem for me. Because part of the software I build runs on a model in that exact size class. Qwen3.8-27B, from Alibaba.
+
+So, do I switch? I spent the past week going through the launch posts, the independent tests, and dozens of YouTube reviews to find out. And what I found surprised me. The biggest problem wasn't either model. It was a setting. And if you run either of these models yourself, there's a good chance you're using that setting right now.
+
+I'm Naresh Joshi. I'm the CEO of Techsergy, where we help companies choose AI models, and build and fine-tune their own. So this is my job. But this time it's also my own software, and my own server bill.
+
+Here's the plan. First, what each company claims, and what their small print says. Then the independent referees. Then what YouTubers and real users found when they actually ran these things. By the end, you'll know which model to use for what, whether I'm switching, and the one setting you should check before you blame any model.
+
+Let's meet the two of them.
+
+Qwen comes from Alibaba. It's the most downloaded family of open models on Hugging Face. The 27B in the name means 27 billion parameters, the tiny adjustable numbers that make up an AI's brain. And all 27 billion of them work on every single word it writes.
+
+Inkling comes from Thinking Machines Lab, the company Mira Murati started after leaving her job as OpenAI's chief technology officer. Inkling 2 Mini is about the same size, 26.4 billion parameters. But for each word, it only wakes up 3.4 billion of them. That's why it fits in about 20GB, and why it can run on a laptop.
+
+And it does something unusual. It's what's called a looped model. For every word, it runs the middle of its brain 3 times.
+
+Think of a writer who drafts a sentence, then rereads it and redrafts it in their head 2 more times before writing anything down. Same brain. More thinking. No extra paper.
+
+There's a catch, and the company admits it. Thinking harder doesn't teach you new facts. Hold on to that. It comes back later.
+
+So, on paper, it's a small, clever newcomer from an American lab, against the most popular open model family from China. You'd expect a clear winner. Here's what the best-known independent scoreboard says.
+
+Artificial Analysis runs the same tests on every model, itself. Inkling 2 Mini scores 20. Qwen3.8-27B scores 20.
+
+A dead heat.
+
+Now, a tie sounds like the most boring result possible. It isn't. Because underneath that 20, these two models are good at very different things. And each company's launch post is written to show off the half it wins.
+
+Let's start with those launch posts.
+
+Thinking Machines says looping lets the model "reach the right answer with fewer tokens." A token is roughly a piece of a word, and you pay for every one. But when Artificial Analysis ran its tests, Inkling turned out to be the most talkative model in its class. 161 million tokens, against 128 million for Qwen.
+
+Then there's the speed chart. It shows Inkling about 4.8 times faster than Qwen. But read the small print, and it isn't a measurement. It's a calculation, at a fixed memory speed, with uncompressed weights, answering one request at a time. In plain words, it's how fast Inkling could go in theory. When one tester put both models on the same graphics card, an RTX 3090, Inkling was faster. By about 12%. 38.7 tokens a second, against 34.5. And on a Mac Studio, another channel found Qwen was the faster one.
+
+And my favourite. On the same launch page, the text says Inkling is behind Qwen on one instruction-following test. The table right below it says Inkling is ahead, 33.4% to 30.1%. They can't both be right. As far as I can tell, nobody has said which one is wrong.
+
+To be fair, Alibaba's small print isn't clean either. Its comparison table puts Qwen up against Claude Opus 4.6, an older model. It ran one of its coding tests on a version of SWE-bench Pro that it says it corrected itself. And it never says which thinking setting produced its scores. Remember that last one.
+
+So nobody's hands are completely clean. That's why we need the referees.
+
+Back to Artificial Analysis, and that tie. Look at what's underneath it.
+
+Inkling wins on price and speed. On each company's own service, a test task cost about 59 cents with Inkling, and $3.53 with Qwen. Inkling wrote about 175 tokens a second, Qwen about 59. Part of that is just Alibaba's own service being slow. Other hosts run Qwen much faster. But going by what people actually pay on OpenRouter, Inkling is still about 8 times cheaper for every token it writes.
+
+Qwen wins the tests that look most like office work. Reports, planning, operations. And it makes things up less often. On the same site's hallucination test, Qwen avoided making things up 71.4% of the time. Inkling, 63.4%.
+
+Remember the writer redrafting in their head? Here's the catch. Inkling actually knows slightly more facts. But when it doesn't know something, it's more likely to invent an answer. Thinking harder doesn't teach you new facts.
+
+Human voters prefer Qwen's writing too. On LMArena's creative writing board, Qwen scores 1379, and Inkling 1207. That's on only 423 votes for Inkling, so it's early. And when the AI has to use tools, Inkling's calls broke about 4.2% of the time, on the only host that's been measured. On Qwen's best hosts, about 0.14%.
+
+One of the most thorough YouTube tests I found, by a channel called The Dark Factory, ran both models through 136 jobs. Inkling got 123 right. Qwen got 116. The channel's verdict on the newcomer:
+
+"The new American model is as good as people say, but only by a little."
+
+Which brings us to YouTube.
+
+One of the most-watched reviews of Inkling 2 Mini has about 168,000 views, and the word INSANE in the title. It's a series of one-shot builds. Games, websites, even an operating system in a browser. It's a fun watch. But Bijan Bowen, who made it, admits something partway through:
+
+"I have to be honest and say I cheated a little because I'm just using it from their API."
+
+So a review of the laptop model mostly ran on the company's servers.
+
+What about that flight simulator? The official demo ran on a MacBook with 48GB of memory, and the video plays mostly at 15 times speed. A reviewer called JeredBlu tried it on a 36GB Mac. In one tool, he got a basic flight game in 11 minutes. In another, the model ran for over an hour and never wrote a single line of code.
+
+And "runs on your laptop" depends on your laptop. Thinking Machines officially asks for 32GB or more. The laptop I'm using right now has 24. Another reviewer, Samuel Gregory, limited his Mac to behave like a 32GB machine. On the longest job, Inkling crashed every time, and Qwen got through. His conclusion: at that size, Qwen "looks like the safer bet."
+
+Now, to be fair to Inkling, a lot of that first-week pain was the software around it, not the model itself. Early downloads produced gibberish until a fix landed. A tool-calling bug crashed one popular app. One developer on Hacker News went from about 26 tokens a second on launch day to between 80 and 100, just 4 days later. In his words: "chalk all the slowness talk above up to model newness."
+
+So if you judge a model in its first week, you're often judging the plumbing.
+
+The host of AI Coding Daily summed up the mood pretty well:
+
+"It's a little bit overhyped on Twitter, but it's a really strong contestant for local AI model."
+
+OK. So now, my question. Should I switch?
+
+My software uses these models for long writing and planning jobs. Story outlines, scene plans, that kind of thing. And every answer has to come back in a strict format, so the rest of the software can read it.
+
+Let's go job by job.
+
+Planning. Qwen leads on the office-style tests.
+
+Facts. Qwen makes fewer of them up.
+
+Complicated instructions. Thinking Machines itself says Inkling is "less reliable than larger models at following detailed instructions" when it's using tools. And there's a moment from that 136-job test that stuck with me. One task had rules that contradicted each other. Qwen flagged the problem after about 4,000 tokens. Inkling thought for 32,000 tokens, and then quietly picked one rule. For my software, that's the worst kind of mistake. The kind you don't notice.
+
+Writing. Here, there's almost no evidence for Inkling yet. In that INSANE review, Bijan Bowen, who loved the model overall, asked it for a long piece of writing. His reaction:
+
+"It also just seems like a bunch of word salad that has no real point."
+
+And speed? On a rented GPU server, time is money. But Inkling's big speed wins mostly show up on smaller graphics cards, where Qwen doesn't fit. On a 16GB card, Inkling managed 38.2 tokens a second, and Qwen just 6.1. On bigger cards, where both models fit, most of that gap disappears. And Inkling's own compressed format only gets its full speed boost on NVIDIA's newest chips.
+
+So on almost every job I care about, the evidence leans towards Qwen. But that's not the twist.
+
+Here's the twist. Remember that setting I promised you?
+
+Both of these models ship with their thinking turned all the way up. By default. Qwen's default is called xhigh. Its highest setting.
+
+Simon Willison, a well-known developer, asked Qwen3.8-27B to draw a pelican at that default. It took 21 minutes. It wrote 22,276 tokens of thinking to produce 3,223 tokens of answer. His verdict: "It's absolutely not a good way to run the model."
+
+Inkling has the same problem. One developer on Hacker News said a single question ran for over 3 hours, and more than 180 tool calls, before he cut it off. Unbiased Bob, who reviews models on YouTube, put it like this:
+
+"Inkling 2 Mini is an incredible coding model that launched yesterday with some really unfortunate defaults and support from llama.cpp in particular."
+
+So why would a company ship its model like that? Because the highest setting gets the highest benchmark scores. And benchmark scores are what end up in the launch post. You pay for it later, in time and money. One commenter on Hacker News called the default configuration "essentially broken."
+
+So I went and looked at my own code. It turns thinking on, and it never asks for a level. It leaves that to the server. And unless the server picks one, Qwen runs at its highest setting.
+
+Here's what turning it down could do. On Artificial Analysis, moving Qwen from its highest setting to medium cost just 2 points on the overall score, from 20 down to 18. That puts it just below Inkling. But it cut the tokens Qwen wrote by about 30%. And the time per task dropped from 31.2 minutes to 25.6.
+
+There's a catch, of course. On the same site's fact test, Qwen's score dropped sharply at medium. So I won't just flip the switch. I'll test it on my own jobs first.
+
+So here's my verdict, as of late November 2026.
+
+Am I switching to Inkling? Not yet. First, I'm testing Qwen at a lower thinking level, on real jobs from my own software. Then, once Inkling's software has settled down, I'll run the same jobs through Inkling, on the same server. If it matches Qwen on my work and saves real time, I'll switch. If you'd like to see that test, tell me in the comments.
+
+For you, it depends on how you run it.
+
+Choose Inkling 2 Mini if you pay for a hosted service and price matters, or if your graphics card is too small for Qwen. If you do agentic coding, it's worth a try too, though its biggest coding wins are still the company's own numbers.
+
+Choose Qwen3.8-27B if facts matter, if your instructions are complicated, if you need writing that reads well, or if you're on a Mac with 32GB or less.
+
+And either way, turn the thinking level down, and test it on your own work.
+
+One more thing. Alibaba says smaller open versions of Qwen4 are coming "soon." No date, no sizes. So this tie might not last long.
+
+In my last comparison video, I gave you 5 questions to ask about any AI comparison. Who ran the test? Which version of the test, and when? Which harness? What does a finished job cost? And is the complaint about the model, or about the service?
+
+This video adds a 6th. What setting was it running at?
+
+Because a model at its highest setting and the same model at medium are almost two different products. And most reviews never tell you which one they tested.
+
+So here's my question for you. Which model do you run yourself, and at what thinking level? Tell me in the comments. I read them all.
