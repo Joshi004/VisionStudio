@@ -931,6 +931,105 @@ export interface paths {
         patch: operations["edit_footage_mark_api_projects__project_id__footage_marks__mark_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/footage-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Footage Files */
+        get: operations["get_footage_files_api_projects__project_id__footage_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-marks/{mark_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Footage File
+         * @description Adds a photo (PNG, JPEG or WebP) or a video (MP4, MOV, MKV or WebM), sent as the raw request
+         *     body, to a footage mark. It is accepted at once and shown after the mark's other files.
+         */
+        post: operations["upload_footage_file_api_projects__project_id__footage_marks__mark_id__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-files/{item_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Footage File
+         * @description Takes a file off its mark. The stored file stays.
+         */
+        delete: operations["remove_footage_file_api_projects__project_id__footage_files__item_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-marks/{mark_id}/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Reorder Footage Files
+         * @description Puts the files shown on a mark in a new order. The list must hold exactly the files shown
+         *     now, once each.
+         */
+        put: operations["reorder_footage_files_api_projects__project_id__footage_marks__mark_id__order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage-files/{item_key}/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Footage File Use
+         * @description Moves where a video starts and ends: steps of half a second, 2 to 30 seconds.
+         */
+        put: operations["set_footage_file_use_api_projects__project_id__footage_files__item_key__use_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -9835,6 +9934,89 @@ export interface components {
             /** Warnings */
             warnings: string[];
         };
+        /** FootageFileOut */
+        FootageFileOut: {
+            /** Item Key */
+            item_key: string;
+            /** Mark Id */
+            mark_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image" | "video";
+            /** Credit */
+            credit: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "preparing" | "ready" | "failed";
+            /** Error */
+            error: string | null;
+            /** Media Url */
+            media_url: string | null;
+            /** Strip Url */
+            strip_url: string | null;
+            strip: components["schemas"]["FootageFileStripOut"] | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Duration S */
+            duration_s: number | null;
+            use: components["schemas"]["FootageFileUseOut"] | null;
+        };
+        /** FootageFileStored */
+        FootageFileStored: {
+            /** Item Key */
+            item_key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image" | "video";
+            /** Job Id */
+            job_id: number | null;
+        };
+        /**
+         * FootageFileStripOut
+         * @description How the strip image of a video is laid out: tile `n` (from 0) is the frame at
+         *     `n * every_s` seconds, `columns` tiles to a row, each `tile_w` wide and `tile_h` high.
+         */
+        FootageFileStripOut: {
+            /** Every S */
+            every_s: number;
+            /** Columns */
+            columns: number;
+            /** Rows */
+            rows: number;
+            /** Tile W */
+            tile_w: number;
+            /** Tile H */
+            tile_h: number;
+            /** Frames */
+            frames: number;
+        };
+        /**
+         * FootageFileUseOut
+         * @description The part of a video that is shown, in seconds of the prepared video.
+         */
+        FootageFileUseOut: {
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+        };
+        /** FootageFilesState */
+        FootageFilesState: {
+            /** Wanted */
+            wanted: boolean;
+            /** Files */
+            files: components["schemas"]["FootageFileOut"][];
+            /** Preparing */
+            preparing: boolean;
+        };
         /** FootageMarkEditIn */
         FootageMarkEditIn: {
             /** Note */
@@ -9924,6 +10106,18 @@ export interface components {
             wanted: boolean;
             /** Has Ai Version */
             has_ai_version: boolean;
+        };
+        /** FootageOrderIn */
+        FootageOrderIn: {
+            /** Shown */
+            shown: string[];
+        };
+        /** FootageUseIn */
+        FootageUseIn: {
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
         };
         /** FullRecordingOut */
         FullRecordingOut: {
@@ -23170,6 +23364,243 @@ export interface operations {
                 };
             };
             /** @description The project has no footage, the story is not saved, or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_footage_files_api_projects__project_id__footage_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageFilesState"];
+                };
+            };
+            /** @description No such project, mark or file. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_footage_file_api_projects__project_id__footage_marks__mark_id__files_post: {
+        parameters: {
+            query: {
+                kind: "image" | "video";
+                credit?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageFileStored"];
+                };
+            };
+            /** @description No such project, mark or file. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the file or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_footage_file_api_projects__project_id__footage_files__item_key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageFilesState"];
+                };
+            };
+            /** @description No such project, mark or file. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the file or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reorder_footage_files_api_projects__project_id__footage_marks__mark_id__order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageOrderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageFilesState"];
+                };
+            };
+            /** @description No such project, mark or file. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the file or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_footage_file_use_api_projects__project_id__footage_files__item_key__use_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageUseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageFilesState"];
+                };
+            };
+            /** @description No such project, mark or file. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the file or the request breaks a rule. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -178,6 +178,12 @@ SAVING_EVIDENCE_CLAIMS: Final = "saving the evidence claims"
 # `suggest_footage_marks` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_FOOTAGE_MARKS: Final = "saving the footage marks"
 
+# --- Running: an owner's video made ready for footage (FTG-003) --------------------------
+# `prepare_footage_file` is a local job: it makes the muted H.264 copy, then its strip and cuts.
+PREPARING_FOOTAGE_VIDEO: Final = "making the video ready"
+FINDING_FOOTAGE_CUTS: Final = "finding the cuts and the strip of frames"
+SAVING_FOOTAGE_VIDEO: Final = "saving the video"
+
 # --- Running: the research brief of the evidence layer (EVD-003) -------------------------
 # `write_evidence_brief` is a local job: it writes the round's folder and files, then the row.
 WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"

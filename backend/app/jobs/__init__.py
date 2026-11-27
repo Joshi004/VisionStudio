@@ -25,7 +25,8 @@
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), the research brief of the evidence layer
   (`write_evidence_brief.py`), the import of a round's results (`import_evidence.py`), the video
-  of a piece of evidence (`render_evidence_clip.py`), the
+  of a piece of evidence (`render_evidence_clip.py`), an owner's video made ready as footage
+  (`prepare_footage_file.py`), the
   generated component, the block scene and the preview of a motion callout
   (`write_callout_component.py`, `write_callout_scene.py`, `render_callout_preview.py`), and the
   Audio video lab of a character (`time_lab_speech_words.py`, `render_av_test.py`), and the
@@ -82,6 +83,7 @@ def register_handlers() -> None:
     from app.jobs.place_music import PlaceMusicHandler
     from app.jobs.plan_environment_views import PlanEnvironmentViewsHandler
     from app.jobs.plan_shots import PlanShotsHandler
+    from app.jobs.prepare_footage_file import PrepareFootageFileHandler
     from app.jobs.preview_music_mix import PreviewMusicMixHandler
     from app.jobs.publish_youtube import PublishYouTubeHandler
     from app.jobs.render_av_test import RenderAvTestHandler
@@ -203,6 +205,7 @@ def register_handlers() -> None:
     handlers.register(RenderShotGraphicHandler())
     handlers.register(SuggestEvidenceClaimsHandler())
     handlers.register(SuggestFootageMarksHandler())
+    handlers.register(PrepareFootageFileHandler())
     handlers.register(WriteEvidenceBriefHandler())
     handlers.register(ImportEvidenceHandler())
     handlers.register(RenderEvidenceClipHandler())

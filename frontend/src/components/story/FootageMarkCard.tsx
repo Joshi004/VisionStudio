@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Select, Stack, Text, TextInput } from "@mantine/core";
 
+import type { FootageFile } from "../../api/footageFiles";
 import { FOOTAGE_KINDS, type FootageMark, type FootageMarkEdit } from "../../api/footageMarks";
+import { FootageFilesSection } from "./FootageFilesSection";
 
 type Props = {
+  projectId: number;
   mark: FootageMark;
+  /** The owner's files shown on this mark, in the order shown. */
+  files?: FootageFile[];
   active?: boolean;
   busy: boolean;
   onSelect?: () => void;
@@ -13,7 +18,16 @@ type Props = {
 };
 
 /** One footage mark: its words, where it came from, its kind and the note on what to show. */
-export function FootageMarkCard({ mark, active = false, busy, onSelect, onEdit, onRemove }: Props) {
+export function FootageMarkCard({
+  projectId,
+  mark,
+  files = [],
+  active = false,
+  busy,
+  onSelect,
+  onEdit,
+  onRemove,
+}: Props) {
   const [note, setNote] = useState(mark.note);
   const isOwner = mark.origin === "owner";
   const dropped = mark.kept === false;
@@ -120,6 +134,9 @@ export function FootageMarkCard({ mark, active = false, busy, onSelect, onEdit, 
               }}
             />
           </Group>
+        )}
+        {!dropped && !mark.words_changed && (
+          <FootageFilesSection projectId={projectId} markId={mark.id} files={files} />
         )}
       </Stack>
     </Paper>

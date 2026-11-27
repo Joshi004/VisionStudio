@@ -21,6 +21,7 @@ import {
   useSuggestEvidenceClaims,
   type EvidenceClaim,
 } from "../../api/evidenceClaims";
+import { useFootageFiles, type FootageFile } from "../../api/footageFiles";
 import {
   useEditFootageMark,
   useFootageMarks,
@@ -452,6 +453,7 @@ export function StoryMarkup({ project, hasUnsavedStory, onGoToWrite }: Props) {
   const editFootage = useEditFootageMark(project.id);
   const removeFootage = useRemoveFootageMark(project.id);
   const suggestFootage = useSuggestFootageMarks(project.id);
+  const filesQuery = useFootageFiles(project.id, canFootage);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState<Active>(null);
@@ -472,6 +474,14 @@ export function StoryMarkup({ project, hasUnsavedStory, onGoToWrite }: Props) {
     () => (canFootage ? (footageQuery.data?.marks ?? []) : []),
     [canFootage, footageQuery.data],
   );
+  // The owner's own files on each footage mark, in the order they are shown.
+  const filesByMark = useMemo(() => {
+    const byMark = new Map<string, FootageFile[]>();
+    for (const file of canFootage ? (filesQuery.data?.files ?? []) : []) {
+      byMark.set(file.mark_id, [...(byMark.get(file.mark_id) ?? []), file]);
+    }
+    return byMark;
+  }, [canFootage, filesQuery.data]);
   const job = claimsQuery.data?.job ?? null;
   const asking = isJobActive(job);
   const footageJob = footageQuery.data?.job ?? null;
@@ -972,7 +982,9 @@ export function StoryMarkup({ project, hasUnsavedStory, onGoToWrite }: Props) {
                         footageHere.map((item) => (
                           <FootageMarkCard
                             key={item.id}
+                            projectId={project.id}
                             mark={item}
+                            files={filesByMark.get(item.id)}
                             busy={busy}
                             active={item.id === activeFootage?.id}
                             onEdit={(change) => changeFootage(item.id, change)}
@@ -1033,6 +1045,11 @@ export function StoryMarkup({ project, hasUnsavedStory, onGoToWrite }: Props) {
       {footageQuery.isError && (
         <Alert color="red" title="Could not load the footage marks">
           {describeError(footageQuery.error)}
+        </Alert>
+      )}
+      {filesQuery.isError && (
+        <Alert color="red" title="Could not load your footage files">
+          {describeError(filesQuery.error)}
         </Alert>
       )}
       {suggestFootage.isError && (

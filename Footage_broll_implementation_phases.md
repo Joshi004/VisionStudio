@@ -396,7 +396,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 |----|-------|------|-------------------|--------|
 | FTG-001 | Footage switch, tables and job types | Code | — | Completed |
 | FTG-002 | Marking footage and GLM's proposals | Code | FTG-001 | Completed |
-| FTG-003 | The owner's own files on a mark | Code | FTG-002 | Not Started |
+| FTG-003 | The owner's own files on a mark | Code | FTG-002 | Completed |
 | FTG-004 | Placing footage over the shots | Code | — | Not Started |
 | FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Not Started |
 | FTG-006 | Footage in the render | Code | FTG-005 | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 2 completed (FTG-001 and FTG-002, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 3 completed (FTG-001, FTG-002 and FTG-003, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -527,7 +527,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-003 — The owner's own files on a mark
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28; the owner still has to rebuild the real app and try the card in a browser)
 
 **Objective.** The owner adds a photo or a video of their own to a mark, and it is ready to be shown.
 
@@ -536,7 +536,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 **Scope.**
 - An upload endpoint per mark (`kind` `image` or `video`, an optional credit of at most 120 characters, one line):
   - an image is a PNG, JPEG or WebP (WebP stored as PNG), at most 20 MB and 40 M pixels, checked from its content, and becomes an item at once;
-  - a video is any file FFprobe reads with one video stream, at most 500 MB and 10 minutes. The job `prepare_footage_file` makes the stored copy: H.264, `yuv420p`, at most 1080 pixels high, **sound removed**, with its strip (a frame every 0.5 s) and its cut times (FFmpeg scene detection).
+  - a video is any file FFprobe reads with one video stream, at most 500 MB and 10 minutes. The job `prepare_footage_file` makes the stored copy: H.264, `yuv420p`, the shorter side at most 1080 pixels, **sound removed**, with its strip (a frame every 0.5 s) and its cut times (FFmpeg scene detection).
 - Items with `origin` `owner`, accepted when added and shown after the mark's other pieces. On the mark card the owner can remove one, change the order, and for a video set where it starts and ends, in steps of 0.5 s. The default is the first 15 s; `use` is 2 to 30 s for an owner's video.
 - The choices written as decision versions (§4.12).
 - **Planning decides:** where the strip and cut code lives so FTG-009 can match it (the capture tool is a separate uv project, so the code is likely written twice, with the same thresholds); the formats FFprobe must accept.
@@ -554,12 +554,38 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Upload endpoint and checks
-- [ ] `prepare_footage_file` handler
-- [ ] Mark card: files, order, start and end
-- [ ] Standard checks
+- [x] Upload endpoint and checks
+- [x] `prepare_footage_file` handler
+- [x] Mark card: files, order, start and end
+- [x] Standard checks
+- [ ] Owner: real app rebuilt (`docker compose up --build -d`, never `down -v`) and the mark card tried once in a browser
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration.** Everything is stored in the tables of `0106`: `footage_item` (`origin` `owner`, `import_id` NULL) and `footage_decision`.
+- **Backend modules:**
+  - `services/footage_decisions.py`: the project-wide decision versions. `add_accepted` (flushes; the upload commits it), `remove_item`, `reorder`, `set_use`, each one new version; nothing is stored when nothing changes. Content is as in the `FootageDecision` docstring, with `use` as `{item_key: {start_s, end_s}}` inside the mark's entry.
+  - `services/footage_frames.py`: `prepare` (the muted H.264 copy), `write_strip` and `find_cuts`, with the constants FTG-009 must copy: `STRIP_EVERY_S` 0.5, `STRIP_COLUMNS` 10, `STRIP_TILE_W` 192, `STRIP_TILE_H` 108 and `CUT_SCENE_THRESHOLD` 0.3.
+  - `services/footage_files.py`: the streamed upload and its checks, `remove_file`, `reorder_files`, `set_use` and `files_state`.
+  - `jobs/prepare_footage_file.py` (`local`, `start_again`, one at a time) and three phase labels in `jobs/phases.py`.
+  - `api/footage_files.py`: `GET /api/projects/{id}/footage-files`; `POST .../footage-marks/{mark_id}/files?kind=image|video[&credit=]` (raw body); `DELETE .../footage-files/{item_key}`; `PUT .../footage-marks/{mark_id}/order`; `PUT .../footage-files/{item_key}/use`.
+- **Frontend:** `api/footageFiles.ts`, `FootageFilesSection.tsx` (inside `FootageMarkCard.tsx`: add with an optional credit, thumbnail, status, Up, Down, Remove, and for a ready video the start and end boxes with a muted preview), and `StoryMarkup.tsx` loads the files. `schema.d.ts` was regenerated from the app's OpenAPI (additions only).
+- **Planning decided:**
+  - **Where the strip and cut code lives:** in `services/footage_frames.py` with the constants above; the capture tool will copy them (FTG-009).
+  - **Formats:** ffprobe's `format_name` must be `mov,mp4,m4a,3gp,3g2,mj2` (MP4, MOV, M4V) or `matroska,webm`. Anything else is refused, which also keeps playlist formats out.
+  - **Strip:** one JPEG grid of fixed 192x108 tiles (the picture fitted, never cropped); tile `n` is the frame at `n * 0.5` s. `capture` holds `strip_columns`, `strip_rows`, `strip_tile_px` and `strip_frames`.
+  - **Removing a file** is a decision version (verdict `rejected`, not in `shown`). The item row and its files stay stored.
+  - **Ids:** `piece_id` is `o<n>` where n counts every file ever added to the mark, so it can pass 9 after removals; at most 9 files are shown on a mark. `item_key` is `owner-<uuid hex>`.
+  - **A video's start and end:** both in steps of 0.5 s (the end may also be the very end of the video), inside the video, 2 to 30 s. Until the owner moves it, `use` is the first 15 s (or the whole video if shorter). The default is stored in `capture.use`; the owner's choice is in the decision.
+- **Deviation from Scope:** the size cap of a prepared video is on the **shorter side** (1080), not on the height, so a portrait 1080x1920 video keeps its size. The Scope line above was changed to say so. §4.8 (the agent's import) still says "at most 1080 pixels high"; FTG-011 should read it the same way or the two will disagree for portrait pieces.
+- **Checked** on a throwaway database and data folder (no paid call, the real app on port 5480 was not touched):
+  - PNG, JPEG, WebP (stored as PNG, transparency kept), MP4, MOV, MKV and WebM uploads work; each video was prepared by the job.
+  - Refused with a sentence: a text file named `.png`, an image over 20 MB (413), an audio-only file, a playlist file, a 1 s video, an image sent as a video and a video sent as an image, a wrong content type (415), a credit over 120 characters, a story project, an unknown mark (404).
+  - Every prepared video has one H.264 `yuv420p` stream and no audio (the MOV test file had a sound track); a 1080x1920 file stayed 1080x1920. The strip has `ceil(duration / 0.5)` tiles (13 for 6.2 s).
+  - A video made of 3 s red then blue: the cut was found at 3.0 s, and a one-colour video has none.
+  - Each add, reorder, move and removal made exactly one decision version; an unchanged order and a repeated removal made none; earlier versions were identical afterwards. Removed files stayed stored. The temp folder was empty at the end.
+  - `ruff check`, `ruff format --check`, `npm run lint` and `npm run typecheck` pass.
+- **A failing prepare job** was checked with a cut-off MKV that ffprobe still reads: the job failed with "The prepared video is not as long as the original.", the item read `failed` with that text, and nothing was stored for it.
+- **Not checked:** the card in a browser (typecheck and lint only), and a video near the limits (500 MB, 10 min).
 
 ### FTG-004 — Placing footage over the shots
 
@@ -1015,3 +1041,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | — | Document written. |
 | 2026-11-28 | FTG-001 | Completed: migration `0106` (`project.footage`, six footage tables, five job types), models, the switch on the API and both forms, `DATABASE_STRUCTURE.md` (with `0105`). |
 | 2026-11-28 | FTG-002 | Completed: footage marks (service, API, GLM proposals job), the `footage_marks` step and board entry, and the story box layer, toolbar row and card. No migration. |
+| 2026-11-28 | FTG-003 | Completed: the owner's photos and videos on a mark (upload API, `prepare_footage_file` job, decision versions, files section on the mark card). No migration. |
