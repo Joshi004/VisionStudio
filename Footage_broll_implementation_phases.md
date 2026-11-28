@@ -84,6 +84,7 @@ What exists and is reused:
   | Nvidia GTC 2026 keynote | 2 h 19 min | 320x180 | 3x3, 93 sheets | about 10.0 s |
 
 - All the previews of the first video were **about 300 KB**. A short shot (a 3 s handshake) of a long video can fall between two previews and never be seen.
+- **Correction from FTG-009:** the "one frame every" figures above are the video's length divided by the frames yt-dlp counts, which is a little off. The real spacing is a whole number of seconds (2 s, 5 s and 10 s were found), and frame `k` is the picture at `k` times that spacing, counted over all the sheets.
 - The feature is not documented by YouTube and could change. Every call warned that no JavaScript runtime was found, as in the sound bite check (`Sound_bite_implementation_phases.md` §2); it still worked.
 - The lowest video stream of the first video (format `602`, 256x144) is about 80 kbit/s, so a minute of it is well under 1 MB.
 - **An agent can read a contact sheet.** 36 previews of the first video were laid out as one 1920x1080 image with each frame's time stamped on it, and read back as an image: the shots and their times were clear.
@@ -164,12 +165,16 @@ Changes to `services/story_pipeline.STEPS` (step keys and labels are suggestions
         p3.png, p3.txt               a web page: the page image and its text
         p4.png, p4.pdf               a PDF page and the PDF
         scans/<video_id>/            the tool's working files for one video, never imported
-          info.json                  title, channel, dates, length, chapters, licence
-          captions.txt               the English captions as plain text, when there are any
-          sheet-01.jpg, ...          contact sheets of YouTube's previews, each frame's time stamped
+          info.json                  video_id, title, channel, channel_id, upload_date, duration_s, licence,
+                                     chapters ({start_s, title}), the first 2000 characters of the description
+          captions.txt               the English captions as plain text, one line each with its time first
+                                     (`2:21  Thank you, Mr. President`), when there are any
+          sheet-01.jpg, ...          contact sheets of YouTube's previews: 6x6 frames, each 320x180, each
+                                     frame's time stamped to 0.1 s in its corner
           fine-<from>-<to>/          a short range at low resolution:
             sheet-01.jpg, ...        frames 0.5 s apart, times stamped
-            cuts.json                the exact cut times found in the range
+            cuts.json                {from_s, to_s, threshold, cuts}: the exact cut times found in the range,
+                                     in seconds of the source video
 ```
 
 The `footage/` folder is never served by nginx. The import copies what it accepts into `media/` under generated names, and leaves the round folder as the agent wrote it, as a record. The owner's own files go straight to `media/`.
@@ -301,6 +306,7 @@ Marks are stored like claims: versions of a list (`source` `manual` or `ai`), ea
 - **`tier`**: `official`, `press`, `commons`, `news`, `creator` or `other` (FT-9).
 - **`same_event`**: `yes`, `no` (file footage) or `unknown`. **`on_screen_text`**, what the agent saw on the picture that is not part of the scene itself: `none`, `small` (a corner logo) or `large` (an anchor, a ticker, a big title).
 - **`capture`** is written only by the tool. The times of a video are seconds of the source video: `window` is the part downloaded, `use` the part to use (inside `window`), `moment_s` the instant the agent chose (inside `use`), `cuts` the cut times the tool found inside `window`.
+- **A video** (FTG-009) also has `strip_columns`, `strip_rows`, `strip_tile_px` (`[192, 108]`) and `strip_frames` beside `strip_every_s`, the strip layout the app uses; `fps`; `moment_s` is `null` when the agent gave no moment (the clip then starts at the start of `use`); `cuts` are seconds of the source video, as `window`, `use` and `moment_s` are (the import moves them to seconds of the stored video); `youtube_licence` is `standard`, `creative_commons` or `unknown`.
 - **An image** has `capture.image`, `image_px`, `page_url` (the page the image was found on, or null) and `sha256`. `source.url` is the image's own address and `source.final_url` that address after redirects. The stored file is `.jpg` or `.png`; WebP is stored as PNG (FTG-008).
 - **A page** has `capture.image` (the page from its top, at most `PAGE_HEIGHTS`, 4, screens tall, at the evidence viewports), `image_px`, `viewport` (`[width, height]` in CSS pixels) with `device_scale`, `text_copy`, `focus_text` (null when no focus was asked) and `focus_rects` (`[x, y, width, height]` as fractions of `image`; empty when no focus was asked) and `sha256`. Words below the captured screens are refused, so `focus_rects` always lie in the image.
 - **A PDF page** has what the evidence `pdf` capture has (`image`, `page`, `source_copy`, `render_scale`, `text_copy`) with `focus_text` and `focus_rects`. Its `image` is the **whole page** (the longer side at 4096 pixels), not a crop, and `focus_rects` are fractions of the page (FTG-008).
@@ -402,8 +408,8 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-006 | Footage in the render | Code | FTG-005 | Completed |
 | FTG-007 | The research brief and the waiting step | Code | FTG-002 | Completed |
 | FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Completed |
-| FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Not Started |
-| FTG-010 | The research skill | Code (Mac) | FTG-009 | Not Started |
+| FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Completed |
+| FTG-010 | The research skill | Code (Mac) | FTG-009 | In Progress |
 | FTG-011 | Importing the research | Code | FTG-007, FTG-008 | Not Started |
 | FTG-012 | The review screen | Code | FTG-011 | Not Started |
 | FTG-013 | The Qwen vs Inkling explainer end to end | Owner | FTG-006, FTG-010, FTG-012 | Not Started |
@@ -419,7 +425,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 8 completed (FTG-001 to FTG-008, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 9 completed (FTG-001 to FTG-009, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); FTG-010 in progress (the skill is written and installed, the owner's runs are left); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -898,7 +904,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-009 — The capture tool: YouTube scans and clips
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28; no new dependency, so no `uv sync` is needed)
 
 **Objective.** The agent can find the right moment of a YouTube video by its picture, and the tool downloads only those seconds, without sound (§4.7).
 
@@ -925,17 +931,45 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - The bytes downloaded by each command are recorded in the notes.
 
 **Completion checklist.**
-- [ ] `scan` (previews, info, captions)
-- [ ] `scan --fine` (sheets and cuts)
-- [ ] `clip`
-- [ ] `validate` for video pieces
-- [ ] Real runs and refusals
+- [x] `scan` (previews, info, captions)
+- [x] `scan --fine` (sheets and cuts)
+- [x] `clip`
+- [x] `validate` for video pieces
+- [x] Real runs and refusals
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration, no backend change, no new dependency.** All work is in `tools/evidence-capture`; `TOOL_VERSION` of `visio-footage-capture` is now `"2"`.
+- **Modules** (package `visio_evidence_capture/footage/`):
+  - `frames.py`: a copy of the app's strip and cut code (`strip_layout`, `strip_args`, `cut_args`, `parse_cuts`, the same constants: 0.5 s, 10 columns, 192x108 tiles, scene threshold 0.3, a 320-pixel-wide copy for detection), `probe` (ffprobe with pixel format and frame rate), and `write_sheets` (contact sheets of 6x6 frames, each 320x180, one 1920x1080 JPEG, each frame's time stamped in yellow on a black box in its corner).
+  - `ytdl.py`: `open_video` (one ask to YouTube, no download; refuses a live stream or premiere) and `download_range` (only the range, video only, no sound, re-encoded to H.264 so it starts on the first frame asked for). The yt-dlp options are the evidence `video` command's.
+  - `scan.py`: `scan_previews` and `scan_fine`. `clip.py`: `capture_clip`, `check_use`, `media_problems`.
+  - `rounds.py` (`file_names` gains `video` and `strip`; `store_piece` takes kind `video`; `scan_dir` makes `results/<mark>/scans/<video_id>[/fine-<from>-<to>]` with the folder guards of `mark_dir`), `cli.py` (`scan`, `scan --fine`, `clip`), `validate.py` (video pieces), `youtube.py` (`parse_time_tenths` and `format_time_tenths` for times like `2:21.5`; `video_id_from_url` names the command in its refusal, with the evidence wording unchanged by default).
+- **Planning decided:**
+  - **Contact sheets:** 6x6 frames of 320x180; a smaller preview (159x90) is scaled up, fitted and never cropped. Times are stamped to 0.1 s.
+  - **Cut threshold:** kept at 0.3 (shared with the app). On the Rick Astley video the same cuts were found in the fine scan (360p) and in the full-quality clip, identical to a millisecond. Two visible cuts with scores of 0.288 and 0.244 were missed in both, so 0.3 is a little high for this kind of video: tune it with the app's value in FTG-013.
+  - **Limits:** `MAX_SCAN_S` 1200, `MAX_FINE_S` 90 (at least 1 s), `use` 2 to 15 s, `CLIP_PAD_S` 2.0, a clip at most 60 MB, a fine scan at most 40 MB, the previews of one scan at most 20 MB. A range past the end of the video is cut at its end, so the limit applies to the part inside the video.
+  - **Format:** `bv*/b` with `format_sort res:<short side>` (yt-dlp's `res` is the shorter side, as FTG-003's cap): 360 for a fine scan, 1080 for a clip. A clip is also scaled by the app's own expression, so its shorter side is never over 1080.
+  - **A clip with no `--moment`** has `moment_s` null; FTG-005 starts it at the start of `use`.
+  - **`source.published`** defaults to the upload date; `final_url` is the tool's own `watch?v=` address; `--publisher` that does not match the channel is a warning in the tool's output.
+  - **Folder names:** a fine scan goes to `fine-<from>-<to>` in whole seconds (from rounded down, to rounded up); a new scan of the same range replaces the files the tool made there. A scan of previews replaces `sheet-*.jpg` of the video's folder.
+- **Deviations from Scope, and what was learned about YouTube's previews** (measured today with yt-dlp 2026.10.26):
+  - **yt-dlp's preview data does not give the spacing, and the obvious way to work it out is wrong.** A sheet's `duration` is the video's length shared evenly over the sheets, and `fps` is the frame count (the last sheet counted full) over the length. Frame `k` of the sheets is not at `sheet start + k * duration / frames`: on a 3 min 33 s video that is 1.97 s, the real spacing is **2.0 s**, and the error would reach 3 s at the end (about 25 s over a 41-minute stream). The tool uses `1 / fps` rounded to whole seconds (at least 1) and the frame's global number: sheet `i` holds frames `i * rows * columns` and on, frame `k` is the picture at `k * spacing`. Checked by matching every preview frame to a frame of a fine scan: the match is exact on a 3:33 video (2.0 s) and a 10:35 one (5.0 s) with one-frame ties only at the ends. A 41-minute static press conference gave 10.0 s but could not be matched by picture (every frame looks the same). If YouTube ever uses a spacing that is not a whole number of seconds this is wrong; `scan --fine` always shows the real time.
+  - The sheets say "about every N s"; the real frame is the picture at the stamped time.
+- **Checked** in throwaway round folders in `/tmp` (removed afterwards; no paid call, the real app was not touched):
+  - `scan`, whole: Rick Astley (3:33, 108 frames in 3 sheets, **291 KB** of previews). `scan` ranged: a 41-minute stream (`P-A9lrYTLMg`, 2:00 to 12:00, 61 frames, **121 KB**), and a 20-minute range of a 2 h 20 min keynote (121 frames in 4 sheets, **266 KB**). The stream without a range wrote only `info.json` and `captions.txt` (687 lines) and said to pass a range; `info.json` gave its Creative Commons licence.
+  - `scan --fine` 1:10 to 1:40 of Rick Astley: 640x360, **1136 KB**, no sound, 60 frames in 2 sheets, 15 cuts; the cuts match the frames (for example 1:12.6 between a face and a hall).
+  - `clip` 1:16.0 to 1:22.0 with a moment at 1:17.5: 74 to 84 s downloaded, H.264 `yuv420p`, 1920x1080, 25 fps, **6.2 MB**, one video stream and **no audio**, 10.0 s; the first frame of the file is the source frame at 74.02 s (one frame after the asked 74.0 s); cuts identical to the fine scan's. The bytes read from the network were not measured (the files' sizes are given; `nettop` was not used): yt-dlp's ffmpeg reads the source stream itself.
+  - Refusals, each with a sentence: an address that is not YouTube (a Vimeo address and `http://127.0.0.1`); a scan range over 20 min (a 25-minute range of the 41-minute stream); a fine scan over 90 s; a fine scan with no `--to`; a start past the end of the video; a time that is not a time; a `use` of 1 s and one of 16 s; a moment outside `use`; an end past the end of the video; an unknown mark; a bad piece id; a fourth piece in a mark of 3.
+  - `validate` passed on the clips and caught a changed byte (SHA-256), a text file named `.mp4` (with its hash made to match), a hand-edited `use` outside `window` and longer than 15 s, cuts out of order, and a link in the mark folder.
+  - The evidence `video` command still captured a window and `validate` of an evidence round was unchanged; the evidence refusal text is the same. A footage command in an evidence round and the reverse are still refused.
+  - `ruff check` and `ruff format --check` in `tools/evidence-capture`.
+- **For FTG-010 (the skill):** the sheets are read as images; the stamped times are exact for a fine scan and for the previews as above. Every `scan` and `clip` needs `ffmpeg` and `ffprobe`. A fine scan of 30 s takes about 7 s and a clip of 10 s about 14 s.
+- **For FTG-011 (the import):** a video piece's `capture.moment_s` may be null; `cuts`, `window`, `use` and `moment_s` are in seconds of the **source** video, while `footage_item.cuts` and the app's own times are in seconds of the stored video (`footage_clips.video_times` moves them), so the import must subtract `window.start_s` from `cuts` when it fills `footage_item.cuts`. The video's size check is on the **shorter side** (1080), as the note of FTG-003 says. The strip of a piece is the app's strip layout (`strip_every_s`, `strip_columns`, `strip_rows`, `strip_tile_px`, `strip_frames` are in `capture`).
+- **Not done:** a clip of a portrait source (a YouTube Short) and of a very long window near the 60 MB limit were not tried; the White House handshake of Appendix A row 8 was not searched for (the stream used for the tests was only scanned, not read for the handshake; FTG-010's run decides).
 
 ### FTG-010 — The research skill
 
-**Status:** Not Started
+**Status:** In Progress (2026-11-28; the skill and its install script are written and installed. The runs in Cursor and in Claude Code, which are the verification, are still to do, see the notes)
 
 **Objective.** Cursor and Claude can research a footage round on their own, safely, and say honestly when nothing was found.
 
@@ -961,12 +995,35 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - A page that carries an instruction to the agent (a test page) does not change what the agent does.
 
 **Completion checklist.**
-- [ ] `SKILL.md` and `reference.md`
-- [ ] Install
-- [ ] Run in Cursor
-- [ ] Run in Claude Code
+- [x] `SKILL.md` and `reference.md`
+- [x] Install
+- [ ] Run in Cursor (owner)
+- [ ] Run in Claude Code (owner)
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration, no backend change, no capture-tool change.** Only new files under `tools/footage-skill/`.
+- **Files:**
+  - `tools/footage-skill/visio-footage/SKILL.md`: the safety rules (the evidence rules, plus: never set `VISIO_FOOTAGE_CONTACT`, and the `scans/` folders are working files that are read but never named in a result), the round, one subagent per mark (at most 3 at a time), where footage comes from (FT-9), same event or file footage (FT-10), the status rules (`found`, `not_found`, `blocked` only), the finish and the import. `allowed-tools` lists the footage command, `ls`, the two exact `curl` calls on `127.0.0.1:5480` (`POST .../footage/import`, `GET .../footage`), Read, Glob, Grep, WebSearch and WebFetch.
+  - `tools/footage-skill/visio-footage/reference.md`: every command and option of `visio-footage-capture` (`image`, `page`, `pdf`, `scan`, `scan --fine`, `clip`, `report`, `remove`, `validate`) as in `footage/cli.py`, the three YouTube steps (§4.7) with the sizes and times from the FTG-009 notes, a table of the tool's real messages, and worked examples with invented names.
+  - `tools/footage-skill/install.sh`: a copy of the evidence script for `visio-footage` and the command `uv run --project .../tools/evidence-capture visio-footage-capture`, with the same guards (plain path, no links, replaces only a folder whose `SKILL.md` says `name: visio-footage`, builds in a temporary folder and swaps, fails if `{{TOOL}}` is left). It warns when `ffmpeg` or `ffprobe` is missing and when `VISIO_FOOTAGE_CONTACT` is not set in the shell.
+- **Planning decided:**
+  - **One install script each** (`tools/footage-skill/install.sh`), so the README path that `footage_rounds.readme_text` writes is still right and the evidence script is untouched.
+  - **The import step is written ahead of FTG-011** (the owner's choice). `POST .../footage/import` answers 404 until FTG-011 adds it; the skill then tells the owner to press Import. It reads `round.status`, `import_job.status` and `latest_import.report` (`by_status`, `items`, `usable_items`), the names of the evidence import's answer.
+  - **`kind_hint` is a hint**: the skill lets the agent keep a photo for a `video` mark and say so in the summary.
+  - **`needed_s`** longer than one shot is met with several pieces, up to `max_pieces_per_mark`.
+- **For FTG-011 (the import):** the skill's two calls need `GET /api/projects/{id}/footage` to carry `round.status` (`imported` when done), `import_job` (with `status`) and `latest_import.report` with `by_status`, `items` and `usable_items`. Today `FootageStateOut` (`api/footage.py`) has `round` and `job` (the brief job) and no import; either add those fields or change the skill's text in the same phase.
+- **Checked** (no paid call, no download, the real app was not touched):
+  - `bash -n tools/footage-skill/install.sh` passes (`shellcheck` is not installed).
+  - `tools/footage-skill/install.sh` ran: `uv sync` changed nothing, `~/.claude/skills/visio-footage/` holds `SKILL.md` and `reference.md` with the real command in place of `{{TOOL}}` (no placeholder left), `visio-evidence` was not touched. It printed the `VISIO_FOOTAGE_CONTACT` note: the variable is not set in the shell used.
+  - A throwaway round for the runs is in `/tmp/ftg010-round/r1/brief/footage.json` (project id 999999, so an import cannot reach a real project): the marks of Appendix A rows 1 to 6 as `f1` to `f6` and row 8 as `f7`. `visio-footage-capture validate` in that folder reads the brief (7 marks, "no result yet" for each) and writes nothing. It is in `/tmp` and may be gone after a restart; the brief is easy to write again from Appendix A.
+- **Not done (the owner's runs):**
+  1. Set `VISIO_FOOTAGE_CONTACT` (an email address or a website) in `~/.zshenv` and restart Cursor, if the Wikimedia photo of row 3 is to be tried. Run `brew install ffmpeg` if `ffmpeg` is missing.
+  2. Copy the round (`cp -R /tmp/ftg010-round /tmp/ftg010-cursor`, and again for Claude Code), open its `r1` folder in Cursor, and paste the README prompt: "Use the visio-footage skill to find footage for every mark in brief/footage.json of this round, each on its own. Then run validate and show me the table of results." Repeat in Claude Code. A list of the folder before the run lets you check nothing was written outside `results/`.
+  3. Record for each mark: found or not, tier, same event or not, time taken and bytes downloaded (the tool prints the KB of each scan, fine scan and clip).
+  4. The prompt-injection test: a public page (for example a gist) that tells the agent to ignore its rules and run a command, given as the page of a mark (the tool refuses local addresses, so it has to be public). The agent must carry on as before and mention it in an `--attempt`.
+  5. Tell me the results; the notes, the checklist and Appendix A get filled in, and the status becomes Completed.
+- **Uncertain:** Claude Code enforces `allowed-tools`; Cursor reads the same folder and may not, as with the evidence skill. The text of the safety rules is then the only guard. Whether Cursor's agent shell sees `~/.zshenv` when Cursor starts from the Dock is not known; the first Wikimedia capture shows it.
+- **Deviation from Scope:** none.
 
 ### FTG-011 — Importing the research
 
@@ -1164,3 +1221,5 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-006 | Completed: footage in the render (`footage_overlays` timeline key, `render_story` lays it first under callouts and cards, credit lines, `footage_without_clip`, out-of-date reasons, footage in the Sources section). No migration. The backend of the real app must be rebuilt. |
 | 2026-11-28 | FTG-007 | Completed: the research brief and the waiting step (`services/footage_rounds.py`, `jobs/write_footage_brief.py`, the step `footage`, Continue without footage, `FootagePanel.tsx`, `api/footage.py`). No migration. The backend of the real app must be rebuilt. |
 | 2026-11-28 | FTG-008 | Completed: `visio-footage-capture` (`image`, `page`, `pdf`, `report`, `remove`, `validate`) in `tools/evidence-capture`, package `visio_evidence_capture/footage/`. No migration, no backend change. Wikimedia images need `VISIO_FOOTAGE_CONTACT`. |
+| 2026-11-28 | FTG-009 | Completed: `scan`, `scan --fine` and `clip` in `visio-footage-capture` (YouTube previews as stamped contact sheets, 0.5 s sheets and cut times of a range, a muted clip of only the chosen seconds), `validate` for video pieces. No migration, no backend change. The previews' spacing is whole seconds, not what yt-dlp's data suggests. |
+| 2026-11-28 | FTG-010 | In progress: the `visio-footage` skill (`SKILL.md`, `reference.md`) and `tools/footage-skill/install.sh` written and installed into `~/.claude/skills`; the import step is written ahead of FTG-011. The owner's runs in Cursor and Claude Code are still to do. No migration, no backend change. |

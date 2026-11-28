@@ -25,13 +25,13 @@ from ..rounds import (
 from . import (
     BRIEF_SCHEMA,
     BRIEF_VERSION,
+    KINDS,
     ON_SCREEN_TEXT,
     RESULT_SCHEMA,
     RESULT_VERSION,
     SAME_EVENT,
     STATUSES,
     STATUSES_WITH_PIECES,
-    STILL_KINDS,
     TIERS,
     TOOL_NAME,
     TOOL_VERSION,
@@ -39,6 +39,8 @@ from . import (
 
 MARK_ID: Final = re.compile(r"^f\d+$")
 PIECE_ID: Final = re.compile(r"^p[1-9]$")
+VIDEO_ID_NAME: Final = re.compile(r"^[A-Za-z0-9_-]{11}$")
+SCAN_SUB: Final = re.compile(r"^fine-\d{1,6}-\d{1,6}$")
 
 # Longest text the tool stores for each flag (the shared limits plus the footage ones).
 LIMITS: Final = {
@@ -53,13 +55,15 @@ DEFAULT_MAX_PIECES: Final = 3
 
 def file_names(piece_id: str) -> dict[str, str]:
     """The only file names the tool makes for one piece. An image keeps its own type, so it is
-    `.jpg` or `.png`; FTG-009 adds the video and its strip.
+    `.jpg` or `.png`; a video is `.mp4` with its strip.
     """
     return {
         "image": f"{piece_id}.png",
         "image_jpeg": f"{piece_id}.jpg",
         "text_copy": f"{piece_id}.txt",
         "source_copy": f"{piece_id}.pdf",
+        "video": f"{piece_id}.mp4",
+        "strip": f"{piece_id}-strip.jpg",
     }
 
 
@@ -261,6 +265,24 @@ class FootageRound:
             raise Refused(f"results/{mark_id} is outside the round.")
         return folder
 
+    def scan_dir(self, mark_id: str, video_id: str, sub: str | None = None) -> Path:
+        """The tool's working folder for one video of a mark, `results/<mark>/scans/<video_id>`
+        (or a folder of it named `sub`), made when it is not there. The agent reads it and the
+        import never does. Refuses a link or anything outside the round; `video_id` and `sub`
+        are names the tool made, checked here.
+        """
+        if not VIDEO_ID_NAME.match(video_id) or (sub is not None and not SCAN_SUB.match(sub)):
+            raise Refused("Internal error: a scan folder name that the tool does not make.")
+        folder = self.mark_dir(mark_id, create=True)
+        for part in ("scans", video_id) + ((sub,) if sub else ()):
+            folder = folder / part
+            if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
+                raise Refused(f"{folder.relative_to(self.root)} is a link or not a folder.")
+            folder.mkdir(exist_ok=True)
+            if not folder.resolve().is_relative_to(self.root):
+                raise Refused(f"{folder.relative_to(self.root)} is outside the round.")
+        return folder
+
     @staticmethod
     def check_piece_id(piece_id: str) -> None:
         if not PIECE_ID.match(piece_id):
@@ -330,8 +352,8 @@ class FootageRound:
         """
         piece_id = entry["id"]
         self.check_piece_id(piece_id)
-        if entry["kind"] not in STILL_KINDS:
-            raise Refused(f"kind must be one of: {', '.join(STILL_KINDS)}.")
+        if entry["kind"] not in KINDS:
+            raise Refused(f"kind must be one of: {', '.join(KINDS)}.")
         self.check_room(mark_id, piece_id)
         result = self.result_or_new(mark_id)
         folder = self.mark_dir(mark_id, create=True)

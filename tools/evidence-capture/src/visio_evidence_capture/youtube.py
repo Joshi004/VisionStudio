@@ -40,9 +40,12 @@ MIN_LAST_WORD_S: Final = 0.3
 # --- Addresses and small values ------------------------------------------------------------
 
 
-def video_id_from_url(url: str) -> str:
+def video_id_from_url(
+    url: str, *, command: str = "video", other_command: str = "the web command"
+) -> str:
     """The 11-character id of a YouTube video, from a watch, youtu.be, shorts or embed address.
-    Anything else is refused.
+    Anything else is refused. `command` and `other_command` name, in the refusal, the command
+    that was run and the one to use for any other page.
     """
     try:
         parts = urlsplit(url.strip())
@@ -56,8 +59,8 @@ def video_id_from_url(url: str) -> str:
         raise Refused("An address with a user name or password is refused (no logins).")
     if host not in YOUTUBE_HOSTS:
         raise Refused(
-            "The video command only takes YouTube addresses (youtube.com or youtu.be). "
-            "For another page, use the web command."
+            f"The {command} command only takes YouTube addresses (youtube.com or youtu.be). "
+            f"For another page, use {other_command}."
         )
     segments = [part for part in parts.path.split("/") if part]
     candidate: str | None = None
@@ -90,6 +93,19 @@ def parse_time(text: str) -> float:
     return float(seconds)
 
 
+def parse_time_tenths(text: str) -> float:
+    """`2:21.5`, `1:02:03.5`, `141.5` or `141` as seconds. Used by the footage commands, which
+    work to a tenth of a second. `parse_time` is unchanged."""
+    cleaned = text.strip()
+    whole, _, fraction = cleaned.partition(".")
+    if fraction and not re.fullmatch(r"\d{1,3}", fraction, re.ASCII):
+        raise Refused(
+            "A time must look like 2:21.5, 1:02:03 or 141.5 (seconds, at most 3 decimals)."
+        )
+    seconds = parse_time(whole)
+    return round(seconds + (float(f"0.{fraction}") if fraction else 0.0), 3)
+
+
 def format_time(seconds: float) -> str:
     total = max(0, int(seconds))
     hours, rest = divmod(total, 3600)
@@ -103,6 +119,13 @@ def upload_date_of(info: dict[str, Any]) -> str | None:
     """`YYYY-MM-DD` from yt-dlp's `YYYYMMDD`, or None."""
     found = UPLOAD_DATE.match(str(info.get("upload_date") or ""))
     return "-".join(found.groups()) if found else None
+
+
+def format_time_tenths(seconds: float) -> str:
+    """`2:21.5` or `1:02:03.5`: the time to a tenth of a second."""
+    tenths = max(0, round(seconds * 10))
+    whole, tenth = divmod(tenths, 10)
+    return f"{format_time(whole)}.{tenth}"
 
 
 def licence_of(info: dict[str, Any]) -> str:

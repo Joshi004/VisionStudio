@@ -2,8 +2,7 @@
 problems before the owner imports. The import (FTG-011) applies the same checks again and does
 not trust this one.
 
-This version checks the still kinds (`image`, `page`, `pdf`). A `video` piece is made and checked
-by the YouTube commands (FTG-009).
+It checks every kind: `image`, `page` and `pdf` (FTG-008) and `video` (FTG-009).
 """
 
 from __future__ import annotations
@@ -32,8 +31,12 @@ from ..validate import (
 )
 from ..web import LANDSCAPE_VIEWPORT, PORTRAIT_VIEWPORT
 from . import (
+    CLIP_MAX_S,
+    CLIP_MIN_S,
     KINDS,
     LOW_RES_LONG_SIDE,
+    LOW_RES_SHORT_SIDE,
+    MAX_CLIP_BYTES,
     MAX_IMAGE_PIXELS,
     ON_SCREEN_TEXT,
     PAGE_HEIGHTS,
@@ -46,7 +49,9 @@ from . import (
     TIERS,
     TOOL_NAME,
 )
-from .rounds import PIECE_ID, FootageRound
+from .clip import media_problems
+from .frames import probe, strip_layout
+from .rounds import PIECE_ID, VIDEO_ID_NAME, FootageRound
 
 Problem = Callable[[str], None]
 
@@ -199,9 +204,10 @@ def _validate_piece(
         return
     if capture.get("tool") != TOOL_NAME:
         problem(f"the capture was not made by {TOOL_NAME} (captures are never written by hand).")
+    if kind == "video":
+        _check_video(rnd, folder, capture, named, problem, warn)
+        return
     if kind not in STILL_KINDS:
-        if kind == "video":
-            problem("video pieces cannot be checked by this version of the tool.")
         return
 
     data = _check_files(rnd, folder, kind, capture, named, problem)
@@ -234,12 +240,22 @@ _FILES: Final = {
         ("text_copy", "text", MAX_TEXT_BYTES, True),
         ("source_copy", "pdf", MAX_PDF_BYTES, True),
     ),
+    "video": (
+        ("media", "mp4", MAX_CLIP_BYTES, True),
+        ("strip", "jpeg", MAX_IMAGE_BYTES, True),
+    ),
 }
+
+_TYPE_NAMES: Final = {"image": "JPEG or PNG", "mp4": "MP4", "jpeg": "JPEG"}
 
 
 def _type_ok(wanted: str, content: bytes) -> bool:
     if wanted == "image":
         return content.startswith((b"\xff\xd8\xff", PNG_SIGNATURE))
+    if wanted == "jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if wanted == "mp4":
+        return content[4:8] == b"ftyp"
     return _file_type_ok(wanted, content)
 
 
@@ -278,7 +294,7 @@ def _check_files(
         if hashes.get(name) != hashlib.sha256(content).hexdigest():
             problem(f"{name} does not match its recorded SHA-256 (it was changed).")
         if not _type_ok(wanted, content):
-            problem(f"{name} is not a real {'JPEG or PNG' if wanted == 'image' else wanted} file.")
+            problem(f"{name} is not a real {_TYPE_NAMES.get(wanted, wanted)} file.")
             continue
         data[key] = content
     return data
@@ -362,6 +378,136 @@ def _open(content: bytes, problem: Problem):
     except Refused as error:
         problem(str(error))
         return None
+
+
+# --- Video pieces (checks 2 to 4) ------------------------------------------------------------
+
+FPS_TOLERANCE: Final = 0.01
+_YOUTUBE_LICENCES: Final = ("standard", "creative_commons", "unknown")
+
+
+def _number_or_none(value: object) -> float | None:
+    return float(value) if _is_number(value) else None
+
+
+def _check_video(
+    rnd: FootageRound,
+    folder: Path,
+    capture: dict[str, Any],
+    named: set[str],
+    problem: Problem,
+    warn: Problem,
+) -> None:
+    """Files, ffprobe and places of a video piece (§4.8 checks 2 to 4)."""
+    data = _check_files(rnd, folder, "video", capture, named, problem)
+    video_id = capture.get("video_id")
+    if not (isinstance(video_id, str) and VIDEO_ID_NAME.match(video_id)):
+        problem("capture.video_id is not a YouTube video id (11 characters).")
+    if capture.get("youtube_licence") not in _YOUTUBE_LICENCES:
+        problem(f"capture.youtube_licence must be one of: {', '.join(_YOUTUBE_LICENCES)}.")
+    if not _is_date_or_none(capture.get("upload_date")):
+        problem("capture.upload_date must be a date written YYYY-MM-DD, or null.")
+
+    duration = _number_or_none(capture.get("duration_s"))
+    window = _pair(capture.get("window"))
+    use = _pair(capture.get("use"))
+    if duration is None or duration <= 0:
+        problem("capture.duration_s is missing.")
+    if window is None:
+        problem("capture.window must be {start_s, end_s}.")
+    if use is None:
+        problem("capture.use must be {start_s, end_s}.")
+    if duration is not None and window is not None:
+        if window[0] < -EPSILON or window[1] <= window[0] or window[1] > duration + EPSILON:
+            problem("the window must lie inside the video (0 to duration_s).")
+    if window is not None and use is not None:
+        if use[0] < window[0] - EPSILON or use[1] > window[1] + EPSILON or use[1] <= use[0]:
+            problem("use must lie inside the window.")
+        length = use[1] - use[0]
+        if not CLIP_MIN_S - EPSILON <= length <= CLIP_MAX_S + EPSILON:
+            problem(
+                f"use lasts {length:.1f} s, but it must last {CLIP_MIN_S:.0f} to "
+                f"{CLIP_MAX_S:.0f} s."
+            )
+    moment = capture.get("moment_s")
+    if moment is not None:
+        if not _is_number(moment):
+            problem("moment_s must be a number or null.")
+        elif use is not None and not use[0] - EPSILON <= moment <= use[1] + EPSILON:
+            problem("moment_s must lie inside use.")
+    _check_cuts(capture.get("cuts"), window, problem)
+
+    if "media" not in data:
+        return
+    path = capture_file(folder, capture["media"], root=rnd.root)
+    try:
+        facts = probe(path)
+    except Refused as error:
+        problem(str(error))
+        return
+    expected = window[1] - window[0] if window is not None else facts.duration_s
+    for text in media_problems(facts, expected):
+        problem(f"{capture['media']}: {text}.")
+    if capture.get("video_px") != [facts.width, facts.height]:
+        problem(
+            f"video_px {capture.get('video_px')!r} is not the video's real size "
+            f"[{facts.width}, {facts.height}]."
+        )
+    fps = _number_or_none(capture.get("fps"))
+    if fps is None or abs(fps - facts.fps) > FPS_TOLERANCE:
+        problem(f"fps {capture.get('fps')!r} is not the video's real rate ({facts.fps:.3f}).")
+    _check_strip(capture, data.get("strip"), facts.duration_s, problem)
+    if facts.short_side < LOW_RES_SHORT_SIDE:
+        warn(f"the video is small ({facts.width}x{facts.height}); it will look soft full screen.")
+
+
+def _pair(value: object) -> tuple[float, float] | None:
+    if not isinstance(value, dict):
+        return None
+    start, end = _number_or_none(value.get("start_s")), _number_or_none(value.get("end_s"))
+    return None if start is None or end is None else (start, end)
+
+
+def _check_cuts(cuts: object, window: tuple[float, float] | None, problem: Problem) -> None:
+    if not isinstance(cuts, list) or not all(_is_number(cut) for cut in cuts):
+        problem("cuts must be a list of times in seconds.")
+        return
+    if any(later <= earlier for earlier, later in zip(cuts, cuts[1:], strict=False)):
+        problem("cuts must be in order, each later than the one before.")
+    if window is not None and any(not window[0] < cut < window[1] for cut in cuts):
+        problem("every cut must lie inside the window.")
+
+
+def _check_strip(
+    capture: dict[str, Any], strip: bytes | None, duration_s: float, problem: Problem
+) -> None:
+    """The strip keys are the layout the app uses for a video of this length, and the picture has
+    that layout's size."""
+    layout = strip_layout(duration_s)
+    wanted = {
+        "strip_every_s": layout.every_s,
+        "strip_columns": layout.columns,
+        "strip_rows": layout.rows,
+        "strip_tile_px": [layout.tile_w, layout.tile_h],
+        "strip_frames": layout.frames,
+    }
+    for key, value in wanted.items():
+        if capture.get(key) != value:
+            problem(f"capture.{key} is {capture.get(key)!r}, but it must be {value!r}.")
+    if strip is None:
+        return
+    try:
+        with Image.open(io.BytesIO(strip)) as picture:
+            size = picture.size
+            picture.load()
+    except (UnidentifiedImageError, OSError, SyntaxError):
+        problem("the strip cannot be read.")
+        return
+    if size != (layout.columns * layout.tile_w, layout.rows * layout.tile_h):
+        problem(
+            f"the strip is {size[0]}x{size[1]}, but {layout.frames} frames make "
+            f"{layout.columns * layout.tile_w}x{layout.rows * layout.tile_h}."
+        )
 
 
 # --- Check 4: the focus ----------------------------------------------------------------------

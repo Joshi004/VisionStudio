@@ -10,7 +10,18 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import ON_SCREEN_TEXT, SAME_EVENT, STATUSES, TIERS, TOOL_NAME, TOOL_VERSION
+from ..youtube import parse_time_tenths
+from . import (
+    CLIP_MAX_S,
+    CLIP_MIN_S,
+    MAX_FINE_S,
+    ON_SCREEN_TEXT,
+    SAME_EVENT,
+    STATUSES,
+    TIERS,
+    TOOL_NAME,
+    TOOL_VERSION,
+)
 from .rounds import Described, FootageRound, Refused, check_described
 
 
@@ -63,7 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=TOOL_NAME,
         description=(
-            "Captures pictures, web pages and PDF pages for a footage round. It is the only "
+            "Captures pictures, web pages, PDF pages and YouTube clips for a footage round, and "
+            "scans YouTube videos by their pictures. It is the only "
             "thing that writes the pictures and the focus rectangles, and it writes the whole "
             "result.json. Run it inside the round folder."
         ),
@@ -94,6 +106,56 @@ def build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("--page", type=int, required=True, help="the page (from 1)")
     pdf.add_argument("--focus", help="the words on the page the script talks about")
     _add_described(pdf)
+
+    scan = commands.add_parser(
+        "scan",
+        help="look at a YouTube video by its pictures (nothing of the video is kept)",
+        description=(
+            "Without --fine: the video's facts, its captions and YouTube's preview pictures as "
+            "contact sheets, with no download of the video. With --fine: only the range given is "
+            "downloaded at low resolution and written as sheets of frames half a second apart, "
+            "with the exact cut times. The files are written to results/<mark>/scans/<video_id>/."
+        ),
+    )
+    _add_round(scan)
+    scan.add_argument("--mark", required=True, help="the mark id, for example f3")
+    scan.add_argument("--url", required=True, help="the video's YouTube address")
+    scan.add_argument(
+        "--from", dest="from_time", metavar="TIME", help="start of the range, such as 37:58.5"
+    )
+    scan.add_argument("--to", dest="to_time", metavar="TIME", help="end of the range")
+    scan.add_argument(
+        "--fine",
+        action="store_true",
+        help=f"frames half a second apart of a range of at most {MAX_FINE_S:.0f} s",
+    )
+
+    clip = commands.add_parser(
+        "clip", help="download only the chosen seconds of a YouTube video, without sound"
+    )
+    _add_round(clip)
+    _add_piece(clip)
+    clip.add_argument("--url", required=True, help="the video's YouTube address")
+    clip.add_argument(
+        "--from",
+        dest="from_time",
+        required=True,
+        metavar="TIME",
+        help="where the part to use starts, such as 2:21.5",
+    )
+    clip.add_argument(
+        "--to",
+        dest="to_time",
+        required=True,
+        metavar="TIME",
+        help=f"where it ends ({CLIP_MIN_S:.0f} to {CLIP_MAX_S:.0f} s after --from)",
+    )
+    clip.add_argument(
+        "--moment",
+        metavar="TIME",
+        help="the instant that matters, inside the part to use (the clip is centred on it)",
+    )
+    _add_described(clip)
 
     report = commands.add_parser("report", help="set a mark's status and summary, add attempts")
     _add_round(report)
@@ -203,6 +265,50 @@ def _run_pdf(args: argparse.Namespace) -> int:
     return 0
 
 
+def _time(text: str | None) -> float | None:
+    return None if text is None else parse_time_tenths(text)
+
+
+def _run_scan(args: argparse.Namespace) -> int:
+    from .scan import scan_fine, scan_previews
+
+    rnd = FootageRound(Path(args.round))
+    run = scan_fine if args.fine else scan_previews
+    lines = run(
+        rnd,
+        mark_id=args.mark,
+        url=args.url,
+        from_s=_time(args.from_time),
+        to_s=_time(args.to_time),
+    )
+    print("OK: scan done." if lines else "OK.")
+    for line in lines:
+        print(f"  {line}")
+    return 0
+
+
+def _run_clip(args: argparse.Namespace) -> int:
+    from .clip import capture_clip
+
+    rnd = FootageRound(Path(args.round))
+    described = _described(args)
+    use_from, use_to = _time(args.from_time), _time(args.to_time)
+    assert use_from is not None and use_to is not None
+    captured = capture_clip(
+        rnd,
+        mark_id=args.mark,
+        piece_id=args.piece,
+        url=args.url,
+        use_from=use_from,
+        use_to=use_to,
+        moment=_time(args.moment),
+        described=described,
+    )
+    rnd.store_piece(args.mark, captured.entry, captured.files)
+    _saved(args.mark, args.piece, captured.notes)
+    return 0
+
+
 def _run_report(args: argparse.Namespace) -> int:
     rnd = FootageRound(Path(args.round))
     rnd.mark(args.mark)
@@ -253,6 +359,8 @@ _COMMANDS = {
     "image": _run_image,
     "page": _run_page,
     "pdf": _run_pdf,
+    "scan": _run_scan,
+    "clip": _run_clip,
     "report": _run_report,
     "remove": _run_remove,
     "validate": _run_validate,
