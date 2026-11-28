@@ -28,6 +28,7 @@ import type { ProjectDetail } from "../../api/projects";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
+import { FootageReview } from "./FootageReview";
 
 type FootagePanelProps = {
   project: ProjectDetail;
@@ -334,6 +335,7 @@ export function FootagePanel({ project }: FootagePanelProps) {
               </Stack>
             )}
             {latestImport !== null && <ImportReport report={latestImport} />}
+            {latestImport !== null && <FootageReview projectId={project.id} />}
           </>
         )}
 

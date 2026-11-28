@@ -411,7 +411,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Completed |
 | FTG-010 | The research skill | Code (Mac) | FTG-009 | In Progress |
 | FTG-011 | Importing the research | Code | FTG-007, FTG-008 | Completed |
-| FTG-012 | The review screen | Code | FTG-011 | Not Started |
+| FTG-012 | The review screen | Code | FTG-011 | Completed |
 | FTG-013 | The Qwen vs Inkling explainer end to end | Owner | FTG-006, FTG-010, FTG-012 | Not Started |
 | FTG-014 | Recording a website | Code, later | FTG-013 | Not Started |
 | FTG-015 | Footage between words | Code, later | FTG-013, SB-011 | Deferred |
@@ -425,7 +425,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 10 completed (FTG-001 to FTG-009 and FTG-011, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); FTG-010 in progress (the skill is written and installed, the owner's runs are left); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 11 completed (FTG-001 to FTG-009, FTG-011 and FTG-012, 2026-11-28; the owner still has to rebuild the real app, try the review screen in a browser, and make the motion image for FTG-005); FTG-010 in progress (the skill is written and installed, the owner's runs are left); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -1079,7 +1079,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-012 — The review screen
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28)
 
 **Objective.** The owner reviews every piece the agent found, beside their own files, and chooses what each mark shows.
 
@@ -1110,12 +1110,20 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Review screen
-- [ ] API and checks
+- [x] Review screen
+- [x] API and checks
 - [ ] Browser check by the owner
-- [ ] Standard checks
+- [x] Standard checks
 
-**Completion notes.** —
+**Completion notes.**
+- **Modules.** `services/footage_review.py` (the view and the checks: `view`, `decide_piece`, `set_piece_use`, `set_mark_framing`, `set_mark_no_footage`, `finish_review`), `api/footage_review.py`, and in the frontend `api/footageReview.ts`, `components/story/FootageReview.tsx` and `safeHref.ts`. `footage_decisions.py` gained `set_verdict`, `set_framing`, `set_round_reviewed` and a `require_shown` flag on `set_use`. No migration: every change is one new `footage_decision` version, and a change that changes nothing writes none.
+- **API.** `GET /api/projects/{id}/footage/review`; `PUT .../review/items/{item_key}` (`verdict`), `.../items/{item_key}/use` (`start_s`, `end_s`), `.../marks/{mark_id}/framing`, `.../marks/{mark_id}/no-footage`; `POST .../review/done`. 404 for an unknown piece or mark, 422 with the reason for any refusal. The order of the pieces shown, removing the owner's own file and the preview use FTG-003's existing routes (`PUT /footage-marks/{id}/order`, `DELETE /footage-files/{item_key}`, `POST /footage-files/{item_key}/preview`); `queue_preview` now also accepts an agent piece that is not shown yet.
+- **The checks.** Accept only for a usable piece of the **newest** import on a live mark (a mark that changed since the round is refused). `use` of an agent video is in seconds of the stored video, inside its window, 2 to 15 s, rounded to 3 decimals, with no 0.5 s grid check (the owner's own files keep theirs). Framing only for a portrait project (`left`, `centre`, `right`, or none). All decisions are refused while footage is off or an import is running. **Review done** is refused with the reason when there is no import, an import is running, the round is already reviewed, the marks changed, or pieces are undecided ("Accept or reject the N pieces still undecided."); on success the round's id (`r2`) goes into `reviewed_rounds`.
+- **Decisions of planning.** "File footage" (`same_event: no`) asks for a confirm dialog in the browser only; the API accepts it like any piece. A new import of a reviewed round takes it off `reviewed_rounds` in the same transaction (as the evidence import does), and the decisions of unchanged pieces survive because the item keys do. A change after Review done is applied at once and leaves the round reviewed. An accepted agent piece is shown before the owner's own files that are already shown on the mark, else last.
+- **The screen.** One card per mark (its words and note, the pieces, the order, "no footage here"), a card per piece with the media, what it shows, the source as plain text (a link only when it is http or https), the warnings as badges, Accept and Reject, a preview, and for a video a timeline with the cuts and the moment, number boxes for the start and end, nudge buttons (0.5 s) and shot-edge buttons that are disabled when they would break the 2 to 15 s rule. The portrait framing choice shows only in a portrait project. Review done is a button with the reason beside it when it is disabled; Continue without footage stays where FTG-007 put it. The text of the agent is never rendered as HTML. `schema.d.ts` was regenerated (additions only).
+- **Checked** on a throwaway database and files folder, in one process through the real routes (no paid call, no network; the script and folders were removed): a round built with the capture tool's own `FootageRound` code (a video with two cuts, a file photo, a photo, a photo with a changed byte, a `not_found` mark) and imported. Accept, reject, use, framing, "no footage here" and Review done each stored one version, and a repeat stored none. Refused with a reason: accepting an unusable piece, `use` outside the window, under 2 s, over 15 s, below 0, on an image, framing in a landscape project or with a wrong value, Review done while a piece is undecided or after it is done. Reordering changed the placement input's order and the moved `use` changed the clip's length. Review done made the round `reviewed` and the footage step done; a new import made it `imported` again with the decisions and the moved `use` kept. A preview of an agent piece that is not shown was queued. `ruff check`, `ruff format --check`, `npm run lint` and `npm run typecheck` pass.
+- **Not checked:** the screen in a browser (typecheck and lint only: layout, the timeline, the confirm dialog, the preview player); a portrait video or Short through the screen; the rounds of FTG-010's own runs; the preview job running (it was only queued, there was no worker). The backend and frontend of the real app must be rebuilt.
+- **Deviation from Scope:** none.
 
 ### FTG-013 — The Qwen vs Inkling explainer end to end (owner)
 
@@ -1240,3 +1248,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-009 | Completed: `scan`, `scan --fine` and `clip` in `visio-footage-capture` (YouTube previews as stamped contact sheets, 0.5 s sheets and cut times of a range, a muted clip of only the chosen seconds), `validate` for video pieces. No migration, no backend change. The previews' spacing is whole seconds, not what yt-dlp's data suggests. |
 | 2026-11-28 | FTG-010 | In progress: the `visio-footage` skill (`SKILL.md`, `reference.md`) and `tools/footage-skill/install.sh` written and installed into `~/.claude/skills`; the import step is written ahead of FTG-011. The owner's runs in Cursor and Claude Code are still to do. No migration, no backend change. |
 | 2026-11-28 | FTG-011 | Completed: `services/footage_checks.py`, `services/footage_import.py`, `jobs/import_footage.py`, `POST /footage/import` and the import fields of `GET /footage`, the Import button and report in the footage panel. No migration. The backend of the real app must be rebuilt. |
+| 2026-11-28 | FTG-012 | Completed: `services/footage_review.py`, `api/footage_review.py` (review, verdict, use, framing, no footage, done), `FootageReview.tsx`; an import takes its round off `reviewed_rounds`; a preview of an unshown agent piece is allowed. No migration. The owner has to rebuild the real app and try the screen in a browser. |

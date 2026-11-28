@@ -29,6 +29,7 @@ import {
 import { EvidencePreview, ReadabilityWarning } from "./EvidencePreview";
 import { SoundbiteClipPanel, type ClipClaim, type CutWords } from "./SoundbiteClipPanel";
 import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
+import { safeHref } from "./safeHref";
 
 type EvidenceReviewProps = {
   projectId: number;
@@ -60,11 +61,6 @@ const HIGHLIGHT_STYLE = {
   backgroundColor: "rgba(255, 212, 59, 0.35)",
   pointerEvents: "none",
 } as const;
-
-/** The agent's addresses are shown as links only when they are plain http or https. */
-export function safeHref(value: string | null): string | null {
-  return value !== null && /^https?:\/\//i.test(value) ? value : null;
-}
 
 function percent(value: number): string {
   return `${value * 100}%`;

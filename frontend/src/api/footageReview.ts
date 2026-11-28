@@ -30,12 +30,18 @@ export function footageReviewKey(projectId: number) {
 }
 
 async function fetchReview(projectId: number) {
-  const { data, error, response } = await api.GET("/api/projects/{project_id}/footage/review", {
-    params: { path: { project_id: projectId } },
-  });
+  const { data, error, response } = await api.GET(
+    "/api/projects/{project_id}/footage/review",
+    {
+      params: { path: { project_id: projectId } },
+    },
+  );
   if (!data) {
     throw new ApiError(
-      detailMessage(error, `Could not load the footage review (HTTP ${response.status}).`),
+      detailMessage(
+        error,
+        `Could not load the footage review (HTTP ${response.status}).`,
+      ),
       response.status,
     );
   }
@@ -51,7 +57,9 @@ export function useFootageReview(projectId: number, enabled = true) {
     enabled: enabled && isValidProjectId(projectId),
     refetchInterval: (query) =>
       query.state.data?.marks.some((mark) =>
-        [...mark.pieces, ...mark.shown].some((piece) => isJobActive(piece.preview)),
+        [...mark.pieces, ...mark.shown].some((piece) =>
+          isJobActive(piece.preview),
+        ),
       )
         ? ACTIVE_POLL_MS
         : false,
@@ -78,7 +86,10 @@ function useAfterDecision(projectId: number) {
 export function useDecideFootagePiece(projectId: number) {
   const afterDecision = useAfterDecision(projectId);
   return useMutation({
-    mutationFn: async (input: { itemKey: string; verdict: "accepted" | "rejected" }) => {
+    mutationFn: async (input: {
+      itemKey: string;
+      verdict: "accepted" | "rejected";
+    }) => {
       const { data, error, response } = await api.PUT(
         "/api/projects/{project_id}/footage/review/items/{item_key}",
         {
@@ -88,7 +99,10 @@ export function useDecideFootagePiece(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not save the choice (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not save the choice (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -102,7 +116,11 @@ export function useDecideFootagePiece(projectId: number) {
 export function useSetFootageReviewUse(projectId: number) {
   const afterDecision = useAfterDecision(projectId);
   return useMutation({
-    mutationFn: async (input: { itemKey: string; startS: number; endS: number }) => {
+    mutationFn: async (input: {
+      itemKey: string;
+      startS: number;
+      endS: number;
+    }) => {
       const { data, error, response } = await api.PUT(
         "/api/projects/{project_id}/footage/review/items/{item_key}/use",
         {
@@ -112,7 +130,10 @@ export function useSetFootageReviewUse(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not move the start and end (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not move the start and end (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -126,7 +147,10 @@ export function useSetFootageReviewUse(projectId: number) {
 export function useSetFootageFraming(projectId: number) {
   const afterDecision = useAfterDecision(projectId);
   return useMutation({
-    mutationFn: async (input: { markId: string; framing: FootageFraming | null }) => {
+    mutationFn: async (input: {
+      markId: string;
+      framing: FootageFraming | null;
+    }) => {
       const { data, error, response } = await api.PUT(
         "/api/projects/{project_id}/footage/review/marks/{mark_id}/framing",
         {
@@ -136,7 +160,10 @@ export function useSetFootageFraming(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not change the crop (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not change the crop (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -160,7 +187,10 @@ export function useSetFootageReviewNoFootage(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not save the choice (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not save the choice (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -184,7 +214,10 @@ export function useReorderFootageShown(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not change the order (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not change the order (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -205,7 +238,10 @@ export function useRemoveOwnFootageFile(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not remove the file (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not remove the file (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -226,7 +262,10 @@ export function useStartFootageReviewPreview(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not start the preview (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not start the preview (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
@@ -234,7 +273,9 @@ export function useStartFootageReviewPreview(projectId: number) {
     },
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: footageReviewKey(projectId) }),
+        queryClient.invalidateQueries({
+          queryKey: footageReviewKey(projectId),
+        }),
         invalidateAfterJobAction(queryClient),
       ]),
   });
@@ -251,7 +292,10 @@ export function useFinishFootageReview(projectId: number) {
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not finish the review (HTTP ${response.status}).`),
+          detailMessage(
+            error,
+            `Could not finish the review (HTTP ${response.status}).`,
+          ),
           response.status,
         );
       }
