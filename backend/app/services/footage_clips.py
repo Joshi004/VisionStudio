@@ -198,6 +198,45 @@ def look_for(
     return look
 
 
+_CREDIT_LABELS: Final = {KIND_VIDEO: "Video", KIND_IMAGE: "Photo", KIND_PDF: "PDF"}
+CREDIT_PART_MAX_CHARS: Final = 60
+_TIER_COMMONS: Final = "commons"
+
+
+def _one_line(value: object, limit: int = CREDIT_PART_MAX_CHARS) -> str | None:
+    """One line of printable text cut to `limit` characters, or None. The text of an agent's
+    piece is untrusted: no control characters, and no braces or backslashes that mean something
+    to the subtitle file."""
+    if not isinstance(value, str):
+        return None
+    kept = "".join(
+        char for char in value if (char.isprintable() or char.isspace()) and char not in "{}\\<>"
+    )
+    text = " ".join(kept.split())
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "\u2026"
+    return text or None
+
+
+def credit_line(item: FootageItem) -> str | None:
+    """The line that names the source of a piece while it is on screen (§4.10), or None for none.
+    An owner's file has one only when the owner wrote a credit. A web page shows its address in
+    the browser frame instead. Any other piece of the agent names its publisher, and a piece from
+    a free-licence library its licence too. Pure."""
+    label = _CREDIT_LABELS.get(item.kind or "")
+    if label is None:
+        return None
+    if item.origin == "owner":
+        credit = _one_line(item.credit, CREDIT_PART_MAX_CHARS * 2)
+        return f"{label}: {credit}" if credit else None
+    source = item.source if isinstance(item.source, dict) else {}
+    publisher = _one_line(source.get("publisher"))
+    if publisher is None:
+        return None
+    licence = _one_line(source.get("licence")) if item.tier == _TIER_COMMONS else None
+    return f"{label}: {publisher}" + (f", {licence}" if licence else "")
+
+
 def framing_of(value: object) -> str | None:
     """The owner's portrait crop of a mark when it is `left`, `centre` or `right`, else None."""
     return footage_video.crop_of(value)

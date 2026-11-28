@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import (
+    FootageItem,
     Job,
     Project,
     StoryRender,
@@ -58,6 +59,8 @@ from app.services import (
     evidence_review,
     evidence_rounds,
     explainer,
+    footage_clips,
+    footage_decisions,
     provenance,
     story_bible,
     story_renders,
@@ -195,6 +198,19 @@ class _Target:
     # The frozen caption track of the render or of the render job's timeline, as stored (the
     # chapters are made from it), or None.
     captions: Any = None
+    # The item keys of the footage the render lays over its shots (FTG-006), in order, each once.
+    footage_keys: tuple[str, ...] = ()
+
+
+def _footage_keys(timeline: Any) -> tuple[str, ...]:
+    """The item keys of the `footage_overlays` of a frozen timeline, in order, each once."""
+    entries = timeline.get("footage_overlays") if isinstance(timeline, dict) else None
+    keys: list[str] = []
+    for entry in entries if isinstance(entries, list) else []:
+        key = entry.get("item_key") if isinstance(entry, dict) else None
+        if isinstance(key, str) and key not in keys:
+            keys.append(key)
+    return tuple(keys)
 
 
 def _render_target(render: StoryRender) -> _Target:
@@ -205,6 +221,7 @@ def _render_target(render: StoryRender) -> _Target:
         width=render.width,
         height=render.height,
         captions=story_renders.recorded_captions(render),
+        footage_keys=_footage_keys(render.inputs),
     )
 
 
@@ -233,6 +250,7 @@ def _job_target(job: Job) -> _Target:
         width=width,
         height=height,
         captions=timeline.get("captions"),
+        footage_keys=_footage_keys(timeline),
     )
 
 
@@ -300,6 +318,42 @@ async def _evidence_sources(session: AsyncSession, project: Project) -> list[dic
     if not current.wanted or not current.covered:
         return []
     return youtube_sources.entries_from_review(await evidence_review.shown_view(session, project))
+
+
+async def _footage_sources(
+    session: AsyncSession, project: Project, keys: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    """The sources of the footage a render lays over its shots (FTG-006), as the entries the
+    Sources section lists after those of the evidence, in the order the footage is shown. Empty
+    for a render without footage, which reads nothing."""
+    if not keys:
+        return []
+    statement = (
+        select(FootageItem)
+        .where(FootageItem.project_id == project.id, FootageItem.item_key.in_(keys))
+        .order_by(FootageItem.id.desc())
+        .execution_options(populate_existing=True)
+    )
+    items: dict[str, FootageItem] = {}
+    for item in (await session.execute(statement)).scalars():
+        items.setdefault(item.item_key, item)
+    decided = await footage_decisions.latest(session, project.id)
+    content = decided.content if decided is not None else None
+    entries: list[dict[str, Any]] = []
+    for key in keys:
+        item = items.get(key)
+        if item is None:
+            continue
+        use_start_s: float | None = None
+        if item.kind == footage_clips.KIND_VIDEO:
+            entry = footage_decisions.mark_entry(content, item.mark_id)
+            moved = entry["use"].get(key) if entry is not None else None
+            times = footage_clips.video_times(item, moved)
+            use_start_s = times.use_start_s if times is not None else None
+        piece = youtube_sources.footage_piece(item, footage_clips.credit_line(item), use_start_s)
+        if piece is not None:
+            entries.append(piece)
+    return entries
 
 
 def _saved_inputs(
@@ -501,6 +555,7 @@ async def _queue_draft(
         **_render_keys(target),
         "context": context,
         "sources": await _evidence_sources(session, project),
+        "footage_sources": await _footage_sources(session, project, target.footage_keys),
         "saved_inputs": _saved_inputs(
             bible, script, scenes, review, target, note, started_at_render=started_at_render
         ),

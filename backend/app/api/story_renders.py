@@ -72,6 +72,7 @@ WarningCode = Literal[
     "overlay_over_evidence",
     "split_without_video",
     "split_small_text",
+    "footage_without_clip",
 ]
 
 

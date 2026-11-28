@@ -40,6 +40,7 @@ from app.jobs import store
 from app.services import (
     caption_plan,
     evidence_clips,
+    footage_clips,
     music_placement,
     provenance,
     render_music,
@@ -147,6 +148,8 @@ class _Context:
     overlays: dict[tuple[str, str], shot_graphics.ShotEntry]
     # The evidence beside the graphic overlays now (OVL-007), by `(scene id, segment id)`.
     splits: dict[tuple[str, str], evidence_clips.SplitClipEntry]
+    # The footage placed over the shots now (FTG-006), by `(scene id, placed key)`.
+    footage: dict[tuple[str, str], footage_clips.PieceClipEntry]
     # The sound effects the next render would use (EXM-007), or None for a render without them.
     sound_effects: story_render_plan.SoundEffectSource | None = None
 
@@ -185,6 +188,7 @@ async def _context(session: AsyncSession, project: Project, *, place: bool) -> _
         sources=sources,
         overlays=await story_renders.overlay_videos(session, project),
         splits=await story_renders.split_clips_now(session, project),
+        footage=await story_renders.footage_clips_now(session, project),
         sound_effects=await story_renders.sound_effect_gate(session, project),
     )
 
@@ -425,6 +429,7 @@ def _scene_reasons(
 
     reasons.extend(story_renders.overlay_reasons(recorded, context.overlays, str(entry.item["id"])))
     reasons.extend(story_renders.split_reasons(recorded, context.splits, str(entry.item["id"])))
+    reasons.extend(story_renders.footage_reasons(recorded, context.footage, str(entry.item["id"])))
     reasons.extend(_music_reasons(recorded, context))
     reasons.extend(story_renders.sound_effect_reasons(recorded, context.sound_effects))
     reasons.extend(story_renders.caption_reasons(recorded, context.project))

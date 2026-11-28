@@ -399,7 +399,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-003 | The owner's own files on a mark | Code | FTG-002 | Completed |
 | FTG-004 | Placing footage over the shots | Code | — | Completed |
 | FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Completed |
-| FTG-006 | Footage in the render | Code | FTG-005 | Not Started |
+| FTG-006 | Footage in the render | Code | FTG-005 | Completed |
 | FTG-007 | The research brief and the waiting step | Code | FTG-002 | Not Started |
 | FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Not Started |
 | FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 5 completed (FTG-001, FTG-002, FTG-003, FTG-004 and FTG-005, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 6 completed (FTG-001, FTG-002, FTG-003, FTG-004, FTG-005 and FTG-006, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -710,7 +710,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-006 — Footage in the render
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28; the owner still has to rebuild the real app)
 
 **Objective.** The scene render and the video render lay each placed piece full screen over the shots it spans, under cards and callouts (§4.10).
 
@@ -740,15 +740,35 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Timeline key and render job
-- [ ] Stacking, callouts and credits
-- [ ] Warnings, refusals and out-of-date reasons
-- [ ] Sources section
-- [ ] Identity check and throwaway render
-- [ ] Standard checks
+- [x] Timeline key and render job
+- [x] Stacking, callouts and credits
+- [x] Warnings, refusals and out-of-date reasons
+- [x] Sources section
+- [x] Identity check and throwaway render (the identity check is by construction; the snapshot comparison on the real database was not run, see below)
+- [x] Standard checks
 - [ ] Owner: real app rebuilt
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration.** The clips, items and decisions already existed.
+- **Modules:**
+  - `services/story_render_plan.py`: `FootageClipSource`, `FootageSource`, `SceneSource.footage`, `_footage_entries` (modelled on `_overlay_entries`), `_split_at_footage`, the warning code `footage_without_clip` and the optional key `footage_overlays` (the timeline version stays 6). `_shift_timeline` moves its frames and times. Footage is not given to `_sound_moments`, so it has no sound effect.
+  - `services/story_renders.py`: `footage_clips_now`, `_footage_sources`, `footage_reasons`; `scene_sources` fills `SceneSource.footage` only when `with_overlays` is on, so `next_render_sources` and `timing_sources` leave footage out and the music placement is untouched. `services/scene_renders.py` has `_Context.footage` and calls `footage_reasons` for its own scene.
+  - `jobs/render_story.py` (the scene render shares it): `FootageOverlay`, `_parse_footage_overlays`, `probe_footage`, and footage laid **first** in each shot's overlays, so the order is footage, callouts, cards, split evidence, graphic overlays. `_with_footage_credits` merges the credits into the source line events of the ASS file.
+  - `services/footage_clips.credit_line` (pure) gives the credit line of a piece.
+  - Sources section: `youtube_sources.footage_piece` and `block(..., footage=)`, `youtube_draft_writer.with_sources(..., footage)`, `youtube_draft._footage_sources` (reads the item keys of the render's frozen `footage_overlays`), the job input `footage_sources` (read as `[]` for an older job) in `jobs/write_youtube_draft.py`.
+  - The API's `WarningCode` and `frontend/src/api/schema.d.ts` have `footage_without_clip` (edited by hand to match what the OpenAPI output gives).
+- **Planning decided:**
+  - **Credits:** the optional string `credit` on each `footage_overlays` entry, not a new top-level key and not the `source_lines` key, so footage stays out of the evidence keys (FT-2). It is on screen for the piece's own span. An owner's file: `Video: <credit>` or `Photo: <credit>` and nothing without a credit. An agent's piece: `Video`, `Photo` or `PDF: <publisher>`, with the licence added for the `commons` tier. A page: none (its address is in the browser frame). Agent text is cleaned (no braces, backslashes or angle brackets) and cut to 60 characters per part.
+  - **Callouts over footage:** `callout_render` is unchanged. For a continuous explainer the plan gives it the shot spans split at the footage edges and the presenter spans with the footage taken out, so a callout that starts over a video or a photo is drawn as over B-roll. A page or a PDF span is added to `graphic_spans`, so a callout that starts there is dropped with the usual warning.
+  - **A footage clip with no file:** a scene render leaves the piece out with the warning `footage_without_clip`; a full render is refused with "This footage has no clip yet: ... Draw it in the Draw the footage step."
+  - **Out of date:** a piece removed, with no current clip, drawn again, or added with a ready clip (story renders and scene renders).
+  - **Sources section:** footage sources follow the evidence's, each address once and not repeating an evidence address. A video's address is `&t=` the second of the source video where `use` starts (the owner's moved `use` if there is one, through `footage_clips.video_times`). An owner's file, or a piece with no address, is listed by its credit line only, and not at all without one. The footage sources are not shown to the model, so its "what we checked" note stays about evidence.
+- **Checked** on a throwaway database and data folder (alembic to head in `/tmp`, no paid call, the real app on port 5480 was not touched; the scripts were removed):
+  - A scene render through `RenderSceneHandler` with three placeholder shots and synthetic clips: a red video piece over 1 to 3 s and a green page piece over 5 to 7 s showed full screen; the frames outside them were the placeholders; the credit line `Video: The White House` was drawn in the top margin; a third piece with no clip gave `footage_without_clip` and was left out. The video had the 288 frames of the scene.
+  - A plan with no footage has no `footage_overlays` key; a scene that starts later has its entries shifted (frame 24, 1000 to 3000 ms) and read back by `parse_timeline`; `_footage_entries` returns the missing label for a full render.
+  - `credit_line` (owner with and without a credit, commons, page), `footage_piece`, `block` with and without footage (the text without footage is identical), `footage_reasons` for the five cases.
+  - `ruff check`, `ruff format --check`, `npm run typecheck` and `npm run lint` (frontend).
+- **Not done:** the snapshot comparison on the real database (the SHA-256 of the frozen timeline and the ASS file, and the count of `generate_shot` jobs, for every project without footage, before and after) needs the owner's go-ahead. By construction a project without footage reads no footage tables (`piece_state` returns at once), writes no `footage_overlays` key, passes the callout resolver the same lists and gets the same Sources text. A render with a card or a callout over footage, and `RenderStoryHandler` on a full project (with a voice take), were not run. The music placement staying current is by construction (`with_overlays=False` leaves footage out). The backend of the real app must be rebuilt.
 
 ### FTG-007 — The research brief and the waiting step
 
@@ -1090,3 +1110,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-003 | Completed: the owner's photos and videos on a mark (upload API, `prepare_footage_file` job, decision versions, files section on the mark card). No migration. |
 | 2026-11-28 | FTG-004 | Completed: footage placed on read (`services/footage_placement.py`, `footage_decisions.shown_marks`, three new `SceneEntry` fields, notes on the `footage_marks` step). No migration, no API or UI change. |
 | 2026-11-28 | FTG-005 | Completed: the footage clip and its preview (`services/footage_clips.py`, `jobs/render_footage_clip.py`, FFmpeg cut rules, the motion `Footage` composition, the step `footage_clips`, the preview route and button). No migration. The motion image must be rebuilt. |
+| 2026-11-28 | FTG-006 | Completed: footage in the render (`footage_overlays` timeline key, `render_story` lays it first under callouts and cards, credit lines, `footage_without_clip`, out-of-date reasons, footage in the Sources section). No migration. The backend of the real app must be rebuilt. |

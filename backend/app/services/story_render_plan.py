@@ -78,6 +78,14 @@ optional key `graphic_overlays`: each entry is a full-frame video laid at (0, 0)
 it spans, on top of callouts and evidence cards. It changes no shot and no second of the story, so
 the version stays 6. A callout that starts in one is left out, as under a graphic shot.
 
+**Footage** (FTG-006). A render of a project with footage may have the optional key
+`footage_overlays`: each entry is an opaque full-frame H.264 clip (no sound) laid at (0, 0) over
+every shot it spans, **under** callouts, evidence cards, split evidence and graphic overlays. It
+changes no shot and no second of the story, so the version stays 6. An entry may have `credit`,
+the line that names its source, drawn in the top margin for its span. A callout that starts over a
+page or a PDF is left out; over a video or a photo it is kept and drawn as over B-roll. Footage
+gets no sound effect.
+
 **Evidence beside a graphic** (OVL-007). Where an overlay and evidence share the screen, the
 overlay entry has `split` true and the `(x, y)` of its panel (its video is drawn at the panel's
 size), and the optional key `split_evidence` holds the evidence side: each entry is a full-frame
@@ -252,6 +260,10 @@ OVERLAY_OVER_EVIDENCE: Final = "overlay_over_evidence"
 # this warning code; and the one whose quote is too small to read at its half of the frame.
 SPLIT_WITHOUT_VIDEO: Final = "split_without_video"
 SPLIT_SMALL_TEXT: Final = "split_small_text"
+# A piece of footage (FTG-006) with no clip is left out of a scene render, with this warning code.
+FOOTAGE_WITHOUT_CLIP: Final = "footage_without_clip"
+# A footage piece of these kinds is text on a page: a callout that starts over it is dropped.
+FOOTAGE_TEXT_KINDS: Final = ("page", "pdf")
 
 # A music sound cut by the edge of a scene render fades over this long (a starting value, not yet
 # tuned by ear).
@@ -398,6 +410,33 @@ class SplitSource:
 
 
 @dataclass(frozen=True)
+class FootageClipSource:
+    """The clip of a placed piece of footage (FTG-006): the newest ready clip made for it, an
+    opaque full-frame H.264 video with no sound."""
+
+    clip_id: int
+    path: str
+    frame_count: int | None
+    file_exists: bool
+
+
+@dataclass(frozen=True)
+class FootageSource:
+    """A piece of footage over the shots of a scene (FTG-006): `start_s` and `end_s` sit on the
+    scene's timeline like a shot's, `kind` is `video`, `image`, `page` or `pdf`, `credit` is the
+    line that names its source (None for none), and `clip` is None while it has no clip."""
+
+    placed_key: str
+    mark_id: str
+    item_key: str
+    kind: str
+    start_s: float
+    end_s: float
+    credit: str | None
+    clip: FootageClipSource | None
+
+
+@dataclass(frozen=True)
 class SoundbiteClipSource:
     """The clip of a sound bite shot (SB-009): the newest ready clip made for it, with the lower
     third and the credit in the picture and the cut's own sound. `take_window` is the stretch of
@@ -534,6 +573,8 @@ class SceneSource:
     overlays: list[OverlaySource] = field(default_factory=list)
     # The evidence drawn beside those overlays (OVL-007). Empty without a split stretch.
     splits: list[SplitSource] = field(default_factory=list)
+    # The footage over its shots (FTG-006). Empty without footage.
+    footage: list[FootageSource] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1810,6 +1851,94 @@ def _split_entries(
     return entries, missing
 
 
+def _footage_entries(
+    scenes: list[SceneSource],
+    fps: int,
+    total_frames: int,
+    *,
+    placeholders: bool,
+    warnings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The footage of the scenes as timeline entries (FTG-006), and the pieces that have no usable
+    clip. Like an overlay, a piece only needs a frame range of the story and a clip with the frames
+    that range needs (one source frame short is allowed). In a scene render a piece without a clip
+    is left out with a warning; in a full render it is returned as missing, and the plan refuses.
+    """
+    entries: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for scene in scenes:
+        if scene.story_start_s is None:
+            continue
+        for piece in scene.footage:
+            start_ms = _ms(scene.story_start_s + piece.start_s)
+            end_ms = _ms(scene.story_start_s + piece.end_s)
+            start_frame = frame_at(start_ms, fps)
+            frames = min(frame_at(end_ms, fps), total_frames) - start_frame
+            if frames < 1:
+                continue
+            label = f"for {piece.mark_id} in scene {scene.index}"
+            clip = piece.clip
+            needed = source_frames_needed(frames, fps)
+            if (
+                clip is None
+                or not clip.file_exists
+                or clip.frame_count is None
+                or clip.frame_count < needed - 1
+            ):
+                if not placeholders:
+                    missing.append(label)
+                    continue
+                warnings.append(
+                    {
+                        "code": FOOTAGE_WITHOUT_CLIP,
+                        "scene_id": scene.scene_id,
+                        "shot_id": None,
+                        "message": f"The footage {label} is left out: it has no clip yet.",
+                    }
+                )
+                continue
+            entries.append(
+                {
+                    "id": piece.placed_key,
+                    "scene_id": scene.scene_id,
+                    "scene_index": scene.index,
+                    "mark_id": piece.mark_id,
+                    "item_key": piece.item_key,
+                    "kind": piece.kind,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "start_frame": start_frame,
+                    "frames": frames,
+                    "source_frames": needed,
+                    "clip_id": clip.clip_id,
+                    "path": clip.path,
+                    "clip_frames": clip.frame_count,
+                    "x": 0,
+                    "y": 0,
+                    # Only a piece with a credit has this key.
+                    **({"credit": piece.credit} if piece.credit else {}),
+                }
+            )
+    return entries, missing
+
+
+def _split_at_footage(
+    shots: list[tuple[int, int]], footage: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """The shot spans cut at the edges of the footage spans, so a callout that starts over footage
+    finds a span of its own. The spans cover the same time."""
+    cuts = sorted({edge for span in footage for edge in span})
+    pieces: list[tuple[int, int]] = []
+    for start, end in shots:
+        low = start
+        for cut in cuts:
+            if low < cut < end:
+                pieces.append((low, cut))
+                low = cut
+        pieces.append((low, end))
+    return pieces
+
+
 def _overlay_evidence_warnings(
     overlays: list[dict[str, Any]],
     cards: list[dict[str, Any]],
@@ -2409,6 +2538,24 @@ def _build(
                     BED_SHOT_RAMP_S,
                 )
 
+    # The footage (FTG-006) is laid first over the shots, under everything else. A page or a PDF
+    # is text on text, so a callout stays off it; over a video or a photo a callout is kept and
+    # drawn as over B-roll (below).
+    footage_entries, footage_missing = _footage_entries(
+        scenes, fps, cursor, placeholders=placeholders, warnings=warnings
+    )
+    if footage_missing:
+        raise RenderPlanError(
+            f"This footage has no clip yet: {_named(footage_missing)}. Draw it in the "
+            "Draw the footage step."
+        )
+    graphic_spans.extend(
+        (entry["start_ms"], entry["end_ms"])
+        for entry in footage_entries
+        if entry["kind"] in FOOTAGE_TEXT_KINDS
+    )
+    footage_spans = [(entry["start_ms"], entry["end_ms"]) for entry in footage_entries]
+
     # The evidence cards (EVD-011) are laid over the shots: a callout stays off them, as off a
     # graphic or an evidence shot. The source lines (EVD-012) sit in the top margin.
     card_entries, cards_missing = _card_entries(
@@ -2462,13 +2609,23 @@ def _build(
     callouts_entry: dict[str, Any] | None = None
     hidden: list[tuple[int, int]] = []
     if callouts is not None:
+        callout_shots = [(entry["start_ms"], entry["end_ms"]) for entry in shots]
+        callout_presenter = presenter_spans
+        if footage_spans:
+            # The presenter is hidden under footage: a callout that starts there is drawn as over
+            # B-roll (FTG-006).
+            callout_shots = _split_at_footage(callout_shots, footage_spans)
+            callout_presenter = [
+                (int(start), int(end))
+                for start, end in subtract_spans(presenter_spans, footage_spans)
+            ]
         resolution = callout_render.resolve(
             callouts,
             callout_units,
-            [(entry["start_ms"], entry["end_ms"]) for entry in shots],
+            callout_shots,
             # The presenter is on camera in a presenter shot of a continuous explainer, whatever
             # unit label its words have.
-            presenter_spans if continuous else [(_ms(s), _ms(e)) for s, e in dialogue_spans],
+            callout_presenter if continuous else [(_ms(s), _ms(e)) for s, e in dialogue_spans],
             total_ms,
             width,
             height,
@@ -2530,6 +2687,8 @@ def _build(
         **({"source_lines": source_line_entries} if source_line_entries else {}),
         # Only a render with graphic overlays has this key (OVL-005).
         **({"graphic_overlays": overlay_entries} if overlay_entries else {}),
+        # Only a render with footage has this key (FTG-006).
+        **({"footage_overlays": footage_entries} if footage_entries else {}),
         # Only a render with evidence beside a graphic has this key (OVL-007).
         **({"split_evidence": split_entries} if split_entries else {}),
         # Only a render of a project with sound effects has this key (EXM-007).
@@ -2670,6 +2829,10 @@ def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> Non
         overlay["start_frame"] -= first_frame
         overlay["start_ms"] = earlier(overlay["start_ms"])
         overlay["end_ms"] = earlier(overlay["end_ms"])
+    for footage in timeline.get("footage_overlays", []):
+        footage["start_frame"] -= first_frame
+        footage["start_ms"] = earlier(footage["start_ms"])
+        footage["end_ms"] = earlier(footage["end_ms"])
     for piece in timeline.get("split_evidence", []):
         piece["start_frame"] -= first_frame
         piece["start_ms"] = earlier(piece["start_ms"])

@@ -68,6 +68,9 @@ class _Task:
     # The accepted evidence for the Sources section (`youtube_sources`). Empty for a job queued
     # before the section existed, or for a project without evidence.
     sources: list[Any]
+    # The sources of the footage in the video (FTG-006), listed after them. Empty for a job queued
+    # before footage existed, or for a video without any.
+    footage_sources: list[Any]
     # The numbered spoken sentences the chapters are chosen from, the video's length, and the
     # titles of the chapters of the draft a note is about. Empty for a video with no chapters
     # (a story, a Short, a short video) and for a job queued before chapters existed.
@@ -117,6 +120,9 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     sources = job_input.get("sources", [])
     if not isinstance(sources, list):
         return None
+    footage_sources = job_input.get("footage_sources", [])
+    if not isinstance(footage_sources, list):
+        return None
     duration = job_input.get("chapter_duration_s")
     chapter_lines = _read_chapter_lines(job_input.get("chapter_lines"))
     if isinstance(duration, bool) or not isinstance(duration, int | float) or duration <= 0:
@@ -131,6 +137,7 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
         saved_inputs=saved_inputs,
         feedback=feedback,
         sources=sources,
+        footage_sources=footage_sources,
         chapter_lines=chapter_lines,
         duration_s=float(duration) if duration is not None else None,
         previous_chapters=previous_chapters,
@@ -239,7 +246,7 @@ class WriteYouTubeDraftHandler(JobHandler):
                 # again. The reason is on the job.
                 chapters_failure = chapters_outcome.failure
         try:
-            content = writer.with_sources(content, task.sources)
+            content = writer.with_sources(content, task.sources, task.footage_sources)
         except ValueError as exc:
             await self._fail(job_id, f"The sources could not be added to the description: {exc}")
             return

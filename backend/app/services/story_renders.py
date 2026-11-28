@@ -55,6 +55,7 @@ from app.services import (
     caption_plan,
     cut_planning_writer,
     evidence_clips,
+    footage_clips,
     graphic_theme,
     projects,
     provenance,
@@ -411,6 +412,53 @@ async def overlay_videos(
     }
 
 
+async def footage_clips_now(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], footage_clips.PieceClipEntry]:
+    """Every piece of footage placed over the shots of the newest plans (FTG-006), by `(scene id,
+    placed key)`, with where its clip stands. Empty for a project without footage, which reads
+    nothing of it."""
+    state = await footage_clips.piece_state(session, project)
+    return {(entry.scene_id, entry.placed_key): entry for entry in state.entries}
+
+
+def _footage_clip_source(
+    entry: footage_clips.PieceClipEntry,
+) -> story_render_plan.FootageClipSource | None:
+    """The clip a placed piece plays: its newest clip, once it is ready and is the current one."""
+    clip = entry.clip if entry.done else None
+    if clip is None or clip.media_path is None:
+        return None
+    return story_render_plan.FootageClipSource(
+        clip_id=clip.id,
+        path=clip.media_path,
+        frame_count=clip.frame_count,
+        file_exists=file_exists(clip.media_path),
+    )
+
+
+def _footage_sources(
+    scene_id: str, footage: dict[tuple[str, str], footage_clips.PieceClipEntry]
+) -> list[story_render_plan.FootageSource]:
+    """The footage placed over the shots of a scene, for the render plan (FTG-006), in the order
+    it starts."""
+    sources = [
+        story_render_plan.FootageSource(
+            placed_key=entry.placed_key,
+            mark_id=entry.piece.mark_id,
+            item_key=entry.piece.item_key,
+            kind=entry.piece.kind,
+            start_s=entry.piece.start_s,
+            end_s=entry.piece.end_s,
+            credit=footage_clips.credit_line(entry.item) if entry.item is not None else None,
+            clip=_footage_clip_source(entry),
+        )
+        for (scene, _key), entry in footage.items()
+        if scene == scene_id
+    ]
+    return sorted(sources, key=lambda source: (source.start_s, source.placed_key))
+
+
 async def evidence_clips_now(
     session: AsyncSession, project: Project
 ) -> dict[tuple[str, str], evidence_clips.ShotClipEntry]:
@@ -673,6 +721,7 @@ async def scene_sources(
     graphics = await graphic_videos(session, project)
     overlays = await overlay_videos(session, project) if with_overlays else {}
     splits = await split_clips_now(session, project) if with_overlays else {}
+    footage = await footage_clips_now(session, project) if with_overlays else {}
     panel = shot_graphics.graphic_panel(project)
     evidence = await evidence_clips_now(session, project)
     bite_state = await evidence_clips.soundbite_state(session, project)
@@ -834,6 +883,7 @@ async def scene_sources(
                 source_lines=source_lines,
                 overlays=_overlay_sources(scene_id, overlays, panel) if blocked is None else [],
                 splits=_split_sources(scene_id, splits) if blocked is None else [],
+                footage=_footage_sources(scene_id, footage) if blocked is None else [],
             )
         )
     return scenes
@@ -1138,8 +1188,10 @@ def _render_reasons(
     overlays: dict[tuple[str, str], shot_graphics.ShotEntry] | None = None,
     splits: dict[tuple[str, str], evidence_clips.SplitClipEntry] | None = None,
     sound_effects: story_render_plan.SoundEffectSource | None = None,
+    footage: dict[tuple[str, str], footage_clips.PieceClipEntry] | None = None,
 ) -> list[str]:
-    """Why a render no longer matches the story, one sentence each. `music` is the project, the
+    """Why a render no longer matches the story, one sentence each. `footage` is the footage now
+    (`footage_clips_now`, FTG-006). `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
     `switched` is every presenter shot now on its clip's own voice (`shot_voice_sources`).
     `graphics` is the video each graphic shot uses now (`graphic_videos`), and `evidence` the
@@ -1222,6 +1274,7 @@ def _render_reasons(
             reasons.append(f"{label} was made again since this video was made.")
     reasons.extend(overlay_reasons(recorded, overlays or {}))
     reasons.extend(split_reasons(recorded, splits or {}))
+    reasons.extend(footage_reasons(recorded, footage or {}))
     reasons.extend(music_reasons(recorded, *music))
     reasons.extend(sound_effect_reasons(recorded, sound_effects))
     reasons.extend(caption_reasons(recorded, music[0]))
@@ -1341,6 +1394,41 @@ def split_reasons(
         if scene_id is not None and key[0] != scene_id:
             continue
         reasons.append("Evidence beside a graphic was added since this video was made.")
+    return reasons
+
+
+def footage_reasons(
+    recorded: dict[str, Any],
+    footage: dict[tuple[str, str], footage_clips.PieceClipEntry],
+    scene_id: str | None = None,
+) -> list[str]:
+    """Why the footage a render laid over its shots (FTG-006) is not what there is now: a piece
+    was removed, has no current clip now or was drawn again, or one with a clip was added. A
+    render is compared with the pieces of its own scene only when `scene_id` is given. A piece
+    with no clip yet does not count as added: a render cannot have it."""
+    entries = recorded.get("footage_overlays")
+    then = [entry for entry in entries or [] if isinstance(entry, dict)]
+    if scene_id is not None:
+        then = [entry for entry in then if entry.get("scene_id") == scene_id]
+    reasons: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in then:
+        key = (str(entry.get("scene_id")), str(entry.get("id")))
+        seen.add(key)
+        label = f"The footage for {entry.get('mark_id')} in scene {entry.get('scene_index')}"
+        now = footage.get(key)
+        if now is None:
+            reasons.append(f"{label} was removed since this video was made.")
+        elif not now.done or now.clip is None:
+            reasons.append(f"{label} has no current clip now.")
+        elif now.clip.id != entry.get("clip_id"):
+            reasons.append(f"{label} was drawn again since this video was made.")
+    for key, now in footage.items():
+        if key in seen or not now.done:
+            continue
+        if scene_id is not None and key[0] != scene_id:
+            continue
+        reasons.append("Footage was added since this video was made.")
     return reasons
 
 
@@ -1520,6 +1608,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     soundbites = await soundbite_clips_now(session, project)
     overlays = await overlay_videos(session, project)
     splits = await split_clips_now(session, project)
+    footage = await footage_clips_now(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -1556,6 +1645,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             overlays,
             splits,
             sound_effects,
+            footage,
         )
         entries.append(
             RenderEntry(

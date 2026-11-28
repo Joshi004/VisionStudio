@@ -342,6 +342,25 @@ class GraphicOverlay:
 
 
 @dataclass(frozen=True)
+class FootageOverlay:
+    """A piece of footage (FTG-006) laid full screen over the shots it spans, under the callouts
+    and the cards: its video (H.264, no alpha, no sound), the story frame it starts at, where it
+    sits (always 0, 0) and the line that names its source, if any. `start_ms` and `end_ms` are the
+    span of the credit line."""
+
+    footage_id: str
+    path: str
+    start_frame: int
+    frames: int
+    clip_frames: int
+    x: int
+    y: int
+    start_ms: int
+    end_ms: int
+    credit: str | None = None
+
+
+@dataclass(frozen=True)
 class SplitEvidence:
     """The evidence beside a graphic overlay (OVL-007): its clip (H.264, no alpha, the whole frame
     with the evidence in its half), the story frame it starts at and where it sits (0, 0). It is
@@ -393,6 +412,8 @@ class Timeline:
     source_lines: tuple[caption_ass.SourceLineEvent, ...] = ()
     # The graphic overlays (OVL-005); a timeline without any has none.
     graphic_overlays: tuple[GraphicOverlay, ...] = ()
+    # The footage laid first over the shots (FTG-006); a timeline without any has none.
+    footage_overlays: tuple[FootageOverlay, ...] = ()
     # The evidence drawn beside those overlays (OVL-007); a timeline without any has none.
     split_evidence: tuple[SplitEvidence, ...] = ()
     # The sound bite values (SB-009). A timeline without a bite does not record them, and one
@@ -776,6 +797,56 @@ def _parse_graphic_overlays(raw: dict[str, Any], total_frames: int) -> tuple[Gra
     return tuple(overlays)
 
 
+def _parse_footage_overlays(raw: dict[str, Any], total_frames: int) -> tuple[FootageOverlay, ...]:
+    """The footage of the timeline: none when the key is missing."""
+    entries = raw.get("footage_overlays", [])
+    if not isinstance(entries, list):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    found: list[FootageOverlay] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        footage_id, path, credit = entry.get("id"), entry.get("path"), entry.get("credit")
+        numbers = [
+            _whole(entry.get(key))
+            for key in (
+                "start_frame",
+                "frames",
+                "source_frames",
+                "clip_frames",
+                "x",
+                "y",
+                "start_ms",
+                "end_ms",
+            )
+        ]
+        if (
+            not isinstance(footage_id, str)
+            or not isinstance(path, str)
+            or (credit is not None and not isinstance(credit, str))
+            or any(value is None for value in numbers)
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        start, frames, source_frames, clip_frames, x, y, start_ms, end_ms = (
+            value or 0 for value in numbers
+        )
+        # One source frame short is allowed, as for a shot (the render repeats the last frame).
+        if (
+            start < 0
+            or frames < 1
+            or clip_frames < source_frames - 1
+            or start + frames > total_frames
+            or end_ms <= start_ms
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        found.append(
+            FootageOverlay(
+                footage_id, path, start, frames, clip_frames, x, y, start_ms, end_ms, credit
+            )
+        )
+    return tuple(found)
+
+
 def _parse_split_evidence(raw: dict[str, Any], total_frames: int) -> tuple[SplitEvidence, ...]:
     """The evidence beside graphic overlays in the timeline: none when the key is missing."""
     entries = raw.get("split_evidence", [])
@@ -1113,6 +1184,7 @@ def parse_timeline(recorded: object) -> Timeline:
         callout_style=callout_style,
         cards=_parse_cards(raw, total),
         graphic_overlays=_parse_graphic_overlays(raw, total),
+        footage_overlays=_parse_footage_overlays(raw, total),
         split_evidence=_parse_split_evidence(raw, total),
         sound_effects=_parse_sound_effects(
             raw.get("sound_effects"), render_commands.sample_count(total, fps)
@@ -1226,6 +1298,18 @@ class RenderStoryHandler(JobHandler):
                 job_id, job.project_id, timeline.callouts, timeline.fps, storage, temp_paths
             )
             shot_overlays = drawn.overlays_by_shot([shot.frames for shot in timeline.shots])
+
+        # Footage (FTG-006): full-screen videos laid first, so the callouts, the cards and the
+        # graphics below are all on top of them. The shots under them are not changed.
+        if timeline.footage_overlays:
+            footage_files = [
+                (piece, await probe_footage(storage, piece)) for piece in timeline.footage_overlays
+            ]
+            on_footage = card_overlays(footage_files, [shot.frames for shot in timeline.shots])
+            shot_overlays = [
+                [*footage_on, *already_on]
+                for footage_on, already_on in zip(on_footage, shot_overlays, strict=True)
+            ]
 
         # Evidence cards (EVD-011): the same kind of clip, laid over the shots they span.
         if timeline.cards:
@@ -1416,14 +1500,15 @@ class RenderStoryHandler(JobHandler):
                 ),
             )
         has_callouts = box_track is not None and bool(box_track.entries)
-        if has_captions or has_callouts or timeline.source_lines:
+        source_lines = _with_footage_credits(timeline)
+        if has_captions or has_callouts or source_lines:
             await self._phase(job_id, phases.WRITING_CAPTIONS)
             captions = await write_subtitles(
                 storage,
                 timeline.captions if has_captions else None,
                 box_track if has_callouts else None,
                 temp_paths,
-                source_lines=timeline.source_lines,
+                source_lines=source_lines,
                 play_res=(timeline.width, timeline.height),
             )
 
@@ -1741,6 +1826,19 @@ async def probe_graphic_overlay(storage: Storage, overlay: GraphicOverlay) -> Pa
     return path
 
 
+async def probe_footage(storage: Storage, piece: FootageOverlay) -> Path:
+    """The video of a piece of footage (FTG-006); refuses one that cannot be read or is too
+    short."""
+    try:
+        path = storage.get_path(piece.path)
+    except StorageError as exc:
+        raise RenderFailed("A file of this render could not be found on disk.") from exc
+    probe = await ffmpeg.probe_video(path)
+    if probe is None or probe.frame_count is None or probe.frame_count < piece.clip_frames:
+        raise RenderFailed("A footage clip could not be read. Draw the footage again.")
+    return path
+
+
 async def probe_split_evidence(storage: Storage, piece: SplitEvidence) -> Path:
     """The clip of evidence beside a graphic (OVL-007); refuses one that cannot be read or is too
     short."""
@@ -1756,8 +1854,21 @@ async def probe_split_evidence(storage: Storage, piece: SplitEvidence) -> Path:
     return path
 
 
+def _with_footage_credits(timeline: Timeline) -> tuple[caption_ass.SourceLineEvent, ...]:
+    """The source lines of the evidence and the credit line of each piece of footage that has
+    one (FTG-006), in the order they start. Without footage this is the timeline's own lines."""
+    credits = tuple(
+        caption_ass.SourceLineEvent(piece.start_ms, piece.end_ms, piece.credit)
+        for piece in timeline.footage_overlays
+        if piece.credit
+    )
+    if not credits:
+        return timeline.source_lines
+    return tuple(sorted((*timeline.source_lines, *credits), key=lambda line: line.start_ms))
+
+
 def card_overlays(
-    cards: Sequence[tuple[EvidenceCard | GraphicOverlay | SplitEvidence, Path]],
+    cards: Sequence[tuple[EvidenceCard | GraphicOverlay | SplitEvidence | FootageOverlay, Path]],
     shot_frames: Sequence[int],
 ) -> list[list[render_commands.Overlay]]:
     """The overlays of each shot for the evidence cards (and for the graphic overlays, OVL-005),

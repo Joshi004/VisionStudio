@@ -115,6 +115,32 @@ def _piece_of(item: Any, details: dict[str, Any] | None = None) -> dict[str, Any
     }
 
 
+def footage_piece(
+    item: Any, credit: str | None, use_start_s: float | None
+) -> dict[str, Any] | None:
+    """One piece of footage that is in the video (FTG-006) as a cleaned entry, or None when it has
+    nothing to list. An agent's piece gives its publisher, title and address; a video's address
+    is built from its 11-character id at the second `use_start_s` of the stored video (the
+    capture's window moves it back to the source video). An owner's file, or a piece with no
+    address, is listed by its `credit` line alone. Pure.
+    """
+    source = item.source if isinstance(item.source, dict) else {}
+    capture = item.capture if isinstance(item.capture, dict) else {}
+    url = None
+    if item.origin != "owner":
+        url = _address(source.get("final_url")) or _address(source.get("url"))
+        if item.kind == "video":
+            window = capture.get("window") if isinstance(capture.get("window"), dict) else {}
+            second = soundbite_render.start_second(window.get("start_s"), use_start_s)
+            url = soundbite_render.watch_url(capture.get("video_id"), second) or url
+    credit_text = _clean(credit, 160)
+    publisher = _clean(source.get("publisher"), PUBLISHER_MAX_CHARS) if url else None
+    title = _clean(source.get("title"), TITLE_MAX_CHARS) if url else None
+    if url is None and credit_text is None:
+        return None
+    return {"publisher": publisher, "title": title, "url": url, "credit": credit_text}
+
+
 def entries_from_review(view: ReviewView) -> list[dict[str, Any]]:
     """The claims that have accepted evidence, in the review's order, each with its accepted pieces
     in the import's order. A piece that is not usable, was not accepted, has no usable address or
@@ -208,22 +234,69 @@ def names(entries: object) -> list[dict[str, str]]:
     return found
 
 
-def block(entries: object, budget_bytes: int, note: str = "") -> str:
+def _read_footage(entry: object) -> dict[str, Any] | None:
+    """A stored footage entry (`footage_piece`), checked again (the job input is read back from the
+    database): an address that is safe, or a credit line, or both."""
+    if not isinstance(entry, dict):
+        return None
+    url = _address(entry.get("url"))
+    credit = _clean(entry.get("credit"), 160)
+    if url is None and credit is None:
+        return None
+    return {
+        "publisher": _clean(entry.get("publisher"), PUBLISHER_MAX_CHARS),
+        "title": _clean(entry.get("title"), TITLE_MAX_CHARS),
+        "url": url,
+        "credit": credit,
+    }
+
+
+def _footage_line(entry: dict[str, Any]) -> str:
+    """`- Publisher, "Title": https://...` for a piece with an address, else `- Video: credit`."""
+    if entry["url"] is None:
+        return f"- {entry['credit']}"
+    return _piece_line(entry)
+
+
+def _unique_footage(footage: object, taken: set[str]) -> list[dict[str, Any]]:
+    """The usable footage entries in order, each address and each credit once, leaving out an
+    address already in `taken` (a source of the evidence)."""
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set(taken)
+    for raw in footage if isinstance(footage, list | tuple) else []:
+        entry = _read_footage(raw)
+        if entry is None:
+            continue
+        key = entry["url"] or f"credit:{entry['credit']}"
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(entry)
+    return found
+
+
+def block(entries: object, budget_bytes: int, note: str = "", footage: object = ()) -> str:
     """The Sources section: the heading, the `note` (a sentence or two on what was checked, may be
-    empty) and one line for every source, each address once. "" when there is no source to list
-    or not even the first one fits in `budget_bytes` (UTF-8 bytes). Sources are added in order;
-    when some are left out the section ends with a sentence that says how many are not listed.
-    When the note is what stops it from fitting, the note is left out.
+    empty) and one line for every source, each address once. The sources of the footage in the
+    video (FTG-006) follow those of the evidence. "" when there is no source to list or not even
+    the first one fits in `budget_bytes` (UTF-8 bytes). Sources are added in order; when some are
+    left out the section ends with a sentence that says how many are not listed. When the note is
+    what stops it from fitting, the note is left out.
     """
-    pieces = _unique_pieces(entries)
+    pieces: list[dict[str, Any]] = _unique_pieces(entries)
+    lines = [_piece_line(piece) for piece in pieces]
+    lines.extend(
+        _footage_line(entry)
+        for entry in _unique_footage(footage, {piece["url"] for piece in pieces})
+    )
     clean_note = _clean(note, 400) or ""
     for with_note in (True, False) if clean_note else (False,):
-        for count in range(len(pieces), 0, -1):
+        for count in range(len(lines), 0, -1):
             parts = [HEADING]
             if with_note:
                 parts.append(clean_note)
-            parts.append("\n".join(_piece_line(piece) for piece in pieces[:count]))
-            left_out = len(pieces) - count
+            parts.append("\n".join(lines[:count]))
+            left_out = len(lines) - count
             if left_out:
                 noun = "source is" if left_out == 1 else "sources are"
                 parts.append(f"{left_out} more {noun} not listed here for length.")

@@ -478,14 +478,15 @@ def with_chapters(content: dict[str, Any], chapters_block: str) -> dict[str, Any
     return {**content, "description": joined}
 
 
-def with_sources(content: dict[str, Any], entries: object) -> dict[str, Any]:
+def with_sources(content: dict[str, Any], entries: object, footage: object = ()) -> dict[str, Any]:
     """The content with the Sources section added to the end of its description (before the
     hashtags, which are added when the text is sent): the heading, the model's note on what was
     checked, and the list of sources. The section takes only the bytes that are left under
     YouTube's limit with the hashtags counted. The note is not stored: the returned content has
     only `{title, description, hashtags, tags}`. The description is returned as it is when there
     are no entries or nothing fits. Raises ValueError if the result breaks a check, which the
-    budget should make impossible.
+    budget should make impossible. `footage` are the sources of the footage in the video
+    (FTG-006), listed after those of the evidence.
     """
     note = content.get("sources_note", "")
     stored = {key: value for key, value in content.items() if key != "sources_note"}
@@ -494,7 +495,7 @@ def with_sources(content: dict[str, Any], entries: object) -> dict[str, Any]:
     used = utf8_bytes(description_with_hashtags(description, hashtags))
     # Two bytes for the empty line between the description and the section.
     room = DESCRIPTION_MAX_BYTES - used - 2
-    section = youtube_sources.block(entries, room, note if isinstance(note, str) else "")
+    section = youtube_sources.block(entries, room, note if isinstance(note, str) else "", footage)
     if not section:
         return stored
     joined = f"{description}\n\n{section}"
