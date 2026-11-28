@@ -9,6 +9,7 @@ import { layoutReport } from "./blocks/report";
 import type { LayoutReport } from "./blocks/report";
 import { readScene } from "./blocks/scene";
 import { Evidence } from "./evidence/Evidence";
+import { Footage } from "./footage/Footage";
 import { fontsLoaded } from "./fonts";
 import { Generated } from "./generated/Generated";
 import { SoundbiteOverlay } from "./soundbite/SoundbiteOverlay";
@@ -194,6 +195,16 @@ export function Root() {
         fps={24}
         durationInFrames={144}
         defaultProps={defaults("evidence_clip")}
+        calculateMetadata={metadata}
+      />
+      <Composition
+        id="Footage"
+        component={Footage}
+        width={1920}
+        height={1080}
+        fps={24}
+        durationInFrames={144}
+        defaultProps={defaults("footage_clip")}
         calculateMetadata={metadata}
       />
       <Composition

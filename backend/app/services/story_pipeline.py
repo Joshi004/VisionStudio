@@ -226,6 +226,12 @@ STEPS: Final[tuple[Step, ...]] = (
     # evidence shot has no targets. The renders wait for it: an evidence shot is a clip of the
     # timeline, like a graphic shot.
     Step("evidence_clips", "Draw the evidence shots", ("shot_plans",), kind=SCENE),
+    # FTG-005: the clip of each piece of footage placed over the shots of a scene, drawn at the
+    # exact length of its place on the timeline. It draws what is shown now and does not wait for
+    # the research (a mark reviewed later adds clips). Skipped as complete for any project that is
+    # not a continuous explainer with footage on. A scene with nothing placed has no targets. The
+    # renders wait for it: a placed piece is laid over the shots (FTG-006).
+    Step("footage_clips", "Draw the footage", ("shot_plans",), kind=SCENE),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.
     Step("music_plan", "Plan the music", ("shot_plans", "music_bible")),
@@ -274,6 +280,7 @@ STEPS: Final[tuple[Step, ...]] = (
             "shot_generation",
             "graphics",
             "evidence_clips",
+            "footage_clips",
             "callout_plan",
             "callout_graphics",
             "shot_plans",
@@ -297,7 +304,14 @@ STEPS: Final[tuple[Step, ...]] = (
     Step(
         "render",
         "Render the video",
-        ("shot_generation", "music_placement", "graphics", "evidence_clips", "callout_graphics"),
+        (
+            "shot_generation",
+            "music_placement",
+            "graphics",
+            "evidence_clips",
+            "footage_clips",
+            "callout_graphics",
+        ),
     ),
 )
 

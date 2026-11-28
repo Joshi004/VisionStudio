@@ -2,13 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
-import { ACTIVE_POLL_MS } from "./polling";
+import { invalidateAfterJobAction } from "./jobs";
+import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY, isValidProjectId, uploadError } from "./projects";
 import type { components } from "./schema";
 
 export type FootageFilesState = components["schemas"]["FootageFilesState"];
 export type FootageFile = components["schemas"]["FootageFileOut"];
 export type FootageFileKind = FootageFile["kind"];
+export type FootagePreview = components["schemas"]["FootagePreviewOut"];
 
 /** The limits the server enforces (the server stays the judge; these only save a long upload). */
 export const FOOTAGE_IMAGE_MAX_MB = 20;
@@ -58,13 +60,17 @@ async function fetchFootageFiles(projectId: number) {
   return data;
 }
 
-/** The owner's files on each mark. Loaded again every few seconds while a video is prepared. */
+/** The owner's files on each mark. Loaded again every few seconds while a video is prepared or a
+ * preview is being drawn. */
 export function useFootageFiles(projectId: number, enabled = true) {
   return useQuery({
     queryKey: footageFilesKey(projectId),
     queryFn: () => fetchFootageFiles(projectId),
     enabled: enabled && isValidProjectId(projectId),
-    refetchInterval: (query) => (query.state.data?.preparing ? ACTIVE_POLL_MS : false),
+    refetchInterval: (query) =>
+      query.state.data?.preparing || query.state.data?.files.some((file) => isJobActive(file.preview))
+        ? ACTIVE_POLL_MS
+        : false,
   });
 }
 
@@ -178,5 +184,30 @@ export function useSetFootageUse(projectId: number) {
     onSuccess: (data) => {
       queryClient.setQueryData(footageFilesKey(projectId), data);
     },
+  });
+}
+
+/** Starts the job that draws a 6 second preview of one file as it will be over the shots. */
+export function useStartFootagePreview(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (itemKey: string) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/footage-files/{item_key}/preview",
+        { params: { path: { project_id: projectId, item_key: itemKey } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not start the preview (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: footageFilesKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
   });
 }

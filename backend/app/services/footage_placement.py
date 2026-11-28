@@ -52,9 +52,9 @@ MAX_LEAD_S: Final = 1.0
 MIN_PIECE_S: Final = 1.5
 # A boundary between pieces moves to a pause at most this far away.
 SNAP_S: Final = 0.5
-# The longest a still piece (image, page, PDF) is on screen: the most the motion service draws
-# (`graphic_overlays.MAX_FRAMES` at `FPS`), less the spare frame a drawn clip has and one frame
-# that rounding the two ends to the frame grid may add.
+# The longest a still piece (image, page, PDF) is on screen: the backend's cap on a drawn clip
+# (`graphic_overlays.MAX_FRAMES` at `FPS`; the motion service itself allows more), less the spare
+# frame a drawn clip has and one frame that rounding the two ends to the frame grid may add.
 STILL_MAX_S: Final = (graphic_overlays.MAX_FRAMES - graphic_overlays.SPARE_FRAMES - 1) / (
     graphic_overlays.FPS
 )

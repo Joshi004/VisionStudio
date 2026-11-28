@@ -20,9 +20,11 @@ import {
   useRemoveFootageFile,
   useReorderFootageFiles,
   useSetFootageUse,
+  useStartFootagePreview,
   useUploadFootageFile,
   type FootageFile,
 } from "../../api/footageFiles";
+import { FootagePreview } from "./FootagePreview";
 
 /** The most files of the owner's one mark holds (the server enforces it). */
 const MAX_FILES = 9;
@@ -154,9 +156,21 @@ type RowProps = {
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
   onUse: (startS: number, endS: number) => void;
+  previewStarting: boolean;
+  onPreview: () => void;
 };
 
-function FileRow({ file, first, last, disabled, onMove, onRemove, onUse }: RowProps) {
+function FileRow({
+  file,
+  first,
+  last,
+  disabled,
+  onMove,
+  onRemove,
+  onUse,
+  previewStarting,
+  onPreview,
+}: RowProps) {
   return (
     <Stack gap={4}>
       <Group gap="xs" wrap="nowrap" align="flex-start">
@@ -229,6 +243,14 @@ function FileRow({ file, first, last, disabled, onMove, onRemove, onUse }: RowPr
           onChange={onUse}
         />
       )}
+      {file.status === "ready" && (
+        <FootagePreview
+          file={file}
+          disabled={disabled}
+          starting={previewStarting}
+          onStart={onPreview}
+        />
+      )}
     </Stack>
   );
 }
@@ -243,6 +265,7 @@ export function FootageFilesSection({ projectId, markId, files }: Props) {
   const remove = useRemoveFootageFile(projectId);
   const reorder = useReorderFootageFiles(projectId);
   const setUse = useSetFootageUse(projectId);
+  const startPreview = useStartFootagePreview(projectId);
   const [credit, setCredit] = useState("");
 
   const pending = upload.isPending || remove.isPending || reorder.isPending || setUse.isPending;
@@ -252,6 +275,7 @@ export function FootageFilesSection({ projectId, markId, files }: Props) {
     remove.reset();
     reorder.reset();
     setUse.reset();
+    startPreview.reset();
   }
 
   function move(index: number, direction: -1 | 1) {
@@ -287,6 +311,11 @@ export function FootageFilesSection({ projectId, markId, files }: Props) {
           onUse={(startS, endS) => {
             resetErrors();
             setUse.mutate({ itemKey: file.item_key, startS, endS });
+          }}
+          previewStarting={startPreview.isPending && startPreview.variables === file.item_key}
+          onPreview={() => {
+            resetErrors();
+            startPreview.mutate(file.item_key);
           }}
         />
       ))}
@@ -336,6 +365,11 @@ export function FootageFilesSection({ projectId, markId, files }: Props) {
       {reorder.isError && (
         <Alert color="red" p="xs" title="The order was not changed">
           {describeError(reorder.error)}
+        </Alert>
+      )}
+      {startPreview.isError && (
+        <Alert color="red" p="xs" title="The preview was not started">
+          {describeError(startPreview.error)}
         </Alert>
       )}
       {setUse.isError && (

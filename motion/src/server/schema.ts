@@ -11,6 +11,9 @@ export const ENGINES = [
   // An evidence clip (EVD-008): a screenshot zoomed to a quote. Its images travel in the request,
   // so it is asked for on POST /evidence-renders only, never on POST /renders.
   "evidence_clip",
+  // A footage clip (FTG-005): a photo, a web page or a PDF page. Its picture travels in the request
+  // like an evidence clip's, so it is asked for on POST /evidence-renders only.
+  "footage_clip",
   // The lower third and the source credit laid over a sound bite clip (SB-009): a transparent
   // full-frame clip, always ProRes 4444 like a callout, with no images in its request.
   "soundbite_overlay",
@@ -18,6 +21,7 @@ export const ENGINES = [
 export type Engine = (typeof ENGINES)[number];
 
 export const EVIDENCE_ENGINE: Engine = "evidence_clip";
+export const FOOTAGE_ENGINE: Engine = "footage_clip";
 export const SOUNDBITE_ENGINE: Engine = "soundbite_overlay";
 // A sound bite is at most 15 s long (SB-007): 1800 frames is 60 s at 30 fps, as for a callout.
 const SOUNDBITE_MAX_FRAMES = 1800;
@@ -124,15 +128,15 @@ const evidenceImageSchema = {
   },
 } as const;
 
-// The body of POST /evidence-renders (EVD-008): a render request of the engine `evidence_clip`,
-// whose `input` is `{image, context}`. The screenshot is always there; the context image only when
+// The body of POST /evidence-renders (EVD-008, FTG-005): a render request of the engine
+// `evidence_clip` or `footage_clip`, whose `input` is `{image, context}`. The screenshot is always there; the context image only when
 // the camera goes past the screenshot's edge.
 export const evidenceRenderRequestSchema = {
   ...renderRequestSchema,
   required: [...renderRequestSchema.required, "input"],
   properties: {
     ...renderRequestSchema.properties,
-    engine: { type: "string", enum: [EVIDENCE_ENGINE] },
+    engine: { type: "string", enum: [EVIDENCE_ENGINE, FOOTAGE_ENGINE] },
     input: {
       type: "object",
       additionalProperties: false,
@@ -267,6 +271,9 @@ export function requestProblem(request: RenderRequest): string | null {
   const card = engine === EVIDENCE_ENGINE && resolved["card"] !== undefined && resolved["card"] !== null;
   if (engine === EVIDENCE_ENGINE && (request.input === null || request.input === undefined)) {
     return "An evidence clip needs its images in `input`.";
+  }
+  if (engine === FOOTAGE_ENGINE && (request.input === null || request.input === undefined)) {
+    return "A footage clip needs its picture in `input`.";
   }
   if (callout && frames > CALLOUT_MAX_FRAMES) {
     return `The engine "${engine}" draws at most ${CALLOUT_MAX_FRAMES} frames.`;

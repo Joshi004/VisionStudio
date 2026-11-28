@@ -377,6 +377,10 @@ SAVING_GRAPHIC: Final = "saving the video"
 # An evidence clip (EVD-008): the screenshot is cut and shrunk before it is sent to the motion
 # service; the other phases are those of a graphic.
 PREPARING_EVIDENCE: Final = "preparing the evidence pictures"
+# A footage clip (FTG-005): the video is cut by FFmpeg, a picture is shrunk before it is sent to the
+# motion service; the other phases are those of a graphic.
+CUTTING_FOOTAGE_CLIP: Final = "cutting the footage video"
+PREPARING_FOOTAGE_PICTURE: Final = "preparing the footage picture"
 
 
 def rendering_graphic(percent: int) -> str:

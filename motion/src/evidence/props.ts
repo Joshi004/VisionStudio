@@ -1,10 +1,11 @@
+import type { Box, ImagePayload } from "../shared/camera";
 import type { GraphicInput } from "../types";
 
 // A box of the screenshot's world, `[x, y, width, height]` in the screenshot's own pixels: the image
 // is `[0, 0, image_w, image_h]` (see `backend/app/services/evidence_clip_layout.py`).
-export type Box = [number, number, number, number];
+export type { Box };
 
-export type EvidenceImage = { mime: "image/png" | "image/jpeg"; base64: string };
+export type EvidenceImage = ImagePayload;
 
 // What the backend sends as `resolved` for an evidence clip (EVD-008). The camera, the stage and
 // the timeline are decided there; the composition only draws them.

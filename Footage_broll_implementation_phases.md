@@ -344,7 +344,7 @@ Starting values, to tune by eye.
 - **At least `MIN_S` (2.0 s).** A shorter run grows after its last word, up to the next thing it may not cover or the end of the scene, and then starts up to `MAX_LEAD_S` (1.0 s) earlier. With no room it is not placed, and the board says why.
 - **Several pieces in a run** (a montage). The pieces shown are played one after another in the owner's order, with plain cuts. The run is shared out evenly; a video piece gets at most its `use` length, and the time it cannot fill goes to the still pieces after it. Each piece is on screen for at least `MIN_PIECE_S` (1.5 s); pieces that do not fit are left out, the last first, with a note. A boundary between two pieces moves to the middle of the nearest pause between words when one is within 0.5 s.
 - **Not enough footage.** When the pieces together are shorter than the run (only video pieces, all short), the run ends when they end and the shot under it shows again.
-- **A still piece** (image, page, PDF) is on screen for at most `MAX_PIECE_FRAMES` (720 frames at 24 fps, 30 s), the most the motion service draws. A run of one still piece that is longer is cut at 30 s, with a note.
+- **A still piece** (image, page, PDF) is on screen for at most `MAX_PIECE_FRAMES` (720 frames at 24 fps, 30 s), the backend's cap on a drawn clip (the motion service itself allows 4320 frames). A run of one still piece that is longer is cut at 30 s, with a note.
 - **Keys.** A run is `{scene_id}/{first}-{last}`: the scene and the run's first and last word in the take, counted from 1, like an overlay. A placed piece is `{run}:{item_key}`. The same words and the same piece keep the same key, so a clip is not drawn again when other marks change.
 - **Worked out on read**, for a scene whose plan is current, from the plan, the timeline, the marks and the pieces shown now. Nothing is stored for the placement.
 
@@ -398,7 +398,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-002 | Marking footage and GLM's proposals | Code | FTG-001 | Completed |
 | FTG-003 | The owner's own files on a mark | Code | FTG-002 | Completed |
 | FTG-004 | Placing footage over the shots | Code | — | Completed |
-| FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Not Started |
+| FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Completed |
 | FTG-006 | Footage in the render | Code | FTG-005 | Not Started |
 | FTG-007 | The research brief and the waiting step | Code | FTG-002 | Not Started |
 | FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 4 completed (FTG-001, FTG-002, FTG-003 and FTG-004, 2026-11-28; the owner still has to rebuild the real app); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 5 completed (FTG-001, FTG-002, FTG-003, FTG-004 and FTG-005, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -644,7 +644,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-005 — The footage clip and its preview
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28; the owner still has to rebuild the motion image and the backend of the real app)
 
 **Objective.** Every placed piece is drawn at its exact length, and the owner can preview a piece.
 
@@ -673,14 +673,40 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks, and `npm run typecheck` in `motion/`.
 
 **Completion checklist.**
-- [ ] Clip states, queue and job
-- [ ] Video by FFmpeg, with the cut rules
-- [ ] Image, page and PDF compositions
-- [ ] Preview
-- [ ] Step and board
-- [ ] Standard checks
+- [x] Clip states, queue and job
+- [x] Video by FFmpeg, with the cut rules
+- [x] Image, page and PDF compositions
+- [x] Preview
+- [x] Step and board
+- [x] Standard checks
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration.** `footage_clip`, the job type `render_footage_clip` and the placed pieces already existed.
+- **Modules:**
+  - `services/footage_cut.py` (pure): `choose_start(use_start_s, use_end_s, length_s, moment_s, cuts, fps)`. `EDGE_S` 0.5, `CUT_SETTLE_FRAMES` 3. The valid start nearest the target wins; with none, the nearest grid start is used and the clip gets the warning `cut_in_clip`.
+  - `services/footage_video.py`: `clip_graph` (fit over the blurred copy, fill, or a portrait crop `left`, `centre` or `right`, tail frames cloned) and `clip_args` (H.264 `yuv420p`, `-an`, constant frame rate). `soundbite_render._picture_chain` is now public (`picture_chain`), output unchanged.
+  - `services/footage_clip_layout.py` (pure): the image look (fit or fill, zoom 1.05, blurred backdrop), the browser window of a page (title bar, three dots, address bar, highlight sweep), and the PDF camera.
+  - `services/footage_clips.py`: the look of a clip, `piece_state` (memoized; nothing is read when footage is off), `queue_piece_clip`, `queue_preview`, `previews_for`. `FootageClipError` carries a sentence.
+  - `jobs/render_footage_clip.py` (`local`, `start_again`, concurrency `GRAPHICS_MAX_RENDERS_KEY`): FFmpeg for a video, the motion service for the rest, then `ffprobe` checks the frames, size, rate, codec, pixel format and that there is **no audio**.
+  - Motion: `shared/camera.tsx` (camera and highlight helpers, used by `Evidence` and `Footage`, `Evidence` unchanged in output), `footage/Footage.tsx` and `footage/props.ts`, the engine `footage_clip` on the large-body route `/evidence-renders` (`/renders` refuses it).
+  - Step `footage_clips` ("Draw the footage", per scene, needs `shot_plans`; `scene_render` and `render` need it); one target per placed piece, `footage:{placed_key}`; the notes of `_footage_notes` moved here from `footage_marks`. `render` does not need `footage` yet (that step comes with FTG-007).
+  - Preview: `POST /projects/{id}/footage-files/{item_key}/preview` (202, `{job_id}`), `FootageFileOut.preview`, `FootagePreview.tsx` in each ready file of the mark card, polling while a preview is queued or running; `StepPanel` shows the shot plan for `footage_clips`.
+- **Planning decided:**
+  - **Composition:** a new `Footage` composition with `mode` `image`, `page` or `pdf`.
+  - **Image move:** a photo of the frame's shape fills it; any other shape is fitted over a blurred, darkened copy, with a 5% zoom over the clip. A portrait crop from the mark's `framing` fills the frame.
+  - **Browser frame:** a rounded window on the plain evidence background with the page's host and path in an address bar; the page scrolls to the focus, zooms and the focus gets the accent highlight.
+  - **32 MiB limit:** the picture is scaled down to what the largest zoom needs and sent as PNG; over 28 MiB it is sent as JPEG (quality 90); if still over, the clip fails with a sentence.
+  - **An owner's video** has no `moment_s`: it starts at the chosen start, moved only as far as the cut rules need.
+  - **The look** includes the portrait crop only for a video or an image, and the accent only for a page or a PDF, so a new accent never draws a video again and a crop never redraws a page.
+- **Deviations:** `footage_clip` was not added to `graphics_render.COMPOSITION_OF` (the job names its composition itself). Page and PDF clips were checked with made-up captures only.
+- **Checked** on a throwaway database and data folder, with the motion service run from a throwaway bundle on another port (no paid call; the real app on port 5480 was not touched; the scripts were removed):
+  - `choose_start` samples: no cuts; a cut near an edge (the start moves past it); a moment near either end of `use` (kept inside it); dense cuts (warning); an owner's video starting at `use.start`.
+  - Preview clips of exactly 144 frames at 1280x720 and 720x1280 for an owner video, an owner image, a made-up page and a made-up PDF, and a 61-frame clip at 30 fps: H.264, `yuv420p`, no audio. The cuts at 3, 6 and 9 s of a test video stayed out of the first and last 0.5 s.
+  - Frames looked at: the 4:3 photo is fitted over the blurred copy; a portrait crop fills the frame (left and right differ); the page shows the window, the address and the highlight; the PDF shows its page and highlight.
+  - Tall pictures: a 1280x5120 noise page stays PNG under the limit, a 1920x7680 one falls back to JPEG, both under 28 MiB.
+  - A new framing makes only a video's and a photo's preview out of date, not a page's. The step has one done target for a project with footage off and none for a project with footage on and no plan.
+  - `ruff check`, `ruff format --check`, `npm run typecheck` and `npm run lint` (frontend), `npm run typecheck` in `motion/`.
+- **Not done:** `piece_state` and `queue_piece_clip` were not run on a real shot plan (they were checked by reading and through the preview path, which shares the look and the job); a 4-screen real page and the scroll's look on a real capture wait for FTG-008. The motion image and the backend of the real app must be rebuilt.
 
 ### FTG-006 — Footage in the render
 
@@ -1063,3 +1089,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-002 | Completed: footage marks (service, API, GLM proposals job), the `footage_marks` step and board entry, and the story box layer, toolbar row and card. No migration. |
 | 2026-11-28 | FTG-003 | Completed: the owner's photos and videos on a mark (upload API, `prepare_footage_file` job, decision versions, files section on the mark card). No migration. |
 | 2026-11-28 | FTG-004 | Completed: footage placed on read (`services/footage_placement.py`, `footage_decisions.shown_marks`, three new `SceneEntry` fields, notes on the `footage_marks` step). No migration, no API or UI change. |
+| 2026-11-28 | FTG-005 | Completed: the footage clip and its preview (`services/footage_clips.py`, `jobs/render_footage_clip.py`, FFmpeg cut rules, the motion `Footage` composition, the step `footage_clips`, the preview route and button). No migration. The motion image must be rebuilt. |

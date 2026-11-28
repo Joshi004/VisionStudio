@@ -9,6 +9,7 @@ import {
   checksRequestSchema,
   EVIDENCE_BODY_LIMIT_BYTES,
   EVIDENCE_ENGINE,
+  FOOTAGE_ENGINE,
   evidenceRenderRequestSchema,
   idParamsSchema,
   layoutProblem,
@@ -55,6 +56,9 @@ app.post<{ Body: RenderRequest }>(
   async (request, reply) => {
     if (request.body.engine === EVIDENCE_ENGINE) {
       return reply.code(400).send({ error: "An evidence clip is asked for on /evidence-renders." });
+    }
+    if (request.body.engine === FOOTAGE_ENGINE) {
+      return reply.code(400).send({ error: "A footage clip is asked for on /evidence-renders." });
     }
     const problem = requestProblem(request.body);
     if (problem !== null) return reply.code(400).send({ error: problem });

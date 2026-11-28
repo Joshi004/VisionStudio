@@ -31,7 +31,7 @@ import logging
 import math
 import uuid
 from collections.abc import AsyncIterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import FootageItem, Job, Project
 from app.jobs import store
-from app.services import footage_decisions, footage_marks, frame_images
+from app.services import footage_clips, footage_decisions, footage_marks, frame_images
 from app.services.ffmpeg import probe
 from app.services.storage import TempFile, TooLargeError, get_storage, media_url
 
@@ -444,6 +444,8 @@ class FileView:
     height: int | None
     duration_s: float | None
     use: dict[str, float] | None
+    # The newest preview of the file (FTG-005), None when none was made.
+    preview: footage_clips.Preview | None = None
 
 
 @dataclass(frozen=True)
@@ -578,4 +580,8 @@ async def files_state(session: AsyncSession, project: Project) -> FilesState:
             capture = item.capture if isinstance(item.capture, dict) else {}
             use = moved if isinstance(moved, dict) else capture.get("use")
         files.append(_view(item, use, busy))
+    previews = await footage_clips.previews_for(
+        session, project, [items[file.item_key] for file in files if file.status == STATUS_READY]
+    )
+    files = [replace(file, preview=previews.get(file.item_key)) for file in files]
     return FilesState(files=files, preparing=any(f.status == STATUS_PREPARING for f in files))

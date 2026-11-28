@@ -28,6 +28,7 @@ const COMPOSITION_OF: Record<Engine, string> = {
   callout_component: "Callout",
   callout_blocks: "Callout",
   evidence_clip: "Evidence",
+  footage_clip: "Footage",
   soundbite_overlay: "SoundbiteOverlay",
 };
 

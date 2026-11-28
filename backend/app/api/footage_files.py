@@ -9,6 +9,8 @@
 - `DELETE .../footage-files/{item_key}` takes a file off its mark.
 - `PUT .../footage-marks/{mark_id}/order` puts the files of a mark in a new order.
 - `PUT .../footage-files/{item_key}/use` moves where a video starts and ends.
+- `POST .../footage-files/{item_key}/preview` queues a 6 second preview of the file as it will be
+  drawn over the shots (FTG-005); the newest one is on the file in the list above.
 
 Every change is a new version of the owner's footage decisions (`services/footage_decisions.py`).
 Every route answers 422 for a project without footage. The answers never return ORM objects.
@@ -23,12 +25,14 @@ from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, Stric
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
+from app.api.jobs import JobStatus
 from app.api.projects import content_length, load_project, require_octet_stream
 from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
+from app.services import footage_clips, footage_marks
 from app.services import footage_files as files_service
-from app.services import footage_marks
+from app.services.storage import media_url
 
 router = APIRouter()
 
@@ -76,6 +80,26 @@ class FootageFileUseOut(BaseModel):
     end_s: float
 
 
+class FootagePreviewOut(BaseModel):
+    """The newest preview video of a file (FTG-005)."""
+
+    job_id: int | None
+    status: JobStatus
+    error: str | None
+    # The 6 second video, under /media, once it is made.
+    video_url: str | None
+    # The video's own warnings, such as a cut that could not be kept off the edges.
+    warnings: list[str]
+    # It was made with other settings than a preview made now would have.
+    out_of_date: bool
+    width: int
+    height: int
+
+
+class FootagePreviewStarted(BaseModel):
+    job_id: int
+
+
 class FootageFileOut(BaseModel):
     item_key: str
     mark_id: str
@@ -93,6 +117,8 @@ class FootageFileOut(BaseModel):
     height: int | None
     duration_s: float | None
     use: FootageFileUseOut | None
+    # The newest preview, null when none was made.
+    preview: FootagePreviewOut | None
 
 
 class FootageFilesState(BaseModel):
@@ -149,6 +175,21 @@ def _strip_out(strip: dict[str, Any] | None) -> FootageFileStripOut | None:
     )
 
 
+def _preview_out(preview: footage_clips.Preview | None) -> FootagePreviewOut | None:
+    if preview is None:
+        return None
+    return FootagePreviewOut(
+        job_id=preview.job_id,
+        status=cast(JobStatus, preview.status),
+        error=preview.error,
+        video_url=media_url(preview.media_path) if preview.media_path else None,
+        warnings=preview.warnings,
+        out_of_date=preview.out_of_date,
+        width=preview.width,
+        height=preview.height,
+    )
+
+
 def _file_out(view: files_service.FileView) -> FootageFileOut:
     use = view.use
     return FootageFileOut(
@@ -169,6 +210,7 @@ def _file_out(view: files_service.FileView) -> FootageFileOut:
             if isinstance(use, dict)
             else None
         ),
+        preview=_preview_out(view.preview),
     )
 
 
@@ -292,3 +334,23 @@ async def set_footage_file_use(
     except files_service.FootageFilesError as exc:
         raise _refusal(exc) from exc
     return await _state(session, project)
+
+
+@router.post(
+    "/projects/{project_id}/footage-files/{item_key}/preview",
+    response_model=FootagePreviewStarted,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def start_footage_preview(
+    project_id: int, item_key: ItemKey, session: SessionDep
+) -> FootagePreviewStarted:
+    """Queues a 6 second preview of a file shown on a mark, drawn the way it will be over the
+    shots. Asking again while one is being made answers the same job."""
+    project = await load_project(session, project_id)
+    try:
+        job = await footage_clips.queue_preview(session, project, item_key)
+    except footage_clips.FootageClipError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    dispatcher.nudge()
+    return FootagePreviewStarted(job_id=job.id)

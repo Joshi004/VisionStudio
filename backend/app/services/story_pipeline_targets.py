@@ -47,6 +47,7 @@ from app.services import (
     evidence_clips,
     evidence_rounds,
     explainer,
+    footage_clips,
     footage_marks,
     footage_placement,
     generation_requests,
@@ -1889,9 +1890,50 @@ async def _evaluate_footage_marks(
                 last_error=_failure(state.job),
             )
         ],
-        # FTG-004: notes on where footage got no room. FTG-005 moves them to `footage_clips`.
-        warnings=_footage_notes(await shot_plans.state(session, project)),
     )
+
+
+async def _evaluate_footage_clips(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with footage on has footage clips. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not footage_marks.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await footage_clips.piece_state(session, project)
+    targets: list[Target] = []
+    for entry in state.entries:
+        active = entry.status == "working"
+        targets.append(
+            Target(
+                f"footage:{entry.placed_key}",
+                f"{_scene_label(entry.scene_item)}, footage {entry.piece.mark_id} "
+                f"piece {entry.piece.index + 1}",
+                entry.done,
+                active=active,
+                block=None if entry.done or active else entry.blocked_reason,
+                last_error=None if entry.done else entry.last_error,
+                ref=(entry.scene_id, entry.placed_key),
+                stale=entry.status == "out_of_date",
+                group=entry.scene_id,
+            )
+        )
+    # FTG-004: the notes on where footage got no room, and on pieces left out or cut short.
+    return StepView(targets, warnings=_footage_notes(await shot_plans.state(session, project)))
+
+
+async def _start_footage_clips(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        job = await footage_clips.queue_piece_clip(session, project, target.ref[1])
+        return (job.id,)
+
+    return await _start_each(session, targets, deadline, make)
 
 
 async def _call_footage_marks(session: AsyncSession, project: Project, options: RunOptions) -> Job:
@@ -3026,6 +3068,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
     "evidence_claims": Adapter(_evaluate_evidence_claims, _project_start(_call_evidence_claims)),
+    "footage_clips": Adapter(_evaluate_footage_clips, _start_footage_clips),
     "footage_marks": Adapter(_evaluate_footage_marks, _project_start(_call_footage_marks)),
     "evidence": Adapter(_evaluate_evidence, _project_start(_call_evidence)),
     "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),

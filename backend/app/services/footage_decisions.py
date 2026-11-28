@@ -263,9 +263,10 @@ class ShownFootageMark:
     pieces: tuple[ShownFootagePiece, ...]
 
 
-def _use_length(decided: Any, capture: Any) -> float | None:
-    """The length of the part of a video that plays: the owner's moved `use` when there is one,
-    otherwise the one the capture recorded. None when neither gives a positive length."""
+def use_range(decided: Any, capture: Any) -> tuple[float, float] | None:
+    """The part of a video that plays, `(start_s, end_s)` as the owner's moved `use` when there is
+    one, otherwise as the capture recorded it. None when neither gives a positive length. (The
+    owner's `use` is in seconds of the stored video; see `footage_clips` for a capture's.)"""
     for use in (decided, capture.get("use") if isinstance(capture, dict) else None):
         if not isinstance(use, dict):
             continue
@@ -277,8 +278,14 @@ def _use_length(decided: Any, capture: Any) -> float | None:
             and not isinstance(end, bool)
             and end > start
         ):
-            return round(float(end) - float(start), 3)
+            return float(start), float(end)
     return None
+
+
+def _use_length(decided: Any, capture: Any) -> float | None:
+    """The length of the part of a video that plays (see `use_range`), or None."""
+    found = use_range(decided, capture)
+    return None if found is None else round(found[1] - found[0], 3)
 
 
 async def shown_marks(session: AsyncSession, project: Project) -> list[ShownFootageMark]:

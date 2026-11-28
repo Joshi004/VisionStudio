@@ -112,7 +112,7 @@ EVIDENCE_STEPS: Final = (EVIDENCE_CLAIMS_STEP, "evidence", "evidence_clips")
 
 # The steps that are switched off for every project but a continuous explainer with footage on
 # (FTG-002). Later footage phases add their steps here.
-FOOTAGE_STEPS: Final = ("footage_marks",)
+FOOTAGE_STEPS: Final = ("footage_marks", "footage_clips")
 
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
@@ -140,6 +140,7 @@ GROUPS: Final[dict[str, str]] = {
     "footage_marks": "story",
     "evidence": "story",
     "evidence_clips": "graphics",
+    "footage_clips": "graphics",
     "graphic_theme": "graphics",
     "graphic_briefs": "graphics",
     "graphics": "graphics",

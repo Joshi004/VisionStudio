@@ -1030,6 +1030,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/footage-files/{item_key}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Footage Preview
+         * @description Queues a 6 second preview of a file shown on a mark, drawn the way it will be over the
+         *     shots. Asking again while one is being made answers the same job.
+         */
+        post: operations["start_footage_preview_api_projects__project_id__footage_files__item_key__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -9966,6 +9987,7 @@ export interface components {
             /** Duration S */
             duration_s: number | null;
             use: components["schemas"]["FootageFileUseOut"] | null;
+            preview: components["schemas"]["FootagePreviewOut"] | null;
         };
         /** FootageFileStored */
         FootageFileStored: {
@@ -10111,6 +10133,36 @@ export interface components {
         FootageOrderIn: {
             /** Shown */
             shown: string[];
+        };
+        /**
+         * FootagePreviewOut
+         * @description The newest preview video of a file (FTG-005).
+         */
+        FootagePreviewOut: {
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Error */
+            error: string | null;
+            /** Video Url */
+            video_url: string | null;
+            /** Warnings */
+            warnings: string[];
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+        };
+        /** FootagePreviewStarted */
+        FootagePreviewStarted: {
+            /** Job Id */
+            job_id: number;
         };
         /** FootageUseIn */
         FootageUseIn: {
@@ -23589,6 +23641,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FootageFilesState"];
+                };
+            };
+            /** @description No such project, mark or file. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the file or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_footage_preview_api_projects__project_id__footage_files__item_key__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootagePreviewStarted"];
                 };
             };
             /** @description No such project, mark or file. */

@@ -26,7 +26,7 @@
   (`write_callout_plan.py`), the research brief of the evidence layer
   (`write_evidence_brief.py`), the import of a round's results (`import_evidence.py`), the video
   of a piece of evidence (`render_evidence_clip.py`), an owner's video made ready as footage
-  (`prepare_footage_file.py`), the
+  (`prepare_footage_file.py`), the video of a footage piece (`render_footage_clip.py`), the
   generated component, the block scene and the preview of a motion callout
   (`write_callout_component.py`, `write_callout_scene.py`, `render_callout_preview.py`), and the
   Audio video lab of a character (`time_lab_speech_words.py`, `render_av_test.py`), and the
@@ -89,6 +89,7 @@ def register_handlers() -> None:
     from app.jobs.render_av_test import RenderAvTestHandler
     from app.jobs.render_callout_preview import RenderCalloutPreviewHandler
     from app.jobs.render_evidence_clip import RenderEvidenceClipHandler
+    from app.jobs.render_footage_clip import RenderFootageClipHandler
     from app.jobs.render_lab_graphic import RenderLabGraphicHandler
     from app.jobs.render_scene import RenderSceneHandler
     from app.jobs.render_shot_graphic import RenderShotGraphicHandler
@@ -209,6 +210,7 @@ def register_handlers() -> None:
     handlers.register(WriteEvidenceBriefHandler())
     handlers.register(ImportEvidenceHandler())
     handlers.register(RenderEvidenceClipHandler())
+    handlers.register(RenderFootageClipHandler())
     handlers.register(WriteThumbnailConceptsHandler())
     handlers.register(WriteYouTubeDraftHandler())
     handlers.register(PublishYouTubeHandler())

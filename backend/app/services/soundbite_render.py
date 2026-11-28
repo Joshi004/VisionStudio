@@ -235,7 +235,7 @@ def framing_for(source: tuple[int, int], frame: tuple[int, int]) -> Framing:
     return Framing(FITTED, (_even(width * share), _even(height * share)))
 
 
-def _picture_chain(framing: Framing, width: int, height: int, fps: int) -> str:
+def picture_chain(framing: Framing, width: int, height: int, fps: int) -> str:
     """The filters from the source's picture (`[0:v:0]`, brought to `fps` first) to `[pic]`, at
     exactly `width` x `height`."""
     cover = (
@@ -277,7 +277,7 @@ def compose_graph(
         raise ValueError("A clip needs frames and sound.")
     total_s = seconds_of(frames, fps)
     audio_s = min(audio_s, total_s)
-    steps = [_picture_chain(framing, width, height, fps)]
+    steps = [picture_chain(framing, width, height, fps)]
     if with_overlay:
         steps.append(
             f"[pic][1:v:0]overlay=x=0:y=0:format=yuv444:eof_action=pass,format=yuv420p,"
