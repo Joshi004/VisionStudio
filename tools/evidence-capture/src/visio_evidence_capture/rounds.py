@@ -189,6 +189,11 @@ class Round:
     def _read_brief(self) -> dict[str, Any]:
         path = self.root / "brief" / "claims.json"
         if not path.is_file() or path.is_symlink():
+            if (self.root / "brief" / "footage.json").exists():
+                raise Refused(
+                    f"{self.root} is a footage round. Use visio-footage-capture here; "
+                    "visio-evidence-capture is for evidence rounds."
+                )
             raise Refused(
                 f"{self.root} is not a research round: brief/claims.json is missing. Run the "
                 "tool inside the round folder, or pass --round."

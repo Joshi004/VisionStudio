@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 visio-evidence-capture = "visio_evidence_capture.cli:main"
+visio-footage-capture = "visio_evidence_capture.footage.cli:main"
 
 [build-system]
 requires = ["hatchling"]

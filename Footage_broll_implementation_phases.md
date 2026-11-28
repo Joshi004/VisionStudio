@@ -301,9 +301,9 @@ Marks are stored like claims: versions of a list (`source` `manual` or `ai`), ea
 - **`tier`**: `official`, `press`, `commons`, `news`, `creator` or `other` (FT-9).
 - **`same_event`**: `yes`, `no` (file footage) or `unknown`. **`on_screen_text`**, what the agent saw on the picture that is not part of the scene itself: `none`, `small` (a corner logo) or `large` (an anchor, a ticker, a big title).
 - **`capture`** is written only by the tool. The times of a video are seconds of the source video: `window` is the part downloaded, `use` the part to use (inside `window`), `moment_s` the instant the agent chose (inside `use`), `cuts` the cut times the tool found inside `window`.
-- **An image** has `capture.image`, `image_px`, `page_url` (the page the image was found on) and `sha256`.
-- **A page** has `capture.image` (the page from its top, at most `PAGE_HEIGHTS`, 4, screens tall, at the evidence viewports), `image_px`, `viewport`, `text_copy`, `focus_text` and `focus_rects` (`[x, y, width, height]` as fractions of `image`; empty when no focus was asked) and `sha256`.
-- **A PDF page** has what the evidence `pdf` capture has (`image`, `page`, `source_copy`, `render_scale`, `text_copy`) with `focus_text` and `focus_rects`.
+- **An image** has `capture.image`, `image_px`, `page_url` (the page the image was found on, or null) and `sha256`. `source.url` is the image's own address and `source.final_url` that address after redirects. The stored file is `.jpg` or `.png`; WebP is stored as PNG (FTG-008).
+- **A page** has `capture.image` (the page from its top, at most `PAGE_HEIGHTS`, 4, screens tall, at the evidence viewports), `image_px`, `viewport` (`[width, height]` in CSS pixels) with `device_scale`, `text_copy`, `focus_text` (null when no focus was asked) and `focus_rects` (`[x, y, width, height]` as fractions of `image`; empty when no focus was asked) and `sha256`. Words below the captured screens are refused, so `focus_rects` always lie in the image.
+- **A PDF page** has what the evidence `pdf` capture has (`image`, `page`, `source_copy`, `render_scale`, `text_copy`) with `focus_text` and `focus_rects`. Its `image` is the **whole page** (the longer side at 4096 pixels), not a crop, and `focus_rects` are fractions of the page (FTG-008).
 
 ### 4.7 Choosing the moment in a YouTube video
 
@@ -401,7 +401,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Completed |
 | FTG-006 | Footage in the render | Code | FTG-005 | Completed |
 | FTG-007 | The research brief and the waiting step | Code | FTG-002 | Completed |
-| FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Not Started |
+| FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Completed |
 | FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Not Started |
 | FTG-010 | The research skill | Code (Mac) | FTG-009 | Not Started |
 | FTG-011 | Importing the research | Code | FTG-007, FTG-008 | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 7 completed (FTG-001 to FTG-007, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 8 completed (FTG-001 to FTG-008, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -839,7 +839,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-008 — The capture tool: images, pages and PDFs
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28; the owner still has to run `uv sync` for the new command and check one Wikimedia image with their own contact, see the notes)
 
 **Objective.** The agent can capture a photo, a web page and a PDF page for a mark, with no quote.
 
@@ -867,12 +867,34 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - An evidence round still captures and validates as before.
 
 **Completion checklist.**
-- [ ] Command, brief reader and result writer
-- [ ] `image`, `page`, `pdf`
-- [ ] `report`, `remove`, `validate`
-- [ ] Real captures and refusals
+- [x] Command, brief reader and result writer
+- [x] `image`, `page`, `pdf`
+- [x] `report`, `remove`, `validate`
+- [x] Real captures and refusals
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration, no backend change.** All work is in `tools/evidence-capture`; the evidence commands behave as before.
+- **Modules** (new package `visio_evidence_capture/footage/`, console script `visio-footage-capture` in `pyproject.toml`, `TOOL_VERSION` "1"):
+  - `__init__.py`: the schemas, the allowed values of §4.6 and the limits (`PAGE_HEIGHTS` 4, `MAX_IMAGE_PIXELS` 40 M, `LOW_RES_LONG_SIDE` 1280, `PDF_LONG_SIDE_PX` 4096).
+  - `rounds.py`: `FootageRound` (reads `brief/footage.json`, mark ids `f<n>`, piece ids `p1` to `p9`, `max_pieces` from the brief), `Described`, `piece_entry`, `store_piece`, `remove_piece` and `report` (`found` needs a piece; `not_found` and `blocked` need none; `not_found` needs an attempt).
+  - `image.py`, `page.py`, `pdf_page.py`, `validate.py` and `cli.py` (`image`, `page`, `pdf`, `report`, `remove`, `validate`).
+  - Shared code touched: `netguard.py` (`fetch_pdf`'s download loop became `_fetch`, with the same checks and messages; `fetch_image` added) and `rounds.py` (an evidence round told it is a footage round). Evidence's private helpers in `web.py`, `pdf.py` and `validate.py` are imported, not moved.
+- **Planning decided:**
+  - **Module split:** as above, one module per command.
+  - **`page` stitches viewport strips** with the evidence `_context_screenshot` from the top of the page (Playwright's one full-page screenshot is very slow on tall pages). A page shorter than one screen is captured one screen tall. `PAGE_HEIGHTS` is 4.
+  - **Focus below the captured screens is refused** (owner's choice), with the screen number and the page's height in screens. The contract stays "the image starts at the page's top".
+  - **A PDF `image` is the whole page**, because FTG-005's `pdf_plan` draws the whole page and zooms itself. A scan with no text layer is accepted with no focus.
+  - **Images:** the type is read from the first bytes; the header is read before decoding so more than 40 M pixels is refused; WebP is stored as PNG; a JPEG with an EXIF orientation is stored upright.
+- **Deviations from Scope:**
+  - A turned JPEG is saved again as a **JPEG** (quality 95), not PNG as the plan said: the same photo as PNG is often over the 20 MB limit.
+  - **Wikimedia refuses the tool's browser-like request** from Python (403, "robot policy"); a request that names the tool and gives a contact is accepted. `image` therefore reads `VISIO_FOOTAGE_CONTACT` (an email address or a website) and sends it in the User-Agent; on a 403 from a Wikimedia host with none set, the message says to set it. The owner must set it to their own contact. FTG-010 should put this in the skill's setup text.
+- **Checked** in throwaway round folders in `/tmp` (removed afterwards; no paid call, the real app was not touched):
+  - Landscape and portrait rounds written by hand in the §4.5 shape. Real captures: an image from NASA (public domain, 1920x1920 JPEG); the English Wikipedia page "Pelican" with no focus and with the focus "large water birds" (2560x5760 landscape, 1440x10240 portrait, the first 4 screens), a short page (example.com); a page of the arXiv paper 1706.03762 with and without a focus (3166x4096). The focus box was drawn over the stored page and PDF images and sits exactly on the words. `validate` passed on the landscape and portrait rounds, with `blocked` and `not_found` marks.
+  - Refusals: `http://127.0.0.1`; an address that is a web page, not an image; a focus not found on a page (the nearest text listed) and on a PDF page; a focus on screen 17 of a 40-screen page; a page past the end of the PDF; a fourth piece in a mark of 3; a bad piece id; an unknown mark; `found` with no piece; `not_found` with no attempt; a footage command in an evidence round and the reverse. Image rules checked on made-up pictures: 7000x6000 pixels (refused before decoding), a WebP made into PNG, a turned JPEG made upright, an untouched JPEG keeping its bytes, a converted picture over 20 MB refused.
+  - `validate` caught a changed byte (SHA-256), a changed text copy, a file with the wrong type, a wrong `image_px`, a focus rectangle outside the image and a link in a mark folder.
+  - Evidence regression: a `web` and a `pdf` capture, `report` and `validate` on an evidence round gave the same output as before.
+  - `ruff check` and `ruff format --check` in `tools/evidence-capture`.
+- **Not done:** a Wikimedia Commons image (needs the owner's `VISIO_FOOTAGE_CONTACT`, see the deviation); Simon Willison's post and the other Appendix A pages were not captured (Wikipedia and arXiv stood in); an image over 20 MB while downloading was not tried (the cap is `fetch_pdf`'s, the same loop); an image whose `page_url` leads to a private address was not tried (`check_url` is used).
 
 ### FTG-009 — The capture tool: YouTube scans and clips
 
@@ -1140,3 +1162,5 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-004 | Completed: footage placed on read (`services/footage_placement.py`, `footage_decisions.shown_marks`, three new `SceneEntry` fields, notes on the `footage_marks` step). No migration, no API or UI change. |
 | 2026-11-28 | FTG-005 | Completed: the footage clip and its preview (`services/footage_clips.py`, `jobs/render_footage_clip.py`, FFmpeg cut rules, the motion `Footage` composition, the step `footage_clips`, the preview route and button). No migration. The motion image must be rebuilt. |
 | 2026-11-28 | FTG-006 | Completed: footage in the render (`footage_overlays` timeline key, `render_story` lays it first under callouts and cards, credit lines, `footage_without_clip`, out-of-date reasons, footage in the Sources section). No migration. The backend of the real app must be rebuilt. |
+| 2026-11-28 | FTG-007 | Completed: the research brief and the waiting step (`services/footage_rounds.py`, `jobs/write_footage_brief.py`, the step `footage`, Continue without footage, `FootagePanel.tsx`, `api/footage.py`). No migration. The backend of the real app must be rebuilt. |
+| 2026-11-28 | FTG-008 | Completed: `visio-footage-capture` (`image`, `page`, `pdf`, `report`, `remove`, `validate`) in `tools/evidence-capture`, package `visio_evidence_capture/footage/`. No migration, no backend change. Wikimedia images need `VISIO_FOOTAGE_CONTACT`. |

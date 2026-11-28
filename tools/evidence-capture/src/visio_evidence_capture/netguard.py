@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from . import MAX_PDF_BYTES, MAX_REDIRECTS, PAGE_LOAD_TIMEOUT_S
+from . import MAX_IMAGE_BYTES, MAX_PDF_BYTES, MAX_REDIRECTS, PAGE_LOAD_TIMEOUT_S
 from .rounds import TEXT_LIMITS, Refused
 
 _Address = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -76,14 +76,18 @@ def check_url(url: str) -> None:
             )
 
 
-def fetch_pdf(url: str) -> tuple[bytes, str]:
-    """Download a PDF. Returns its bytes and the address it finally came from.
+def _fetch(
+    url: str, *, accept: str, max_bytes: int, what: str, user_agent: str = DOWNLOAD_USER_AGENT
+) -> tuple[bytes, str]:
+    """Download a file. Returns its bytes and the address it finally came from.
 
-    Redirects are followed here, one at a time, so each one is checked. The size is capped while
-    streaming, and the file must look like a PDF.
+    Redirects are followed here, one at a time, so each one is checked, and so is the address
+    of every server that answers. The size is capped while streaming. `what` names the file in
+    the messages ("PDF", "image").
     """
     current = url
-    headers = {"User-Agent": DOWNLOAD_USER_AGENT, "Accept": "application/pdf,*/*;q=0.5"}
+    headers = {"User-Agent": user_agent, "Accept": accept}
+    too_large = f"The {what} is larger than {max_bytes // (1024 * 1024)} MB."
     timeout = httpx.Timeout(PAGE_LOAD_TIMEOUT_S)
     with httpx.Client(follow_redirects=False, timeout=timeout, headers=headers) as client:
         for _ in range(MAX_REDIRECTS + 1):
@@ -101,24 +105,40 @@ def fetch_pdf(url: str) -> tuple[bytes, str]:
                         current = urljoin(current, location)
                         continue
                     if response.status_code >= 400:
-                        raise Refused(f"The server answered {response.status_code} for the PDF.")
+                        raise Refused(f"The server answered {response.status_code} for the {what}.")
                     declared = response.headers.get("content-length")
-                    if declared and declared.isdigit() and int(declared) > MAX_PDF_BYTES:
-                        raise Refused(
-                            f"The PDF is larger than {MAX_PDF_BYTES // (1024 * 1024)} MB."
-                        )
+                    if declared and declared.isdigit() and int(declared) > max_bytes:
+                        raise Refused(too_large)
                     data = bytearray()
                     for chunk in response.iter_bytes():
                         data.extend(chunk)
-                        if len(data) > MAX_PDF_BYTES:
-                            raise Refused(
-                                f"The PDF is larger than {MAX_PDF_BYTES // (1024 * 1024)} MB."
-                            )
+                        if len(data) > max_bytes:
+                            raise Refused(too_large)
             except httpx.HTTPError as error:
-                raise Refused(f"The PDF could not be downloaded: {error}") from error
-            if b"%PDF-" not in bytes(data[:1024]):
-                raise Refused(
-                    "That address did not give a PDF. For a web page, use the web command."
-                )
+                raise Refused(f"The {what} could not be downloaded: {error}") from error
             return bytes(data), current
     raise Refused(f"The address redirected more than {MAX_REDIRECTS} times.")
+
+
+def fetch_pdf(url: str) -> tuple[bytes, str]:
+    """Download a PDF. The file must look like a PDF."""
+    data, final_url = _fetch(
+        url, accept="application/pdf,*/*;q=0.5", max_bytes=MAX_PDF_BYTES, what="PDF"
+    )
+    if b"%PDF-" not in data[:1024]:
+        raise Refused("That address did not give a PDF. For a web page, use the web command.")
+    return data, final_url
+
+
+def fetch_image(url: str, *, user_agent: str | None = None) -> tuple[bytes, str]:
+    """Download a picture (the footage `image` command). The caller checks what it is.
+
+    Without `user_agent` the request looks like a browser's.
+    """
+    return _fetch(
+        url,
+        accept="image/jpeg,image/png,image/webp,*/*;q=0.5",
+        max_bytes=MAX_IMAGE_BYTES,
+        what="image",
+        user_agent=user_agent or DOWNLOAD_USER_AGENT,
+    )
