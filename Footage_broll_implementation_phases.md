@@ -334,9 +334,9 @@ The import (FTG-011) checks every piece in this order. The capture tool's `valid
 
 1. **Shape.** The schema and version are known, the round and mark ids match the brief, every value is one the contract allows, the piece ids are `p1` to `p9`, and there are no more pieces than `max_pieces_per_mark`.
 2. **Files.** Every file named is inside its mark's folder, a regular file (no link), used once, within its size limit, with the SHA-256 recorded. Its type is checked from its content: MP4 (`ftyp`), JPEG, PNG, PDF, UTF-8 text. `image_px` is the image's real size and at most 40 M pixels. The `scans/` folder is never read.
-3. **Video.** FFprobe: exactly one video stream, H.264, `yuv420p`, **no audio stream**, at most 1080 pixels high, the length of `window` within 0.5 s, at most 60 MB.
+3. **Video.** FFprobe: exactly one video stream, H.264, `yuv420p`, **no audio stream**, at most 1080 pixels on the shorter side, the length of `window` within 0.5 s, at most 60 MB.
 4. **Places.** `use` lies inside `window` and lasts 2 to 15 s; `moment_s` lies inside `use`; `cuts` are in order and inside `window`; every `focus_rects` entry lies inside its image (at most 12).
-5. **Warnings**, never refusals, shown on the review card: low resolution (the shorter side under 720 pixels), file footage (`same_event` `no`), event not checked (`unknown`), text on the picture (`on_screen_text` not `none`), not an official source (`tier` `news`, `creator` or `other`), the YouTube channel not the publisher, licence unknown, focus words not found in the page's text.
+5. **Warnings**, never refusals, shown on the review card: low resolution (the shorter side under 720 pixels), file footage (`same_event` `no`), event not checked (`unknown`), text on the picture (`on_screen_text` not `none`), not an official source (`tier` `news`, `creator` or `other`), the YouTube channel not the publisher, licence unknown, focus words not found in the page's text. (The capture tool's `validate` refuses focus words that are not on the page, so the agent fixes them; the import, which reads the file as untrusted, only warns.)
 6. **The owner** accepts or rejects (FTG-012).
 
 A failure in checks 1 to 4 makes that piece unusable, and the review shows why.
@@ -410,7 +410,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Completed |
 | FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Completed |
 | FTG-010 | The research skill | Code (Mac) | FTG-009 | In Progress |
-| FTG-011 | Importing the research | Code | FTG-007, FTG-008 | Not Started |
+| FTG-011 | Importing the research | Code | FTG-007, FTG-008 | Completed |
 | FTG-012 | The review screen | Code | FTG-011 | Not Started |
 | FTG-013 | The Qwen vs Inkling explainer end to end | Owner | FTG-006, FTG-010, FTG-012 | Not Started |
 | FTG-014 | Recording a website | Code, later | FTG-013 | Not Started |
@@ -425,7 +425,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 9 completed (FTG-001 to FTG-009, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); FTG-010 in progress (the skill is written and installed, the owner's runs are left); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 10 completed (FTG-001 to FTG-009 and FTG-011, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); FTG-010 in progress (the skill is written and installed, the owner's runs are left); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -1027,7 +1027,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-011 — Importing the research
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28)
 
 **Objective.** The app reads a round's results as untrusted input, checks every piece and copies the usable files into storage (§4.8).
 
@@ -1053,13 +1053,29 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Checks and copy
-- [ ] Job and API
-- [ ] Panel report
-- [ ] Checks above
+- [x] Checks and copy
+- [x] Job and API
+- [x] Panel report
+- [x] Checks above
 - [ ] Standard checks
 
-**Completion notes.** —
+**Completion notes.**
+- **Modules.** `services/footage_checks.py` (pure: checks 1 to 5 of §4.8 on one mark's `result.json` and the file facts handed to it; no file or network access), `services/footage_import.py` (reads the round folder, calls ffprobe, copies the files, stores the rows), `jobs/import_footage.py` (`ImportFootageHandler`, job type `import_footage`, provider `local`, phase `IMPORTING_FOOTAGE`, registered in `jobs/__init__.py`). No migration: `footage_import` and `footage_item` came with `0106`.
+- **API (`api/footage.py`).** `POST /api/projects/{id}/footage/import` (202 with `job_id`, 422 with the reason when nothing can be imported: footage off, no round, the marks changed since the round, the brief still being written, the folder not usable, no result written yet). `GET /api/projects/{id}/footage` gained `can_import`, `import_blocked_reason`, `import_job` and `latest_import` (`version`, `created_at`, `report` with `marks`, `by_status`, `items`, `usable_items`, and per mark its status, problems, warnings and pieces with `usable`, `reasons`, `warnings`). These are the names the `visio-footage` skill's two `curl` calls read, so the skill needs no change. The response models are named `FootageImport*Out` because the evidence ones already have the plain names and FastAPI would otherwise rename them in `schema.d.ts`.
+- **The folder is untrusted.** Only the top level of `results/<mark>/` is listed and a link anywhere in it makes the mark unusable (`O_NOFOLLOW`, regular files only, size limits, SHA-256, type from the content, ffprobe and a decode for video). A file name must be plain (`PLAIN_NAME`), so a name such as `scans/x.jpg` is refused and the `scans/` folder is never listed or opened. Generic helpers (`Budget`, `_read_regular`, `discard_files`, the text and URL checks) are imported from `evidence_import` and `evidence_checks` as they are; evidence code was not changed (the owner's choice).
+- **What is stored.** `footage_import` (one row per press, `version` counts up, `results` per mark and `report`, see `DATABASE_STRUCTURE.md`) and one `footage_item` row per piece, usable or not (`origin` `agent`, files in `media/<project_id>/`, `usable`, `checks`, `warnings`, `cuts`). A file whose hash was stored by an earlier import of the project is reused, not copied again. On any failure the files copied by that run are removed and nothing is committed.
+- **Item key.** SHA-256 of the mark, the kind, the part used (a video), the page and focus rectangles, and the real hashes of the files; the piece id is left out so renumbering keeps the owner's decisions, and an unusable piece adds its id so its key never equals a usable one's. Importing the same round twice gave the same keys and no new file. FTG-012 reads the newest import's rows; the same key appears once per import.
+- **Video times.** `use`, `window`, `moment_s` and `cuts` in the result are seconds of the source video; the row's `cuts` are seconds of the stored video (`window.start_s` taken off), as FTG-003's note asks.
+- **Warning codes** (`footage_item.warnings`): `low_resolution`, `file_footage`, `event_not_checked`, `text_on_picture`, `not_official`, `channel_not_publisher`, `licence_unknown`, `focus_not_found`. **Planning decided:** a missing licence warns for a `commons` piece, for any image, and for a video whose `youtube_licence` is `unknown`; focus words that are not on the page's text are a warning, not a refusal (the owner's choice; the tool's `validate` still refuses them); the 1080 limit is on the shorter side, as FTG-003 does (§4.8 changed to say so).
+- **Strip layout.** The strip's keys (`strip_every_s`, `strip_columns`, `strip_rows`, `strip_tile_px`, `strip_frames`) must be the app's layout for the video, taken from either the probed length of the file or the window length, because the tool and the app can measure the file one frame apart.
+- **Panel.** `FootagePanel.tsx` has an Import footage / Import again button (disabled with the reason when it cannot run), the job's status and error, and the report: one row per mark with its status badge, "N of M pieces usable", red reasons and orange warnings, all as plain text. The page polls while the import job runs. `schema.d.ts` was regenerated (additions only).
+- **Checked** on a throwaway database and data folder with the app on another port (the real app on port 5480 was not touched; no paid call; the scripts and folders were removed):
+  - A round made by `visio-footage-capture` itself: a YouTube clip (6 s), a page with a focus, a PNG and a PDF page, three marks `found`. All four pieces imported, each file stored once; the warnings shown were low resolution, event not checked, file footage, text on the picture and licence unknown, where they apply. Changing the tier to `news`, the publisher to another name, or the focus text to words not on the page gave "not an official source", "the YouTube channel is not the publisher" and "focus words not found", each as a warning only.
+  - Refused by the right check: a changed byte (hash), a text file named `.mp4` with its hash fixed ("not a real MP4 file"), a link in place of the page image, a link in the mark folder (every piece of the mark refused), a video with sound, `use` starting before `window`, a strip named `scans/s.jpg`. A `scans/` folder holding an unreadable file did not matter (never opened). A missing mark folder reads as "no result", a broken `result.json` and a mark folder that is a link as "unusable result". No file was copied for any of these.
+  - A second import of the same round: the same item keys, no new file in storage. Adding a mark after the round did not stop the import (the round still holds marks that are current).
+  - `ruff check`, `ruff format --check`, `npm run lint` and `npm run typecheck` pass.
+- **Not checked:** the panel in a browser (typecheck and lint only); a portrait video or a Short; a round of the skill's own runs in Cursor or Claude (FTG-010's runs). The backend of the real app must be rebuilt.
+- **Deviation from Scope:** none.
 
 ### FTG-012 — The review screen
 
@@ -1223,3 +1239,4 @@ From `explainer_scripts/qwen_vs_inkling/script.txt`, except row 8. None has been
 | 2026-11-28 | FTG-008 | Completed: `visio-footage-capture` (`image`, `page`, `pdf`, `report`, `remove`, `validate`) in `tools/evidence-capture`, package `visio_evidence_capture/footage/`. No migration, no backend change. Wikimedia images need `VISIO_FOOTAGE_CONTACT`. |
 | 2026-11-28 | FTG-009 | Completed: `scan`, `scan --fine` and `clip` in `visio-footage-capture` (YouTube previews as stamped contact sheets, 0.5 s sheets and cut times of a range, a muted clip of only the chosen seconds), `validate` for video pieces. No migration, no backend change. The previews' spacing is whole seconds, not what yt-dlp's data suggests. |
 | 2026-11-28 | FTG-010 | In progress: the `visio-footage` skill (`SKILL.md`, `reference.md`) and `tools/footage-skill/install.sh` written and installed into `~/.claude/skills`; the import step is written ahead of FTG-011. The owner's runs in Cursor and Claude Code are still to do. No migration, no backend change. |
+| 2026-11-28 | FTG-011 | Completed: `services/footage_checks.py`, `services/footage_import.py`, `jobs/import_footage.py`, `POST /footage/import` and the import fields of `GET /footage`, the Import button and report in the footage panel. No migration. The backend of the real app must be rebuilt. |

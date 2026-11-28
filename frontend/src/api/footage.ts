@@ -11,6 +11,8 @@ import type { components } from "./schema";
 export type FootageState = components["schemas"]["FootageStateOut"];
 export type FootageRound = components["schemas"]["FootageRoundOut"];
 export type FootageMarkState = components["schemas"]["FootageMarkStateOut"];
+export type FootageImport = components["schemas"]["FootageImportOut"];
+export type FootageImportMark = components["schemas"]["FootageImportMarkOut"];
 
 /**
  * The footage research query of a project. It sits under the project's own key, so whatever
@@ -35,13 +37,16 @@ async function fetchFootage(projectId: number) {
 }
 
 /** Where the project's footage research stands. Loaded again every few seconds while the brief
- * is written. */
+ * is written or the results are imported. */
 export function useFootage(projectId: number, enabled = true) {
   return useQuery({
     queryKey: footageKey(projectId),
     queryFn: () => fetchFootage(projectId),
     enabled: enabled && isValidProjectId(projectId),
-    refetchInterval: (query) => (isJobActive(query.state.data?.job) ? ACTIVE_POLL_MS : false),
+    refetchInterval: (query) =>
+      isJobActive(query.state.data?.job) || isJobActive(query.state.data?.import_job)
+        ? ACTIVE_POLL_MS
+        : false,
   });
 }
 
@@ -57,6 +62,31 @@ export function useWriteFootageBrief(projectId: number) {
       if (!data) {
         throw new ApiError(
           detailMessage(error, `Could not write the brief (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: footageKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** Starts the job that checks the newest round's results and copies the usable files in. */
+export function useImportFootage(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/footage/import",
+        { params: { path: { project_id: projectId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not import the footage (HTTP ${response.status}).`),
           response.status,
         );
       }

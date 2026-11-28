@@ -79,6 +79,7 @@ def register_handlers() -> None:
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.generate_shot import GenerateShotHandler
     from app.jobs.import_evidence import ImportEvidenceHandler
+    from app.jobs.import_footage import ImportFootageHandler
     from app.jobs.lab_voice import LabVoiceHandler
     from app.jobs.place_music import PlaceMusicHandler
     from app.jobs.plan_environment_views import PlanEnvironmentViewsHandler
@@ -211,6 +212,7 @@ def register_handlers() -> None:
     handlers.register(WriteEvidenceBriefHandler())
     handlers.register(WriteFootageBriefHandler())
     handlers.register(ImportEvidenceHandler())
+    handlers.register(ImportFootageHandler())
     handlers.register(RenderEvidenceClipHandler())
     handlers.register(RenderFootageClipHandler())
     handlers.register(WriteThumbnailConceptsHandler())

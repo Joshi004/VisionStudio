@@ -197,6 +197,11 @@ WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"
 # then saves the rows.
 IMPORTING_EVIDENCE: Final = "checking and copying the evidence"
 
+# --- Running: the import of a footage round's results (FTG-011) --------------------------
+# `import_footage` is a local job: it reads and checks the round's results, copies the files,
+# then saves the rows.
+IMPORTING_FOOTAGE: Final = "checking and copying the footage"
+
 # --- Running: the callout look of a motion explainer (CMO-002) ---------------------------
 # `write_callout_look` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_LOOK: Final = "saving the callout look"

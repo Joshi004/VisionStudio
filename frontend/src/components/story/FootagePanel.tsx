@@ -16,14 +16,18 @@ import { describeError } from "../../api/errors";
 import {
   useContinueWithoutFootage,
   useFootage,
+  useImportFootage,
   useUndoNoFootage,
   useWriteFootageBrief,
+  type FootageImport,
+  type FootageImportMark,
   type FootageMarkState,
   type FootageRound,
 } from "../../api/footage";
 import type { ProjectDetail } from "../../api/projects";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { CLAIM_STATUS_COLOR, CLAIM_STATUS_LABEL } from "./evidenceLabels";
 
 type FootagePanelProps = {
   project: ProjectDetail;
@@ -48,6 +52,91 @@ const MARK_STATE_COLOR: Record<FootageMarkState["state"], string> = {
   no_footage: "gray",
   waiting: "orange",
 };
+
+function markStatusKey(mark: FootageImportMark): string {
+  return mark.status ?? mark.result_state;
+}
+
+/** One mark of the import report. Every text shown is plain text. */
+function ImportMarkRow({ mark }: { mark: FootageImportMark }) {
+  const key = markStatusKey(mark);
+  const refused = mark.items.filter((item) => !item.usable);
+  const hasNotes =
+    mark.problems.length > 0 ||
+    mark.warnings.length > 0 ||
+    refused.length > 0 ||
+    mark.items.some((item) => item.warnings.length > 0);
+  return (
+    <Stack gap={2}>
+      <Group gap="xs">
+        <Text size="sm" fw={600}>
+          {mark.mark_id}
+        </Text>
+        <Badge size="sm" variant="light" color={CLAIM_STATUS_COLOR[key] ?? "gray"}>
+          {CLAIM_STATUS_LABEL[key] ?? key}
+        </Badge>
+        {mark.items.length > 0 && (
+          <Text size="xs" c="dimmed">
+            {mark.items.filter((item) => item.usable).length} of {mark.items.length} pieces usable
+          </Text>
+        )}
+      </Group>
+      {hasNotes && (
+        <Stack gap={2} pl="md">
+          {mark.problems.map((text) => (
+            <Text key={`p-${text}`} size="xs" c="red">
+              {text}
+            </Text>
+          ))}
+          {refused.map((item) =>
+            item.reasons
+              .filter((text) => !mark.problems.includes(text))
+              .map((text) => (
+                <Text key={`r-${item.piece_id}-${text}`} size="xs" c="red">
+                  {item.piece_id}: {text}
+                </Text>
+              )),
+          )}
+          {mark.warnings.map((text) => (
+            <Text key={`w-${text}`} size="xs" c="orange">
+              {text}
+            </Text>
+          ))}
+          {mark.items.map((item) =>
+            item.warnings.map((text) => (
+              <Text key={`iw-${item.piece_id}-${text}`} size="xs" c="orange">
+                {item.piece_id}: {text}
+              </Text>
+            )),
+          )}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+function ImportReport({ report }: { report: FootageImport }) {
+  return (
+    <Stack gap="xs">
+      <Group gap="xs">
+        <Text size="sm" fw={600}>
+          Import {report.version}
+        </Text>
+        {Object.entries(report.report.by_status).map(([key, count]) => (
+          <Badge key={key} size="sm" variant="light" color={CLAIM_STATUS_COLOR[key] ?? "gray"}>
+            {CLAIM_STATUS_LABEL[key] ?? key}: {count}
+          </Badge>
+        ))}
+        <Text size="xs" c="dimmed">
+          {report.report.usable_items} of {report.report.items} pieces of footage usable
+        </Text>
+      </Group>
+      {report.marks.map((mark) => (
+        <ImportMarkRow key={mark.mark_id} mark={mark} />
+      ))}
+    </Stack>
+  );
+}
 
 function CopyLine({ label, value }: { label: string; value: string }) {
   return (
@@ -74,18 +163,23 @@ function CopyLine({ label, value }: { label: string; value: string }) {
 /**
  * The footage step: write the brief of the marks that have no footage yet into the files folder,
  * then do the research outside the app (a skill in Cursor or Claude). Only the full render waits
- * for it. "Continue without footage" lets the render go on with the shots already planned. The
- * import and the review come later (FTG-011, FTG-012).
+ * for it. "Continue without footage" lets the render go on with the shots already planned. When
+ * the agent has finished, its results are imported and checked here; the review comes later
+ * (FTG-012).
  */
 export function FootagePanel({ project }: FootagePanelProps) {
   const { data, isLoading, isError, error } = useFootage(project.id);
   const write = useWriteFootageBrief(project.id);
   const continueWithout = useContinueWithoutFootage(project.id);
   const undo = useUndoNoFootage(project.id);
+  const importResults = useImportFootage(project.id);
 
   const round = data?.round ?? null;
   const job = data?.job ?? null;
   const failed = job?.status === "failed";
+  const importJob = data?.import_job ?? null;
+  const importFailed = importJob?.status === "failed";
+  const latestImport = data?.latest_import ?? null;
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -218,11 +312,44 @@ export function FootagePanel({ project }: FootagePanelProps) {
                   </Text>
                 )}
                 <CopyLine label={`Prompt (skill: ${data.skill})`} value={data.prompt} />
+                <Group justify="space-between" align="center">
+                  <Text size="xs" c="dimmed">
+                    When the agent has finished, import its results: every piece of footage is
+                    checked, and the files that pass are copied into the app.
+                  </Text>
+                  <Button
+                    variant="light"
+                    onClick={() => importResults.mutate()}
+                    loading={importResults.isPending}
+                    disabled={data.can_import !== true}
+                  >
+                    {latestImport === null ? "Import footage" : "Import again"}
+                  </Button>
+                </Group>
+                {data.can_import !== true && data.import_blocked_reason !== null && (
+                  <Text size="xs" c="dimmed">
+                    {data.import_blocked_reason}
+                  </Text>
+                )}
               </Stack>
             )}
+            {latestImport !== null && <ImportReport report={latestImport} />}
           </>
         )}
 
+        {importJob !== null && importJob.status !== "succeeded" && (
+          <JobStatusBadge job={importJob} />
+        )}
+        {importFailed && (
+          <Alert color="red" title="The footage was not imported">
+            {importJob.error ?? "The job failed."}
+          </Alert>
+        )}
+        {importResults.isError && (
+          <Alert color="red" title="Could not import the footage">
+            {describeError(importResults.error)}
+          </Alert>
+        )}
         {job !== null && job.status !== "succeeded" && <JobStatusBadge job={job} />}
         {failed && (
           <Alert color="red" title="The brief was not written">

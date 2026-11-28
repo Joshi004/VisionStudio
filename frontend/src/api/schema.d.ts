@@ -887,6 +887,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/footage/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Footage
+         * @description Starts the job that imports the newest round's results. If one is already waiting or
+         *     running for the project, its id is returned and no second job is made.
+         */
+        post: operations["import_footage_api_projects__project_id__footage_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/footage/continue-without": {
         parameters: {
             query?: never;
@@ -10139,6 +10160,69 @@ export interface components {
             /** Preparing */
             preparing: boolean;
         };
+        /**
+         * FootageImportItemOut
+         * @description One piece of the newest import.
+         */
+        FootageImportItemOut: {
+            /** Piece Id */
+            piece_id: string;
+            /** Kind */
+            kind: ("video" | "image" | "page" | "pdf") | null;
+            /** Usable */
+            usable: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /** FootageImportMarkOut */
+        FootageImportMarkOut: {
+            /** Mark Id */
+            mark_id: string;
+            /** Status */
+            status: ("found" | "not_found" | "blocked") | null;
+            /**
+             * Result State
+             * @enum {string}
+             */
+            result_state: "ok" | "no_result" | "invalid";
+            /** Problems */
+            problems: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Items */
+            items: components["schemas"]["FootageImportItemOut"][];
+        };
+        /**
+         * FootageImportOut
+         * @description The newest import of the newest round.
+         */
+        FootageImportOut: {
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            report: components["schemas"]["FootageImportReportOut"];
+            /** Marks */
+            marks: components["schemas"]["FootageImportMarkOut"][];
+        };
+        /** FootageImportReportOut */
+        FootageImportReportOut: {
+            /** Marks */
+            marks: number;
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            /** Items */
+            items: number;
+            /** Usable Items */
+            usable_items: number;
+        };
         /** FootageMarkEditIn */
         FootageMarkEditIn: {
             /** Note */
@@ -10333,6 +10417,12 @@ export interface components {
             prompt: string;
             /** Skill */
             skill: string;
+            /** Can Import */
+            can_import: boolean;
+            /** Import Blocked Reason */
+            import_blocked_reason: string | null;
+            import_job: components["schemas"]["FootageBriefJobOut"] | null;
+            latest_import: components["schemas"]["FootageImportOut"] | null;
         };
         /** FootageUseIn */
         FootageUseIn: {
@@ -23420,6 +23510,46 @@ export interface operations {
                 };
             };
             /** @description The project has no footage, the marks are not ready, nothing changed, nothing is waiting, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_footage_api_projects__project_id__footage_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The results cannot be imported now: the project has no footage, there is no round, the marks changed since the round's brief, nothing was written in results yet, or the files folder is not available. */
             422: {
                 headers: {
                     [name: string]: unknown;

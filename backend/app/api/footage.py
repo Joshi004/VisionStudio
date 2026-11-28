@@ -11,8 +11,15 @@
   go on. 422 when a mark is not decided on yet or nothing is waiting.
 - `DELETE .../marks/{mark_id}/no-footage` takes that choice off one mark, so it waits again.
 
-The import of a round and the review come with FTG-011 and FTG-012. The rows and the files are
-made by `app/services/footage_rounds.py`. The answers never return ORM objects.
+- `POST .../import` starts the `import_footage` job (FTG-011): it reads and checks the newest
+  round's results and copies the usable files into storage. 422 with the reason when it cannot be
+  imported now. `GET ...` also answers the newest import's report: what each mark has, and why a
+  piece was refused. Those sentences are the app's own; the agent's summary and texts are not sent
+  here (the review sends them, FTG-012).
+
+The review comes with FTG-012. The rows and the files are made by
+`app/services/footage_rounds.py` and `app/services/footage_import.py`. The answers never return
+ORM objects.
 """
 
 from __future__ import annotations
@@ -27,10 +34,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Project
+from app.db.models import FootageItem, Project
 from app.db.session import SessionDep
-from app.jobs import dispatcher
-from app.services import footage_rounds
+from app.jobs import dispatcher, store
+from app.services import footage_import, footage_rounds
 
 router = APIRouter()
 
@@ -48,8 +55,19 @@ _MARK_NOT_FOUND: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorResponse, "description": "No such project or footage mark."}
 }
 
+_IMPORT_REFUSED: dict[int | str, dict[str, Any]] = {
+    422: {
+        "model": ErrorResponse,
+        "description": "The results cannot be imported now: the project has no footage, there "
+        "is no round, the marks changed since the round's brief, nothing was written in "
+        "results yet, or the files folder is not available.",
+    }
+}
+
 RoundStatus = Literal["brief_written", "imported", "reviewed"]
 MarkState = Literal["owner_file", "reviewed", "no_footage", "waiting"]
+MarkResultStatus = Literal["found", "not_found", "blocked"]
+ResultState = Literal["ok", "no_result", "invalid"]
 
 
 class FootageRoundOut(BaseModel):
@@ -84,6 +102,46 @@ class FootageMarkStateOut(BaseModel):
     state: MarkState
 
 
+class FootageImportItemOut(BaseModel):
+    """One piece of the newest import."""
+
+    piece_id: str
+    kind: Literal["video", "image", "page", "pdf"] | None
+    usable: bool
+    # Why it was refused, one sentence per failed check. Empty for a usable piece.
+    reasons: list[str]
+    # Warnings that did not refuse it (file footage, text on the picture, and the others).
+    warnings: list[str]
+
+
+class FootageImportMarkOut(BaseModel):
+    mark_id: str
+    # The mark's status as the agent reported it, or null when the mark has no usable result.
+    status: MarkResultStatus | None
+    # `no_result`: no result.json. `invalid`: there is one and it cannot be used.
+    result_state: ResultState
+    problems: list[str]
+    warnings: list[str]
+    items: list[FootageImportItemOut]
+
+
+class FootageImportReportOut(BaseModel):
+    marks: int
+    # Marks by status, plus `no_result` and `invalid`. Only the counts that are not zero.
+    by_status: dict[str, int]
+    items: int
+    usable_items: int
+
+
+class FootageImportOut(BaseModel):
+    """The newest import of the newest round."""
+
+    version: int
+    created_at: datetime
+    report: FootageImportReportOut
+    marks: list[FootageImportMarkOut]
+
+
 class FootageStateOut(BaseModel):
     # False for a story, a lines explainer and a project with footage off.
     wanted: bool
@@ -113,6 +171,14 @@ class FootageStateOut(BaseModel):
     # The prompt to paste into Cursor or Claude, and the skill it uses.
     prompt: str
     skill: str
+    # The newest round's results can be imported now (and no import job is going on).
+    can_import: bool
+    # Why they cannot be, or null. It does not look at the folder: an import with no result
+    # written yet is refused when it is asked for.
+    import_blocked_reason: str | None
+    # The newest `import_footage` job of the project, whatever its status.
+    import_job: FootageBriefJobOut | None
+    latest_import: FootageImportOut | None
 
 
 class FootageBriefRun(BaseModel):
@@ -123,8 +189,95 @@ def _active(job_status: str) -> bool:
     return job_status in ("queued", "running")
 
 
+def _reasons(checks: Any) -> list[str]:
+    if not isinstance(checks, dict):
+        return []
+    return [
+        entry["reason"]
+        for entry in checks.values()
+        if isinstance(entry, dict) and isinstance(entry.get("reason"), str)
+    ]
+
+
+def _messages(warnings: Any) -> list[str]:
+    if not isinstance(warnings, list):
+        return []
+    return [
+        entry["message"]
+        for entry in warnings
+        if isinstance(entry, dict) and isinstance(entry.get("message"), str)
+    ]
+
+
+def _item_out(item: FootageItem) -> FootageImportItemOut:
+    return FootageImportItemOut(
+        piece_id=item.piece_id,
+        kind=cast(Any, item.kind),
+        usable=item.usable,
+        reasons=[] if item.usable else _reasons(item.checks),
+        warnings=_messages(item.warnings),
+    )
+
+
+async def _latest_import(session: AsyncSession, round_row_id: int) -> FootageImportOut | None:
+    record = await footage_import.latest_import(session, round_row_id)
+    if record is None:
+        return None
+    by_mark: dict[str, list[FootageImportItemOut]] = {}
+    for item in await footage_import.items_of(session, record.id):
+        by_mark.setdefault(item.mark_id, []).append(_item_out(item))
+    marks: list[FootageImportMarkOut] = []
+    results = record.results if isinstance(record.results, dict) else {}
+    for mark_id, entry in results.items():
+        if not isinstance(entry, dict):
+            continue
+        mark_status = entry.get("status")
+        problems = [text for text in entry.get("problems", []) if isinstance(text, str)]
+        marks.append(
+            FootageImportMarkOut(
+                mark_id=mark_id,
+                status=cast(MarkResultStatus | None, mark_status),
+                result_state=(
+                    "ok" if mark_status is not None else ("invalid" if problems else "no_result")
+                ),
+                problems=problems,
+                warnings=[text for text in entry.get("warnings", []) if isinstance(text, str)],
+                items=by_mark.get(mark_id, []),
+            )
+        )
+    report = record.report if isinstance(record.report, dict) else {}
+    return FootageImportOut(
+        version=record.version,
+        created_at=record.created_at,
+        report=FootageImportReportOut(
+            marks=int(report.get("marks", 0)),
+            by_status={str(k): int(v) for k, v in dict(report.get("by_status", {})).items()},
+            items=int(report.get("items", 0)),
+            usable_items=int(report.get("usable_items", 0)),
+        ),
+        marks=marks,
+    )
+
+
+def _job_out(job: Any) -> FootageBriefJobOut | None:
+    if job is None:
+        return None
+    return FootageBriefJobOut(
+        id=job.id,
+        status=cast(JobStatus, job.status),
+        phase=job.phase,
+        error=job.error,
+    )
+
+
 async def _state(session: AsyncSession, project: Project) -> FootageStateOut:
     state = await footage_rounds.state(session, project)
+    import_job = (
+        await store.latest_job(session, project.id, footage_import.JOB_TYPE)
+        if state.wanted
+        else None
+    )
+    import_reason = footage_import.import_refusal(state) if state.wanted else None
     row = state.round
     job = state.job
     reason = footage_rounds.refusal(state, project) if state.wanted else None
@@ -180,6 +333,12 @@ async def _state(session: AsyncSession, project: Project) -> FootageStateOut:
         ),
         prompt=footage_rounds.README_PROMPT,
         skill=footage_rounds.SKILL_NAME,
+        can_import=state.wanted
+        and import_reason is None
+        and not (import_job is not None and _active(import_job.status)),
+        import_blocked_reason=import_reason,
+        import_job=_job_out(import_job),
+        latest_import=await _latest_import(session, row.id) if row is not None else None,
     )
 
 
@@ -206,6 +365,25 @@ async def write_footage_brief(project_id: int, session: SessionDep) -> FootageBr
     try:
         job = await footage_rounds.start_brief(session, project)
     except footage_rounds.FootageRoundsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return FootageBriefRun(job_id=job.id)
+
+
+@router.post(
+    "/projects/{project_id}/footage/import",
+    response_model=FootageBriefRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_IMPORT_REFUSED},
+)
+async def import_footage(project_id: int, session: SessionDep) -> FootageBriefRun:
+    """Starts the job that imports the newest round's results. If one is already waiting or
+    running for the project, its id is returned and no second job is made.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await footage_import.start_import(session, project)
+    except footage_import.FootageImportError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return FootageBriefRun(job_id=job.id)
