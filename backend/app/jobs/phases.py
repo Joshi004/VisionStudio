@@ -184,6 +184,10 @@ PREPARING_FOOTAGE_VIDEO: Final = "making the video ready"
 FINDING_FOOTAGE_CUTS: Final = "finding the cuts and the strip of frames"
 SAVING_FOOTAGE_VIDEO: Final = "saving the video"
 
+# --- Running: the research brief of the footage layer (FTG-007) --------------------------
+# `write_footage_brief` is a local job: it writes the round's folder and files, then the row.
+WRITING_FOOTAGE_BRIEF: Final = "writing the footage brief"
+
 # --- Running: the research brief of the evidence layer (EVD-003) -------------------------
 # `write_evidence_brief` is a local job: it writes the round's folder and files, then the row.
 WRITING_EVIDENCE_BRIEF: Final = "writing the research brief"

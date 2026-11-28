@@ -196,6 +196,13 @@ STEPS: Final[tuple[Step, ...]] = (
     # not need this step as a whole (OVL-006), so a scene whose plan exists goes on while a claim
     # added later waits for its research. The claim then gets a card, not a new plan.
     Step("evidence", "Gather the evidence", ("story_bible", "evidence_claims")),
+    # FTG-007: the research brief written for the footage marks, and the owner's own work outside
+    # the app (the research, the import, the review), or "no footage here". It waits on the owner
+    # like `evidence`. It needs the Story Bible for the brief's topic line and the footage marks.
+    # Skipped as complete for any project that is not a continuous explainer with footage on, and
+    # for one with no mark. Only the full render waits for it (FT-14): shot planning, H3 clips,
+    # the music and scene renders do not.
+    Step("footage", "Gather the footage", ("story_bible", "footage_marks")),
     # CMO-006: the callout look and both versions of every callout of a motion project. It needs
     # the callout plan and the graphics look. Skipped as complete for any project whose callouts
     # are not drawn as motion graphics. The renders wait for it: a render is refused while a
@@ -309,6 +316,7 @@ STEPS: Final[tuple[Step, ...]] = (
             "music_placement",
             "graphics",
             "evidence_clips",
+            "footage",
             "footage_clips",
             "callout_graphics",
         ),

@@ -3,7 +3,8 @@
 
 Deleting the project row removes every story artifact and job of the project (ON DELETE
 CASCADE), and its media folder `media/<project_id>/` holds the files they made (and
-`evidence/<project_id>/` the research rounds of the evidence layer, EVD-003). The project's
+`evidence/<project_id>/` and `footage/<project_id>/` the research rounds of the evidence layer,
+EVD-003, and of the footage layer, FTG-007). The project's
 sound effects (EXM-006) are Music lab runs: their rows and files are removed after the project
 row, unless something else (an edit of one, a trial case) uses a run. The library
 characters and environments the project used are separate: they are offered for deletion too,
@@ -40,7 +41,13 @@ from app.db.models import (
     StoryRender,
 )
 from app.jobs import store
-from app.services import evidence_rounds, lab_deletion, library_deletion, server_cleanup
+from app.services import (
+    evidence_rounds,
+    footage_rounds,
+    lab_deletion,
+    library_deletion,
+    server_cleanup,
+)
 from app.services.library_deletion import Kind
 from app.services.server_cleanup import PurgePlan
 from app.services.storage import Storage, StorageError
@@ -329,4 +336,9 @@ async def delete_project(
         await evidence_rounds.remove_project_folder(project_id)
     except (StorageError, OSError):
         _logger.exception("could not remove the evidence folder of project %d", project_id)
+    # The research rounds of the footage layer (FTG-007) are files of the project too.
+    try:
+        await footage_rounds.remove_project_folder(project_id)
+    except (StorageError, OSError):
+        _logger.exception("could not remove the footage folder of project %d", project_id)
     return plan

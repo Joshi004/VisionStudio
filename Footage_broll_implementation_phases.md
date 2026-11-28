@@ -400,7 +400,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 | FTG-004 | Placing footage over the shots | Code | — | Completed |
 | FTG-005 | The footage clip and its preview | Code | FTG-003, FTG-004 | Completed |
 | FTG-006 | Footage in the render | Code | FTG-005 | Completed |
-| FTG-007 | The research brief and the waiting step | Code | FTG-002 | Not Started |
+| FTG-007 | The research brief and the waiting step | Code | FTG-002 | Completed |
 | FTG-008 | The capture tool: images, pages and PDFs | Code (Mac) | — | Not Started |
 | FTG-009 | The capture tool: YouTube scans and clips | Code (Mac) | FTG-008 | Not Started |
 | FTG-010 | The research skill | Code (Mac) | FTG-009 | Not Started |
@@ -419,7 +419,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - **Research, backend:** FTG-007 (after FTG-002) → FTG-011 → FTG-012. FTG-011 imports video pieces only once FTG-009 is done.
 - **Mac tools:** FTG-008 → FTG-009 → FTG-010 can start at once. They depend only on the contracts in §4.3, §4.5 and §4.6.
 
-**Progress snapshot:** 6 completed (FTG-001, FTG-002, FTG-003, FTG-004, FTG-005 and FTG-006, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
+**Progress snapshot:** 7 completed (FTG-001 to FTG-007, 2026-11-28; the owner still has to rebuild the real app, and the motion image for FTG-005); 18 phases (13 to build now, 1 later, 4 deferred).
 
 ---
 
@@ -772,7 +772,7 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 
 ### FTG-007 — The research brief and the waiting step
 
-**Status:** Not Started
+**Status:** Completed (2026-11-28; the owner still has to rebuild the real app and try the panel in a browser)
 
 **Objective.** The app writes a research brief for the marks that need it, and the full render waits for the footage.
 
@@ -799,14 +799,43 @@ Planning in FTG-001 decides the names and the exact split. Footage needs:
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Rounds, brief and README
-- [ ] Waiting step and needs
-- [ ] Continue without footage
-- [ ] Footage panel
-- [ ] Project deletion
-- [ ] Standard checks
+- [x] Rounds, brief and README
+- [x] Waiting step and needs
+- [x] Continue without footage (and a per-mark Undo)
+- [x] Footage panel
+- [x] Project deletion
+- [x] Standard checks
+- [ ] Owner: real app rebuilt (`docker compose up --build -d`, never `down -v`) and the Footage panel tried once in a browser
 
-**Completion notes.** —
+**Completion notes.**
+- **No migration.** The tables (`footage_round`, `footage_import`, `footage_decision`) and the job type `write_footage_brief` come from `0106`.
+- **Modules:**
+  - `services/footage_rounds.py`: the brief (`brief_marks`, `build_brief`, `readme_text`), the folder files (`write_round_files`, `discard_round`, `remove_project_folder`, the same guards as the evidence folder), `state()` (memoized; a project without footage reads no tables), `refusal`, `awaiting_text`, `is_done`, `start_brief`, `make_round`, `needed_seconds`, `continue_without_footage` and `undo_no_footage`. From the evidence layer it imports only the pure helpers `sentence_spans` and `topic_of` (FT-2).
+  - `services/footage_decisions.set_no_footage`: one decision version for any number of marks; nothing is stored when nothing changes.
+  - `jobs/write_footage_brief.py` (`local`, `start_again`), the phase label `WRITING_FOOTAGE_BRIEF` and the handler registration.
+  - Step `footage` ("Gather the footage", needs `story_bible` and `footage_marks`, after `evidence`); `render` needs it, `scene_render` does not. `_evaluate_footage` is a copy of the evidence step's (a target with `awaiting`, a run pauses with `waiting_for`). The board shows it `off` through `FOOTAGE_STEPS`, in the `story` group.
+  - API `api/footage.py`: `GET /projects/{id}/footage`, `POST .../footage/brief`, `POST .../footage/continue-without`, `DELETE .../footage/marks/{mark_id}/no-footage`.
+  - Project deletion removes `footage/<id>/` after the evidence folder.
+- **Frontend:** `api/footage.ts`, `FootagePanel.tsx` (counts, the "Waiting for you" alert, each mark with its state and an Undo on a skipped one, the folder and prompt with Copy, Write the brief, Continue without footage), `StepPanel.tsx` (`footage`). The mark and file mutations also refresh the footage query. `schema.d.ts` was regenerated from the app's OpenAPI (additions only).
+- **Planning decided:**
+  - **When a mark is covered**, in this order: a usable file of the owner's is among the pieces shown on it (`owner_file`); the owner chose "no footage here" (`no_footage`); the newest reviewed round that holds it unchanged (`reviewed`). A round is **reviewed** when it has an import and its id (`r2`, or the number 2) is in `reviewed_rounds` of the owner's decisions. FTG-012 must write that list with ids like `r2`.
+  - **A round holds a mark unchanged** when the brief entry has the same `id`, `origin`, `text`, `sentence`, `note` and `kind_hint`. `context` and `needed_s` are left out, so an edit elsewhere in the story or a new recording forces no round.
+  - **`needed_s`** is worked out only when a brief is written (not on every read): for each scene whose take is timed, from the first covered word's start to the last one's end (the matching FTG-004 uses, `graphic_suggestions.scene_suggestions`), summed over the scenes; a mark with no timed word is estimated at 2.5 words a second, to 0.1 s.
+  - **Undecided GLM proposals and marks whose words changed** block the brief, Continue without footage and the step (as for evidence). "Keep or drop the N footage marks GLM proposed." is the wait text.
+  - **"No footage here"** is stored by mark id and holds until undone, even if the note changes. An owner's file covers a mark before it, so Undo on such a mark only clears the flag.
+  - **The README** tells the owner to run `tools/footage-skill/install.sh`. FTG-010 decides the install script and must keep that path or change the README text (`footage_rounds.readme_text`).
+  - **Undo** was added to the Scope at the owner's request (one decision version per click).
+- **Checked** on a throwaway database and data folder with the app run on another port (no paid call, the real app on port 5480 was not touched; the scripts and the folder were removed):
+  - The brief has the §4.5 fields, files and rules; `needed_s` estimated for untimed marks (7 words gave 2.8) and taken from timings with stand-in takes (3.4 s); the sentence and the sentences around it are right.
+  - A mark with an owner's file is covered and a repeat brief is refused while the round holds the waiting marks unchanged. With round 1 reviewed, changing one note made only that mark wait, and round 2 held only it. Its wait text says the 2 covered marks stay.
+  - The step view has `awaiting` while a mark waits and is done after Continue without footage; Undo makes the mark wait again; a second Undo gets 422 and an unknown mark 404. Each change made one decision version.
+  - An undecided proposal blocks Continue and the brief with the sentence.
+  - With footage off, the state reads nothing, the step is done with no `awaiting` and a brief is refused.
+  - Deletion removed only the project's folder (another project's stayed), did nothing twice, and refused a symlink (its target stayed).
+  - `render` needs `footage`, `scene_render` does not.
+  - `ruff check`, `ruff format --check`, `npm run lint` and `npm run typecheck` pass.
+- **Not checked:** the panel in a browser (typecheck and lint only); a real run of the pipeline to the `waiting_for` pause (the step view was evaluated directly; the pause logic is the evidence step's, unchanged); a video of the owner still being prepared leaves its mark waiting until the file is ready, and the panel refreshes then only on the next load or change (no polling for that). The backend of the real app must be rebuilt.
+- **Deviation from Scope:** none.
 
 ### FTG-008 — The capture tool: images, pages and PDFs
 

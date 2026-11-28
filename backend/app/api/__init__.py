@@ -24,6 +24,7 @@ from app.api import (
     environment_views,
     evidence,
     evidence_claims,
+    footage,
     footage_files,
     footage_marks,
     generation_requests,
@@ -88,6 +89,7 @@ api_router.include_router(callout_look.router, tags=["callout-look"])
 api_router.include_router(callout_graphics.router, tags=["callout-graphics"])
 api_router.include_router(evidence_claims.router, tags=["evidence-claims"])
 api_router.include_router(evidence.router, tags=["evidence"])
+api_router.include_router(footage.router, tags=["footage"])
 api_router.include_router(footage_marks.router, tags=["footage-marks"])
 api_router.include_router(footage_files.router, tags=["footage-files"])
 api_router.include_router(graphic_theme.router, tags=["graphic-theme"])

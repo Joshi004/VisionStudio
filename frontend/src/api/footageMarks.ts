@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { footageKey } from "./footage";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY, isValidProjectId } from "./projects";
@@ -75,6 +76,8 @@ export function useMarkFootage(projectId: number) {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(footageMarksKey(projectId), data);
+      // What the footage step waits for depends on the marks that count.
+      void queryClient.invalidateQueries({ queryKey: footageKey(projectId) });
     },
   });
 }
@@ -101,6 +104,8 @@ export function useEditFootageMark(projectId: number) {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(footageMarksKey(projectId), data);
+      // What the footage step waits for depends on the marks that count.
+      void queryClient.invalidateQueries({ queryKey: footageKey(projectId) });
     },
   });
 }
@@ -124,6 +129,8 @@ export function useRemoveFootageMark(projectId: number) {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(footageMarksKey(projectId), data);
+      // What the footage step waits for depends on the marks that count.
+      void queryClient.invalidateQueries({ queryKey: footageKey(projectId) });
     },
   });
 }
@@ -148,6 +155,7 @@ export function useSuggestFootageMarks(projectId: number) {
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: footageMarksKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: footageKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
   });

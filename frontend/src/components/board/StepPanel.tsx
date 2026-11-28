@@ -111,6 +111,7 @@ const GraphicThemePanel = lazyNamed(
 );
 const StoryMarkup = lazyNamed(() => import("../story/StoryMarkup"), "StoryMarkup");
 const EvidencePanel = lazyNamed(() => import("../story/EvidencePanel"), "EvidencePanel");
+const FootagePanel = lazyNamed(() => import("../story/FootagePanel"), "FootagePanel");
 const GraphicBriefsPanel = lazyNamed(
   () => import("../story/GraphicBriefsPanel"),
   "GraphicBriefsPanel",
@@ -227,6 +228,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <StoryMarkup project={project} hasUnsavedStory={false} />;
       case "evidence":
         return <EvidencePanel project={project} />;
+      case "footage":
+        return <FootagePanel project={project} />;
       case "callout_graphics":
         return (
           <Stack gap="md">

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { footageKey } from "./footage";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY, isValidProjectId, uploadError } from "./projects";
@@ -108,7 +109,12 @@ export function useUploadFootageFile(projectId: number) {
       }
       return (await response.json()) as components["schemas"]["FootageFileStored"];
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: footageFilesKey(projectId) }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: footageFilesKey(projectId) }),
+        // A file of the owner's covers its mark, so the footage step may be done.
+        queryClient.invalidateQueries({ queryKey: footageKey(projectId) }),
+      ]),
   });
 }
 
@@ -131,6 +137,7 @@ export function useRemoveFootageFile(projectId: number) {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(footageFilesKey(projectId), data);
+      void queryClient.invalidateQueries({ queryKey: footageKey(projectId) });
     },
   });
 }

@@ -119,6 +119,7 @@ def register_handlers() -> None:
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
     from app.jobs.write_evidence_brief import WriteEvidenceBriefHandler
+    from app.jobs.write_footage_brief import WriteFootageBriefHandler
     from app.jobs.write_graphic_theme import WriteGraphicThemeHandler
     from app.jobs.write_lab_graphic_block_scene import WriteLabGraphicBlockSceneHandler
     from app.jobs.write_lab_graphic_brief import WriteLabGraphicBriefHandler
@@ -208,6 +209,7 @@ def register_handlers() -> None:
     handlers.register(SuggestFootageMarksHandler())
     handlers.register(PrepareFootageFileHandler())
     handlers.register(WriteEvidenceBriefHandler())
+    handlers.register(WriteFootageBriefHandler())
     handlers.register(ImportEvidenceHandler())
     handlers.register(RenderEvidenceClipHandler())
     handlers.register(RenderFootageClipHandler())

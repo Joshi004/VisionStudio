@@ -22,7 +22,9 @@ the project, because an owner's own file has no round. `content` is:
 - `items`: the owner's verdict on each piece of the mark, by `item_key`: `accepted` or `rejected`.
 - `shown`: the item keys to show, in order. An accepted piece the owner removed is not in it.
 - `use`: a video piece's start and end in seconds of its stored video, moved by the owner.
-- `framing` and `no_footage`, `reviewed_rounds`: written by the review (FTG-012), kept as they are.
+- `no_footage`: the owner's "no footage here" (FTG-007: Continue without footage and its undo).
+- `framing` and `reviewed_rounds`: written by the review (FTG-012), kept as they are
+  (`reviewed_rounds` holds round ids like `r2`).
 
 A decision names a piece by its `item_key`, so a new import keeps the decisions for pieces that
 did not change. This module only stores what it is given: the rules about files and times are
@@ -233,6 +235,29 @@ async def set_use(
         entry["use"][item_key] = {"start_s": start_s, "end_s": end_s}
 
     await _edit(session, project, mark_id, change, commit=True)
+
+
+async def set_no_footage(
+    session: AsyncSession, project: Project, mark_ids: list[str], value: bool
+) -> None:
+    """Sets or clears the owner's "no footage here" on each of `mark_ids`, as one new version
+    (FTG-007). Nothing is stored when nothing changes. Commits. A mark with no entry yet gets one
+    with nothing else decided; clearing a flag on a mark with no entry stores nothing.
+    """
+    based_on = await latest(session, project.id)
+    before = _normalised(based_on.content if based_on is not None else None)
+    after = copy.deepcopy(before)
+    for mark_id in mark_ids:
+        if value:
+            _entry_for_edit(after, mark_id)["no_footage"] = True
+        else:
+            for entry in after["marks"]:
+                if entry["mark_id"] == mark_id:
+                    entry["no_footage"] = False
+    if after == before:
+        return
+    await _add_version(session, project, based_on, after)
+    await session.commit()
 
 
 # --- What is shown now (FTG-004) -----------------------------------------------------------

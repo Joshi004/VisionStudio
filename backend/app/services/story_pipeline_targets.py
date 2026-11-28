@@ -50,6 +50,7 @@ from app.services import (
     footage_clips,
     footage_marks,
     footage_placement,
+    footage_rounds,
     generation_requests,
     graphic_theme,
     look_state_images,
@@ -1984,6 +1985,51 @@ async def _call_evidence(session: AsyncSession, project: Project, options: RunOp
     return await evidence_rounds.start_brief(session, project)
 
 
+# --- The footage (FTG-007) --------------------------------------------------------------------
+
+
+async def _evaluate_footage(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with footage on has footage research. For any other project the
+    # step has one target that is already done, so a run reports it as skipped. Turning footage
+    # off later keeps the rows and ignores them.
+    if not footage_marks.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await footage_rounds.state(session, project)
+    # Done: no mark counts, or every mark that counts has footage, a reviewed round or "no
+    # footage here".
+    done = footage_rounds.is_done(state)
+    active = _active(state.job)
+    # What the owner has to do outside the run: decide on GLM's proposals, run the research,
+    # import, review, or continue without footage. It is a wait, not a failure.
+    awaiting = None if done or active else footage_rounds.awaiting_text(state)
+    # Otherwise a brief has to be written. It cannot be when the story or the files folder is not
+    # there: that is reported.
+    block = None
+    if not done and not active and awaiting is None:
+        block = footage_rounds.refusal(state, project)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=block,
+                awaiting=awaiting,
+                last_error=None if done or awaiting is not None else _failure(state.job),
+                # A round exists, but it does not have the marks that count now.
+                stale=state.round is not None and not done and not state.current,
+            )
+        ]
+    )
+
+
+async def _call_footage(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await footage_rounds.start_brief(session, project)
+
+
 # --- The callout graphics (CMO-006) -----------------------------------------------------------
 
 # The target of the callout look. Every callout target waits for it.
@@ -3071,6 +3117,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "footage_clips": Adapter(_evaluate_footage_clips, _start_footage_clips),
     "footage_marks": Adapter(_evaluate_footage_marks, _project_start(_call_footage_marks)),
     "evidence": Adapter(_evaluate_evidence, _project_start(_call_evidence)),
+    "footage": Adapter(_evaluate_footage, _project_start(_call_footage)),
     "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),

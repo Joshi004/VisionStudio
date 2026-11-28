@@ -849,6 +849,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/footage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Footage */
+        get: operations["get_footage_api_projects__project_id__footage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Footage Brief
+         * @description Starts the job that writes the next round's brief. If one is already waiting or running
+         *     for the project, its id is returned and no second job is made.
+         */
+        post: operations["write_footage_brief_api_projects__project_id__footage_brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/continue-without": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Without Footage
+         * @description Sets "no footage here" on every mark that is waiting, as one decision version.
+         */
+        post: operations["continue_without_footage_api_projects__project_id__footage_continue_without_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/marks/{mark_id}/no-footage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Undo No Footage
+         * @description Takes "no footage here" off one mark, so it waits for research again.
+         */
+        delete: operations["undo_no_footage_api_projects__project_id__footage_marks__mark_id__no_footage_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/footage-marks": {
         parameters: {
             query?: never;
@@ -9955,6 +10033,28 @@ export interface components {
             /** Warnings */
             warnings: string[];
         };
+        /**
+         * FootageBriefJobOut
+         * @description The newest `write_footage_brief` job of the project, whatever its status.
+         */
+        FootageBriefJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** FootageBriefRun */
+        FootageBriefRun: {
+            /** Job Id */
+            job_id: number;
+        };
         /** FootageFileOut */
         FootageFileOut: {
             /** Item Key */
@@ -10093,6 +10193,18 @@ export interface components {
             /** Words Changed */
             words_changed: boolean;
         };
+        /** FootageMarkStateOut */
+        FootageMarkStateOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "owner_file" | "reviewed" | "no_footage" | "waiting";
+        };
         /**
          * FootageMarksJobOut
          * @description The newest `suggest_footage_marks` job of the project, whatever its status.
@@ -10163,6 +10275,64 @@ export interface components {
         FootagePreviewStarted: {
             /** Job Id */
             job_id: number;
+        };
+        /** FootageRoundOut */
+        FootageRoundOut: {
+            /** Round Id */
+            round_id: string;
+            /** Round No */
+            round_no: number;
+            /** Host Folder */
+            host_folder: string | null;
+            /** Folder */
+            folder: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "brief_written" | "imported" | "reviewed";
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Marks */
+            marks: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** FootageStateOut */
+        FootageStateOut: {
+            /** Wanted */
+            wanted: boolean;
+            /** Marks Count */
+            marks_count: number;
+            /** Covered Marks */
+            covered_marks: number;
+            /** Skipped Marks */
+            skipped_marks: number;
+            /** Waiting Marks */
+            waiting_marks: number;
+            /** Pending */
+            pending: string[];
+            /** Awaiting */
+            awaiting: string | null;
+            /** Done */
+            done: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Can Write Brief */
+            can_write_brief: boolean;
+            /** Can Continue Without */
+            can_continue_without: boolean;
+            /** Marks */
+            marks: components["schemas"]["FootageMarkStateOut"][];
+            round: components["schemas"]["FootageRoundOut"] | null;
+            job: components["schemas"]["FootageBriefJobOut"] | null;
+            /** Prompt */
+            prompt: string;
+            /** Skill */
+            skill: string;
         };
         /** FootageUseIn */
         FootageUseIn: {
@@ -23170,6 +23340,167 @@ export interface operations {
                 };
             };
             /** @description The decision is not allowed, there is nothing to review, the claims changed since the round's brief, or (Review done) a claim is not decided yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_footage_api_projects__project_id__footage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_footage_brief_api_projects__project_id__footage_brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the marks are not ready, nothing changed, nothing is waiting, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    continue_without_footage_api_projects__project_id__footage_continue_without_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the marks are not ready, nothing changed, nothing is waiting, or the files folder is not available. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    undo_no_footage_api_projects__project_id__footage_marks__mark_id__no_footage_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageStateOut"];
+                };
+            };
+            /** @description No such project or footage mark. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, the marks are not ready, nothing changed, nothing is waiting, or the files folder is not available. */
             422: {
                 headers: {
                     [name: string]: unknown;
