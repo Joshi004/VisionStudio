@@ -481,8 +481,10 @@ def with_chapters(content: dict[str, Any], chapters_block: str) -> dict[str, Any
 def with_sources(content: dict[str, Any], entries: object, footage: object = ()) -> dict[str, Any]:
     """The content with the Sources section added to the end of its description (before the
     hashtags, which are added when the text is sent): the heading, the model's note on what was
-    checked, and the list of sources. The section takes only the bytes that are left under
-    YouTube's limit with the hashtags counted. The note is not stored: the returned content has
+    checked, and the sources in groups, each publisher once (`youtube_sources.block`). The section
+    takes only the bytes that are left under YouTube's limit with the hashtags counted; when it is
+    too long the note goes first, then the links of the last sources. The note is not stored: the
+    returned content has
     only `{title, description, hashtags, tags}`. The description is returned as it is when there
     are no entries or nothing fits. Raises ValueError if the result breaks a check, which the
     budget should make impossible. `footage` are the sources of the footage in the video

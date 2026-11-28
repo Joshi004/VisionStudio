@@ -1,7 +1,8 @@
 """The "Sources" section of the YouTube description: a short note on what was checked, then a
-plain list of the sources the owner accepted, each address once (publisher, title, link). The
-claims they back and how each one relates to a claim stay in the stored entries but are not
-written in the description.
+short list of the sources the owner accepted, in groups (articles and websites, documents, videos,
+footage and images). Each publisher is listed once with one plain link (a YouTube link has no
+time in it); the title is not written. The claims the sources back and how each one relates to a
+claim stay in the stored entries but are not written in the description.
 
 The section is built by code from stored data only. The model never writes a link, a publisher or a
 title. Two steps, both pure (no I/O):
@@ -10,8 +11,8 @@ title. Two steps, both pure (no I/O):
   frozen on the `write_youtube_draft` job, like the rest of what the draft is made from:
 
       [{"claim": "the words of the script",
-        "pieces": [{"publisher", "title", "published", "page", "relation", "url",
-                    "archive_url"}]}]
+        "pieces": [{"publisher", "title", "published", "page", "pdf", "video", "relation",
+                    "url", "archive_url"}]}]
 
 - `block` turns the entries and the model's note into the text, within the number of UTF-8 bytes
   there is room for. `names` gives the model the publisher and title of each source.
@@ -23,7 +24,7 @@ The agent's text is untrusted (EV-7). Everything that is shown is cleaned here: 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from app.services import soundbite_render
 
@@ -35,6 +36,16 @@ CLAIM_MAX_CHARS: Final = 150
 TITLE_MAX_CHARS: Final = 120
 PUBLISHER_MAX_CHARS: Final = 60
 URL_MAX_CHARS: Final = 500
+
+# The groups of the list, in the order they are shown.
+GROUP_ARTICLES: Final = "Articles and websites"
+GROUP_DOCUMENTS: Final = "Documents"
+GROUP_VIDEOS: Final = "Videos"
+GROUP_FOOTAGE: Final = "Footage and images"
+GROUP_ORDER: Final = (GROUP_ARTICLES, GROUP_DOCUMENTS, GROUP_VIDEOS, GROUP_FOOTAGE)
+
+_YOUTUBE_HOSTS: Final = frozenset({"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"})
+_YOUTUBE_TIME_PARAMETERS: Final = frozenset({"t", "start"})
 
 _ACCEPTED: Final = "accepted"
 _RELATION_LABELS: Final = {
@@ -109,6 +120,7 @@ def _piece_of(item: Any, details: dict[str, Any] | None = None) -> dict[str, Any
         "published": _clean(source.get("published"), 20),
         "page": page if item.kind == "pdf" and isinstance(page, int) and page > 0 else None,
         "pdf": item.kind == "pdf",
+        "video": item.kind == "video",
         "relation": item.relation if item.relation in _RELATION_LABELS else None,
         "url": url,
         "archive_url": _address(source.get("archive_url")),
@@ -188,20 +200,46 @@ def _read_piece(piece: object) -> dict[str, Any] | None:
         "published": _clean(piece.get("published"), 20),
         "page": page if isinstance(page, int) and not isinstance(page, bool) and page > 0 else None,
         "pdf": piece.get("pdf") is True,
+        # Entries stored before this flag existed have none; `_group_of` also checks the address.
+        "video": piece.get("video") is True,
         "relation": piece.get("relation") if piece.get("relation") in _RELATION_LABELS else None,
         "url": url,
         "archive_url": _address(piece.get("archive_url")),
     }
 
 
-def _piece_line(piece: dict[str, Any]) -> str:
-    """`- Publisher, "Title": https://...` (a piece with neither is `- Source: https://...`)."""
-    name = ", ".join(
-        part
-        for part in (piece["publisher"], f'"{piece["title"]}"' if piece["title"] else None)
-        if part
-    )
-    return f"- {name or 'Source'}: {piece['url']}"
+def _is_youtube(url: str) -> bool:
+    return (urlparse(url).hostname or "") in _YOUTUBE_HOSTS
+
+
+def _plain_address(url: str) -> str:
+    """The address as it is listed: a YouTube address loses its time (`t`, `start`) and its
+    fragment, so one video cited at several moments has one link. Any other address is as it is."""
+    if not _is_youtube(url):
+        return url
+    parts = urlsplit(url)
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key not in _YOUTUBE_TIME_PARAMETERS
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), ""))
+
+
+def _domain(url: str) -> str:
+    """The website of an address without `www.`, or "" when it has none."""
+    return (urlparse(url).hostname or "").removeprefix("www.")
+
+
+def _group_of(piece: dict[str, Any]) -> str:
+    """The group of an accepted piece of evidence: a PDF is a document, a video (by its kind, or
+    by its address for an entry stored before the kind was kept) is a video, the rest are
+    articles and websites."""
+    if piece["pdf"]:
+        return GROUP_DOCUMENTS
+    if piece["video"] or _is_youtube(piece["url"]):
+        return GROUP_VIDEOS
+    return GROUP_ARTICLES
 
 
 def _unique_pieces(entries: object) -> list[dict[str, Any]]:
@@ -251,56 +289,79 @@ def _read_footage(entry: object) -> dict[str, Any] | None:
     }
 
 
-def _footage_line(entry: dict[str, Any]) -> str:
-    """`- Publisher, "Title": https://...` for a piece with an address, else `- Video: credit`."""
-    if entry["url"] is None:
-        return f"- {entry['credit']}"
-    return _piece_line(entry)
+def _listed_sources(entries: object, footage: object) -> list[dict[str, Any]]:
+    """The sources to list, each publisher once: `{"group", "name", "url"}`, ordered by group
+    (see `GROUP_ORDER`), then as they came. A source is its publisher, or its website when it has
+    no publisher, or the credit line of an owner's file that has no address (then `url` is None).
+    The first address of a publisher is its link, and the group of its first appearance is its
+    group. The evidence comes first, so a publisher of footage who is already a source of the
+    evidence is not listed again. A YouTube link has no time in it.
+    """
+    listed: list[dict[str, Any]] = []
+    seen: set[str] = set()
 
+    def add(group: str, name: str, url: str | None) -> None:
+        key = name.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        listed.append({"group": group, "name": name, "url": url})
 
-def _unique_footage(footage: object, taken: set[str]) -> list[dict[str, Any]]:
-    """The usable footage entries in order, each address and each credit once, leaving out an
-    address already in `taken` (a source of the evidence)."""
-    found: list[dict[str, Any]] = []
-    seen: set[str] = set(taken)
+    for piece in _unique_pieces(entries):
+        name = piece["publisher"] or _domain(piece["url"]) or "Source"
+        add(_group_of(piece), name, _plain_address(piece["url"]))
     for raw in footage if isinstance(footage, list | tuple) else []:
         entry = _read_footage(raw)
         if entry is None:
             continue
-        key = entry["url"] or f"credit:{entry['credit']}"
-        if key in seen:
-            continue
-        seen.add(key)
-        found.append(entry)
-    return found
+        if entry["url"] is None:
+            add(GROUP_FOOTAGE, entry["credit"], None)
+        else:
+            name = entry["publisher"] or _domain(entry["url"]) or "Source"
+            add(GROUP_FOOTAGE, name, _plain_address(entry["url"]))
+    listed.sort(key=lambda source: GROUP_ORDER.index(source["group"]))
+    return listed
+
+
+def _group_blocks(listed: list[dict[str, Any]], names_only: int) -> list[str]:
+    """One block of text for every group that has a source: the group's name, then `- Name: link`
+    for each of its sources (`- Name` for one that has no link, or one of the last `names_only`
+    sources of `listed`, which go without their link to save room)."""
+    first_without_link = len(listed) - names_only
+    blocks: list[str] = []
+    for group in GROUP_ORDER:
+        lines = [
+            f"- {source['name']}: {source['url']}"
+            if source["url"] and index < first_without_link
+            else f"- {source['name']}"
+            for index, source in enumerate(listed)
+            if source["group"] == group
+        ]
+        if lines:
+            blocks.append(group + "\n" + "\n".join(lines))
+    return blocks
 
 
 def block(entries: object, budget_bytes: int, note: str = "", footage: object = ()) -> str:
     """The Sources section: the heading, the `note` (a sentence or two on what was checked, may be
-    empty) and one line for every source, each address once. The sources of the footage in the
-    video (FTG-006) follow those of the evidence. "" when there is no source to list or not even
-    the first one fits in `budget_bytes` (UTF-8 bytes). Sources are added in order; when some are
-    left out the section ends with a sentence that says how many are not listed. When the note is
-    what stops it from fitting, the note is left out.
+    empty) and the sources in groups (articles and websites, documents, videos, footage and
+    images), each publisher once with one plain link. The sources of the footage in the video
+    (FTG-006) follow those of the evidence. "" when there is no source to list or the section does
+    not fit in `budget_bytes` (UTF-8 bytes). When it does not fit, the note is left out first;
+    then more and more of the last sources are listed by name only, without their link. No source
+    is ever left out of the list.
     """
-    pieces: list[dict[str, Any]] = _unique_pieces(entries)
-    lines = [_piece_line(piece) for piece in pieces]
-    lines.extend(
-        _footage_line(entry)
-        for entry in _unique_footage(footage, {piece["url"] for piece in pieces})
-    )
+    listed = _listed_sources(entries, footage)
+    if not listed:
+        return ""
     clean_note = _clean(note, 400) or ""
-    for with_note in (True, False) if clean_note else (False,):
-        for count in range(len(lines), 0, -1):
-            parts = [HEADING]
-            if with_note:
-                parts.append(clean_note)
-            parts.append("\n".join(lines[:count]))
-            left_out = len(lines) - count
-            if left_out:
-                noun = "source is" if left_out == 1 else "sources are"
-                parts.append(f"{left_out} more {noun} not listed here for length.")
-            text = parts[0] + "\n" + "\n\n".join(parts[1:])
-            if _utf8_bytes(text) <= budget_bytes:
-                return text
+    # (whether the note is kept, how many of the last sources have no link), most complete first.
+    attempts = [(True, 0)] if clean_note else []
+    attempts += [(False, names_only) for names_only in range(len(listed) + 1)]
+    for with_note, names_only in attempts:
+        parts = [clean_note] if with_note else []
+        parts += _group_blocks(listed, names_only)
+        text = HEADING + "\n" + "\n\n".join(parts)
+        if _utf8_bytes(text) <= budget_bytes:
+            return text
     return ""
