@@ -23,8 +23,10 @@ the project, because an owner's own file has no round. `content` is:
 - `shown`: the item keys to show, in order. An accepted piece the owner removed is not in it.
 - `use`: a video piece's start and end in seconds of its stored video, moved by the owner.
 - `no_footage`: the owner's "no footage here" (FTG-007: Continue without footage and its undo).
-- `framing` and `reviewed_rounds`: written by the review (FTG-012), kept as they are
-  (`reviewed_rounds` holds round ids like `r2`).
+- `framing`: the portrait crop of the mark (`left`, `centre`, `right` or null), set by the review
+  (FTG-012).
+- `reviewed_rounds`: round ids like `r2`, added by Review done and taken off again by a new import
+  of the round (FTG-012).
 
 A decision names a piece by its `item_key`, so a new import keeps the decisions for pieces that
 did not change. This module only stores what it is given: the rules about files and times are
@@ -223,12 +225,17 @@ async def set_use(
     item_key: str,
     start_s: float,
     end_s: float,
+    *,
+    require_shown: bool = True,
 ) -> None:
     """Moves where a video file starts and ends, in seconds of its stored video. Commits. The
-    times are checked by the caller. Raises FootageDecisionError when the file is not shown.
+    times are checked by the caller. Raises FootageDecisionError when the file is not shown,
+    unless `require_shown` is False (the review lets the owner move a piece before accepting it).
     """
     current = await latest(session, project.id)
-    if item_key not in shown_keys(current.content if current is not None else None, mark_id):
+    if require_shown and item_key not in shown_keys(
+        current.content if current is not None else None, mark_id
+    ):
         raise FootageDecisionError(NOT_SHOWN_MESSAGE)
 
     def change(entry: dict[str, Any]) -> None:
@@ -258,6 +265,69 @@ async def set_no_footage(
         return
     await _add_version(session, project, based_on, after)
     await session.commit()
+
+
+async def set_verdict(
+    session: AsyncSession,
+    project: Project,
+    mark_id: str,
+    item_key: str,
+    verdict: str,
+    *,
+    before: frozenset[str] = frozenset(),
+) -> None:
+    """The owner's verdict on a piece of the agent (FTG-012). `accepted` also shows it, ahead of
+    the first piece in `before` that is shown (the owner's own files), or last when none is;
+    a piece already shown keeps its place. `rejected` takes it off the mark. Commits. Nothing is
+    stored when nothing changes. The caller checks that the piece may be decided on.
+    """
+    if verdict not in (ACCEPTED, REJECTED):
+        raise FootageDecisionError("The verdict must be accepted or rejected.")
+
+    def change(entry: dict[str, Any]) -> None:
+        _set_verdict(entry, item_key, verdict)
+        if verdict == ACCEPTED:
+            if item_key not in entry["shown"]:
+                position = next(
+                    (index for index, key in enumerate(entry["shown"]) if key in before),
+                    len(entry["shown"]),
+                )
+                entry["shown"].insert(position, item_key)
+        else:
+            entry["shown"] = [key for key in entry["shown"] if key != item_key]
+
+    await _edit(session, project, mark_id, change, commit=True)
+
+
+async def set_framing(
+    session: AsyncSession, project: Project, mark_id: str, framing: str | None
+) -> None:
+    """The portrait crop of a mark: `left`, `centre`, `right` or None. Commits. The caller checks
+    the value. Nothing is stored when nothing changes."""
+
+    def change(entry: dict[str, Any]) -> None:
+        entry["framing"] = framing
+
+    await _edit(session, project, mark_id, change, commit=True)
+
+
+async def set_round_reviewed(
+    session: AsyncSession, project: Project, round_id: str, value: bool, *, commit: bool = True
+) -> None:
+    """Adds `round_id` (like `r2`) to the rounds the owner reviewed, or takes it off. Nothing is
+    stored when it is already so. With `commit` False the version is flushed, not committed (a
+    new import takes its round off in the transaction that stores the import).
+    """
+    based_on = await latest(session, project.id)
+    before = _normalised(based_on.content if based_on is not None else None)
+    after = copy.deepcopy(before)
+    listed = [value for value in after["reviewed_rounds"] if value != round_id]
+    after["reviewed_rounds"] = [*listed, round_id] if value else listed
+    if after == before:
+        return
+    await _add_version(session, project, based_on, after)
+    if commit:
+        await session.commit()
 
 
 # --- What is shown now (FTG-004) -----------------------------------------------------------

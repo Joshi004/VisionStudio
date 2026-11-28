@@ -161,7 +161,7 @@ def _refusal(exc: files_service.FootageFilesError) -> HTTPException:
     return HTTPException(exc.status_code, exc.message)
 
 
-def _strip_out(strip: dict[str, Any] | None) -> FootageFileStripOut | None:
+def strip_out(strip: dict[str, Any] | None) -> FootageFileStripOut | None:
     if strip is None or any(value is None for value in strip.values()):
         return None
     tile = strip["strip_tile_px"]
@@ -175,7 +175,7 @@ def _strip_out(strip: dict[str, Any] | None) -> FootageFileStripOut | None:
     )
 
 
-def _preview_out(preview: footage_clips.Preview | None) -> FootagePreviewOut | None:
+def preview_out(preview: footage_clips.Preview | None) -> FootagePreviewOut | None:
     if preview is None:
         return None
     return FootagePreviewOut(
@@ -201,7 +201,7 @@ def _file_out(view: files_service.FileView) -> FootageFileOut:
         error=view.error,
         media_url=view.media_url,
         strip_url=view.strip_url,
-        strip=_strip_out(view.strip),
+        strip=strip_out(view.strip),
         width=view.width,
         height=view.height,
         duration_s=view.duration_s,
@@ -210,7 +210,7 @@ def _file_out(view: files_service.FileView) -> FootageFileOut:
             if isinstance(use, dict)
             else None
         ),
-        preview=_preview_out(view.preview),
+        preview=preview_out(view.preview),
     )
 
 

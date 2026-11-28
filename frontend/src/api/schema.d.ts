@@ -1150,6 +1150,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/footage/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Footage Review */
+        get: operations["get_footage_review_api_projects__project_id__footage_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/review/items/{item_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Decide Footage Piece
+         * @description Accepts or rejects a piece of the agent. An accepted piece is shown on its mark.
+         */
+        put: operations["decide_footage_piece_api_projects__project_id__footage_review_items__item_key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/review/items/{item_key}/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Footage Piece Use
+         * @description Moves where a video starts and ends, in seconds of the stored video: inside the video,
+         *     2 to 15 seconds.
+         */
+        put: operations["set_footage_piece_use_api_projects__project_id__footage_review_items__item_key__use_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/review/marks/{mark_id}/framing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Footage Framing
+         * @description Sets the portrait crop of a mark; null fits the picture over a blurred copy.
+         */
+        put: operations["set_footage_framing_api_projects__project_id__footage_review_marks__mark_id__framing_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/review/marks/{mark_id}/no-footage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Footage Review No Footage
+         * @description Sets or clears "no footage here" on a mark.
+         */
+        put: operations["set_footage_review_no_footage_api_projects__project_id__footage_review_marks__mark_id__no_footage_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/footage/review/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish Footage Review
+         * @description Marks the newest round reviewed. Refused while a piece is undecided.
+         */
+        post: operations["finish_footage_review_api_projects__project_id__footage_review_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -10359,6 +10477,183 @@ export interface components {
         FootagePreviewStarted: {
             /** Job Id */
             job_id: number;
+        };
+        /** FootageReviewAttemptOut */
+        FootageReviewAttemptOut: {
+            /** What */
+            what: string;
+            /** Outcome */
+            outcome: string;
+        };
+        /** FootageReviewFramingIn */
+        FootageReviewFramingIn: {
+            /** Framing */
+            framing: ("left" | "centre" | "right") | null;
+        };
+        /** FootageReviewMarkOut */
+        FootageReviewMarkOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Note */
+            note: string;
+            /** Kind Hint */
+            kind_hint: string;
+            /** Live */
+            live: boolean;
+            /** No Footage */
+            no_footage: boolean;
+            /** Framing */
+            framing: ("left" | "centre" | "right") | null;
+            /** Status */
+            status: ("found" | "not_found" | "blocked") | null;
+            /** Summary */
+            summary: string;
+            /** Attempts */
+            attempts: components["schemas"]["FootageReviewAttemptOut"][];
+            /** Pieces */
+            pieces: components["schemas"]["FootageReviewPieceOut"][];
+            /** Shown */
+            shown: components["schemas"]["FootageReviewPieceOut"][];
+            /** Undecided */
+            undecided: number;
+        };
+        /** FootageReviewNoFootageIn */
+        FootageReviewNoFootageIn: {
+            /** No Footage */
+            no_footage: boolean;
+        };
+        /** FootageReviewOut */
+        FootageReviewOut: {
+            /** Wanted */
+            wanted: boolean;
+            /** Round Id */
+            round_id: string | null;
+            /** Import Version */
+            import_version: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "brief_written" | "imported" | "reviewed";
+            /** Importing */
+            importing: boolean;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Undecided */
+            undecided: number;
+            /** Can Finish */
+            can_finish: boolean;
+            /** Finish Blocked Reason */
+            finish_blocked_reason: string | null;
+            /** Marks */
+            marks: components["schemas"]["FootageReviewMarkOut"][];
+        };
+        /** FootageReviewPieceOut */
+        FootageReviewPieceOut: {
+            /** Item Key */
+            item_key: string;
+            /** Piece Id */
+            piece_id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "agent" | "owner";
+            /** Kind */
+            kind: ("video" | "image" | "page" | "pdf") | null;
+            /** Usable */
+            usable: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Tier */
+            tier: string | null;
+            source: components["schemas"]["FootageReviewSourceOut"] | null;
+            /** What It Shows */
+            what_it_shows: string | null;
+            /** Same Event */
+            same_event: ("yes" | "no" | "unknown") | null;
+            /** Event Date */
+            event_date: string | null;
+            /** On Screen Text */
+            on_screen_text: ("none" | "small" | "large") | null;
+            /** Credit */
+            credit: string | null;
+            /** Warnings */
+            warnings: components["schemas"]["FootageReviewWarningOut"][];
+            /** Verdict */
+            verdict: ("accepted" | "rejected") | null;
+            /** Shown At */
+            shown_at: number | null;
+            /** Image Url */
+            image_url: string | null;
+            /** Video Url */
+            video_url: string | null;
+            /** Strip Url */
+            strip_url: string | null;
+            strip: components["schemas"]["FootageFileStripOut"] | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Window S */
+            window_s: number | null;
+            use: components["schemas"]["FootageFileUseOut"] | null;
+            /** Moment S */
+            moment_s: number | null;
+            /** Cuts */
+            cuts: number[];
+            /** Focus Rects */
+            focus_rects: number[][];
+            /** Focus Text */
+            focus_text: string | null;
+            /** Page */
+            page: number | null;
+            preview: components["schemas"]["FootagePreviewOut"] | null;
+        };
+        /**
+         * FootageReviewSourceOut
+         * @description Where a piece came from, as the agent wrote it. Plain text.
+         */
+        FootageReviewSourceOut: {
+            /** Url */
+            url: string | null;
+            /** Final Url */
+            final_url: string | null;
+            /** Publisher */
+            publisher: string | null;
+            /** Title */
+            title: string | null;
+            /** Published */
+            published: string | null;
+            /** Licence */
+            licence: string | null;
+        };
+        /** FootageReviewUseIn */
+        FootageReviewUseIn: {
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+        };
+        /** FootageReviewVerdictIn */
+        FootageReviewVerdictIn: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "accepted" | "rejected";
+        };
+        /** FootageReviewWarningOut */
+        FootageReviewWarningOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
         };
         /** FootageRoundOut */
         FootageRoundOut: {
@@ -24155,6 +24450,266 @@ export interface operations {
                 };
             };
             /** @description The project has no footage, the file or the request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_footage_review_api_projects__project_id__footage_review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageReviewOut"];
+                };
+            };
+            /** @description No such project, mark or piece. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_footage_piece_api_projects__project_id__footage_review_items__item_key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageReviewVerdictIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageReviewOut"];
+                };
+            };
+            /** @description No such project, mark or piece. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, nothing is imported, or the change breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_footage_piece_use_api_projects__project_id__footage_review_items__item_key__use_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                item_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageReviewUseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageReviewOut"];
+                };
+            };
+            /** @description No such project, mark or piece. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, nothing is imported, or the change breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_footage_framing_api_projects__project_id__footage_review_marks__mark_id__framing_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageReviewFramingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageReviewOut"];
+                };
+            };
+            /** @description No such project, mark or piece. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, nothing is imported, or the change breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_footage_review_no_footage_api_projects__project_id__footage_review_marks__mark_id__no_footage_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FootageReviewNoFootageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageReviewOut"];
+                };
+            };
+            /** @description No such project, mark or piece. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, nothing is imported, or the change breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    finish_footage_review_api_projects__project_id__footage_review_done_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FootageReviewOut"];
+                };
+            };
+            /** @description No such project, mark or piece. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no footage, nothing is imported, or the change breaks a rule. */
             422: {
                 headers: {
                     [name: string]: unknown;

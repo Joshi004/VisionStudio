@@ -245,7 +245,7 @@ function FileRow({
       )}
       {file.status === "ready" && (
         <FootagePreview
-          file={file}
+          preview={file.preview}
           disabled={disabled}
           starting={previewStarting}
           onStart={onPreview}

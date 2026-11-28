@@ -1,21 +1,21 @@
 import { Button, Group, Stack, Text } from "@mantine/core";
 
-import type { FootageFile } from "../../api/footageFiles";
+import type { FootagePreview as FootagePreviewData } from "../../api/footageFiles";
 import { isJobActive } from "../../api/polling";
 
 type FootagePreviewProps = {
-  file: FootageFile;
+  /** The newest preview of the piece, or null when none was made. */
+  preview: FootagePreviewData | null;
   disabled: boolean;
   starting: boolean;
   onStart: () => void;
 };
 
 /**
- * The preview video of a ready file (FTG-005): a button to draw 6 seconds of it the way it will
+ * The preview video of a ready piece (FTG-005): a button to draw 6 seconds of it the way it will
  * be laid over the shots, and the video once it exists.
  */
-export function FootagePreview({ file, disabled, starting, onStart }: FootagePreviewProps) {
-  const preview = file.preview;
+export function FootagePreview({ preview, disabled, starting, onStart }: FootagePreviewProps) {
   const active = isJobActive(preview);
 
   return (

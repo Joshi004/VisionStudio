@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import FootageImport, FootageItem, FootageRound, Job, Project
 from app.jobs import store
-from app.services import ffmpeg, footage_marks, footage_rounds
+from app.services import ffmpeg, footage_decisions, footage_marks, footage_rounds
 from app.services.evidence_checks import MAX_RESULT_BYTES, PLAIN_NAME, FileProblem, FileRead
 from app.services.evidence_import import (
     MAX_ROUND_BYTES,
@@ -499,6 +499,9 @@ async def make_import(
         for piece, paths in pairs:
             session.add(_item_row(project_id, record.id, mark_id, piece, paths))
     await session.flush()
+    # A new import of a reviewed round has to be reviewed again (FTG-012): the round reads
+    # `imported` until the owner presses Review done. Stored with the import, in one transaction.
+    await footage_decisions.set_round_reviewed(session, project, round_id, False, commit=False)
     return record
 
 

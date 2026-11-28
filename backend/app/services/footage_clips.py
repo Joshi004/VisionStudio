@@ -502,14 +502,20 @@ def _preview_look(
 
 
 async def queue_preview(session: AsyncSession, project: Project, item_key: str) -> Job:
-    """Queues the preview of one piece shown on a mark, and commits. If a preview of that piece is
+    """Queues the preview of one piece shown on a mark (or of the agent's, shown or not), and
+    commits. If a preview of that piece is
     already waiting or running, its job is returned. Raises FootageClipError (with the reason)
     when the piece cannot be previewed."""
     if not footage_marks.wanted(project):
         raise FootageClipError("Footage is not on for this project.")
     item = (await _items(session, project, {item_key})).get(item_key)
     content = await _decided(session, project)
-    if item is None or item_key not in footage_decisions.shown_keys(content, item.mark_id):
+    # A piece of the agent can be previewed before the owner accepts it (the review); an owner's
+    # file has to be shown on its mark.
+    if item is None or (
+        item.origin != "agent"
+        and item_key not in footage_decisions.shown_keys(content, item.mark_id)
+    ):
         raise FootageClipError(NOT_SHOWN_MESSAGE)
     if not item.usable:
         raise FootageClipError(NOT_READY_MESSAGE)

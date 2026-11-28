@@ -62,7 +62,7 @@ const HIGHLIGHT_STYLE = {
 } as const;
 
 /** The agent's addresses are shown as links only when they are plain http or https. */
-function safeHref(value: string | null): string | null {
+export function safeHref(value: string | null): string | null {
   return value !== null && /^https?:\/\//i.test(value) ? value : null;
 }
 
@@ -74,7 +74,7 @@ function percent(value: number): string {
  * The clean screenshot with the quote's rectangles drawn over it. The boxes are fractions of the
  * image, so they follow the displayed size.
  */
-function HighlightedImage({
+export function HighlightedImage({
   url,
   rects,
   alt,

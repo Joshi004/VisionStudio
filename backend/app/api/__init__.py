@@ -27,6 +27,7 @@ from app.api import (
     footage,
     footage_files,
     footage_marks,
+    footage_review,
     generation_requests,
     gpu,
     graphic_briefs,
@@ -92,6 +93,7 @@ api_router.include_router(evidence.router, tags=["evidence"])
 api_router.include_router(footage.router, tags=["footage"])
 api_router.include_router(footage_marks.router, tags=["footage-marks"])
 api_router.include_router(footage_files.router, tags=["footage-files"])
+api_router.include_router(footage_review.router, tags=["footage-review"])
 api_router.include_router(graphic_theme.router, tags=["graphic-theme"])
 api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
 api_router.include_router(thumbnails.router, tags=["thumbnails"])
